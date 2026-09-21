@@ -50,14 +50,14 @@ func TestAudioPlanAndContainer(t *testing.T) {
 	p := probe("/m/a.mp4", "h264", "yuv420p", "", []string{"aac", "pcm_s24le", "ac3"}, []string{"mov_text"})
 	s := Settings{Codec: HEVC, Backend: SW, Audio: []AudioTrack{{Index: 3, Action: "drop"}}}
 	a, prim, _ := joined(t, s, p, nil)
-	if prim.Container != "mkv" {
-		t.Errorf("PCM→FLAC can't live in mp4; got %s", prim.Container)
+	if prim.Container != "mp4" {
+		t.Errorf("PCM in an MP4 source should stay MP4 (as ALAC); got %s", prim.Container)
 	}
 	if strings.Contains(a, "-map 0:3") {
 		t.Error("dropped track still mapped")
 	}
-	if !strings.Contains(a, "-c:a:1 flac") || prim.ExpectAudio != 2 || prim.ExpectSubs != 1 {
-		t.Errorf("want pcm→flac on output #1, 2 audio, 1 sub: %s (%d/%d)", a, prim.ExpectAudio, prim.ExpectSubs)
+	if !strings.Contains(a, "-c:a:1 alac") || prim.ExpectAudio != 2 || prim.ExpectSubs != 1 {
+		t.Errorf("want pcm→alac on output #1, 2 audio, 1 sub: %s (%d/%d)", a, prim.ExpectAudio, prim.ExpectSubs)
 	}
 	p2 := probe("/m/b.mp4", "h264", "yuv420p", "", []string{"aac"}, []string{"mov_text"})
 	_, prim, _ = joined(t, Settings{Codec: HEVC, Backend: SW}, p2, nil)
@@ -148,5 +148,23 @@ func TestCropPaths(t *testing.T) {
 	}
 	if a, _, _ = joined(t, Settings{Codec: HEVC, Backend: SW, Crop: "1920:1200:0:0"}, p, nil); strings.Contains(a, "crop=") {
 		t.Error("an out-of-frame crop must be ignored")
+	}
+}
+
+func TestH264AndCopy(t *testing.T) {
+	p := probe("/m/a.mkv", "mpeg2video", "yuv420p", "", []string{"ac3"}, nil)
+	a, _, _ := joined(t, Settings{Codec: H264, Backend: QSV}, p, nil)
+	if !strings.Contains(a, "h264_qsv") || !strings.Contains(a, "format=nv12") || strings.Contains(a, "p010") {
+		t.Errorf("H.264 must be 8-bit: %s", a)
+	}
+	hev1 := probe("/m/b.mp4", "hevc", "yuv420p10le", "", []string{"aac", "pcm_s16le"}, nil)
+	a, prim, fb := joined(t, Settings{VideoCopy: true, Container: "mp4"}, hev1, nil)
+	if fb != nil || !strings.Contains(a, "-c:v copy") || !strings.Contains(a, "-tag:v hvc1") ||
+		!strings.Contains(a, "+faststart") || !strings.Contains(a, "-c:a:1 alac") || prim.Container != "mp4" {
+		t.Errorf("quick fix should copy video, tag hvc1, faststart, pcm→alac: %s", a)
+	}
+	avi := probe("/m/c.avi", "vc1", "yuv420p", "", []string{"ac3"}, nil)
+	if _, prim, _ = joined(t, Settings{VideoCopy: true, PreferMP4: true}, avi, nil); prim.Container != "mkv" {
+		t.Errorf("VC-1 can't be copied into MP4: %s", prim.Container)
 	}
 }

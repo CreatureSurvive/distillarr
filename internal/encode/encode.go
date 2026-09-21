@@ -29,6 +29,7 @@ type Codec string
 const (
 	HEVC Codec = "hevc"
 	AV1  Codec = "av1"
+	H264 Codec = "h264" // maximum compatibility; always 8-bit
 )
 
 // AllBackends is the preference-ordered default chain.
@@ -72,6 +73,9 @@ type Settings struct {
 	ExtraArgs      string       `json:"extra_args,omitempty"` // appended output options
 	PreferMP4      bool         `json:"prefer_mp4,omitempty"` // auto container: MP4 whenever tracks fit
 	Crop           string       `json:"crop,omitempty"`       // "w:h:x:y" black-bar crop ("" = none)
+	// VideoCopy keeps the video bitstream as-is: a quick fix (remux,
+	// hvc1 tag, faststart, audio conversion) with no re-encode.
+	VideoCopy bool `json:"video_copy,omitempty"`
 	// VMAFTarget > 0: before encoding, search samples for the smallest
 	// quality that scores at least this VMAF (Quality is the start point).
 	VMAFTarget float64 `json:"vmaf_target,omitempty"`
@@ -139,6 +143,9 @@ func (s *Settings) Normalize() {
 	if s.BitDepth != 8 {
 		s.BitDepth = 10
 	}
+	if s.Codec == H264 {
+		s.BitDepth = 8 // 10-bit H.264 barely plays anywhere
+	}
 	if s.Deinterlace == "" {
 		s.Deinterlace = "auto"
 	}
@@ -169,6 +176,9 @@ func Build(s Settings, src *media.Probe, outPath string, clip *Clip) (primary, f
 	streams := planStreams(s, src, container, clip != nil)
 	if clip != nil && clip.NoAudio {
 		streams = streamPlan{maps: []string{"-map", fmt.Sprintf("0:%d", v.Index)}, codecs: []string{"-an", "-sn", "-dn"}}
+	}
+	if s.VideoCopy {
+		return buildCopy(s, src, v, outPath, container, streams), nil, nil
 	}
 	video, err := videoArgs(s)
 	if err != nil {
@@ -318,6 +328,25 @@ func Build(s Settings, src *media.Probe, outPath string, clip *Clip) (primary, f
 	return nil, nil, fmt.Errorf("unknown backend %q", s.Backend)
 }
 
+// buildCopy is a quick fix: video copied bit-exact, audio/subtitles per
+// the stream plan, re-muxed with hvc1 + faststart where MP4.
+func buildCopy(s Settings, src *media.Probe, v *media.Stream, out, container string, st streamPlan) *CmdSpec {
+	args := []string{"-hide_banner", "-loglevel", "warning", "-nostdin",
+		"-progress", "pipe:1", "-nostats", "-stats_period", "0.5",
+		"-fflags", "+genpts", // old AVI/MPEG files often lack usable timestamps
+		"-i", src.Format.Filename}
+	args = append(args, st.maps...)
+	args = append(args, "-c:v", "copy")
+	args = append(args, st.codecs...)
+	args = append(args, muxArgs(container)...)
+	if v.CodecName == "hevc" && container == "mp4" {
+		args = append(args, "-tag:v", "hvc1")
+	}
+	args = append(args, "-y", out)
+	return &CmdSpec{Args: args, SemKey: "copy", Container: container,
+		ExpectAudio: st.nAudio, ExpectSubs: st.nSubs}
+}
+
 // parseCrop validates a "w:h:x:y" crop against the frame.
 func parseCrop(spec string, fw, fh int) (w, h, x, y int, ok bool) {
 	if spec == "" {
@@ -357,6 +386,15 @@ func videoArgs(s Settings) ([]string, error) {
 			a = append(a, "-svtav1-params", fmt.Sprintf("film-grain=%d:film-grain-denoise=1", clamp(s.FilmGrain, 1, 50)))
 		}
 		return a, nil
+	case s.Backend == SW && s.Codec == H264:
+		return []string{"-c:v", "libx264", "-crf", itoa(crf), "-preset", sp, "-pix_fmt", "yuv420p",
+			"-profile:v", "high"}, nil
+	case s.Backend == QSV && s.Codec == H264:
+		return []string{"-c:v", "h264_qsv", "-rc_mode", "LA_ICQ", "-global_quality", itoa(crf),
+			"-look_ahead", "1", "-look_ahead_depth", "40", "-bf", "3", "-preset", sp, "-profile:v", "high"}, nil
+	case s.Backend == VAAPI && s.Codec == H264:
+		return []string{"-c:v", "h264_vaapi", "-rc_mode", "ICQ", "-global_quality", itoa(crf),
+			"-bf", "2", "-profile:v", "high"}, nil
 	case s.Backend == QSV && s.Codec == HEVC:
 		prof := "main10"
 		if !s.tenBit() {
@@ -448,7 +486,11 @@ func AudioDecision(s Settings, a media.Stream, container string) AudioTrack {
 		}
 	}
 	if a.IsPCM() && s.AudioPCMTarget != "copy" {
-		return AudioTrack{Index: a.Index, Action: "convert", Codec: s.AudioPCMTarget}
+		c := s.AudioPCMTarget
+		if c == "flac" && container == "mp4" {
+			c = "alac" // lossless too, and MP4/Apple-native
+		}
+		return AudioTrack{Index: a.Index, Action: "convert", Codec: c}
 	}
 	if container == "mp4" && !isMP4AudioSafe(a.CodecName) {
 		return AudioTrack{Index: a.Index, Action: "convert", Codec: "aac"}
@@ -593,6 +635,13 @@ func ChooseContainer(s Settings, src *media.Probe) (string, error) {
 }
 
 func fitsMP4(s Settings, src *media.Probe) bool {
+	if s.VideoCopy {
+		switch src.Video().CodecName {
+		case "h264", "hevc", "av1", "mpeg4":
+		default:
+			return false // e.g. VC-1, WMV, MPEG-2 can't be copied into MP4
+		}
+	}
 	for _, sub := range src.Subtitles() {
 		if !subKept(s, sub, "mkv") {
 			continue
@@ -608,7 +657,7 @@ func fitsMP4(s Settings, src *media.Probe) bool {
 		if d.Action == "copy" && !isMP4AudioSafe(a.CodecName) {
 			return false
 		}
-		if d.Action == "convert" && d.Codec == "flac" {
+		if d.Action == "convert" && d.Codec == "opus" {
 			return false
 		}
 	}
