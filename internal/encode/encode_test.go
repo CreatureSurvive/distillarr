@@ -168,3 +168,24 @@ func TestH264AndCopy(t *testing.T) {
 		t.Errorf("VC-1 can't be copied into MP4: %s", prim.Container)
 	}
 }
+
+func TestUpscaleSettings(t *testing.T) {
+	s := Settings{UpscaleTo: 1080, VMAFTarget: 93}
+	s.Normalize()
+	if s.VMAFTarget != 0 {
+		t.Error("an upscale job must not carry a VMAF target: scoring against its own source is meaningless")
+	}
+	if s.UpscaleTier != "shader" || s.UpscaleOutput != "replace" {
+		t.Errorf("upscale defaults: tier %q output %q", s.UpscaleTier, s.UpscaleOutput)
+	}
+	off := Settings{VMAFTarget: 93}
+	off.Normalize()
+	if off.VMAFTarget != 93 || off.UpscaleTier != "" || off.UpscaleOutput != "" {
+		t.Errorf("a non-upscale job must be left alone: %+v", off)
+	}
+
+	p := probe("/m/a.mkv", "h264", "yuv420p", "", []string{"ac3"}, nil)
+	if _, _, err := Build(Settings{VideoCopy: true, UpscaleTo: 1080}, p, "/out.tmp", nil); err == nil {
+		t.Error("video copy + upscale must be rejected")
+	}
+}

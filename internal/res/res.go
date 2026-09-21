@@ -5,7 +5,10 @@
 // height alone suggests.
 package res
 
-import "fmt"
+import (
+	"fmt"
+	"math"
+)
 
 // Class returns the nominal vertical resolution for w×h.
 func Class(w, h int) int {
@@ -61,5 +64,26 @@ func Fit(w, h, cap int) (ow, oh int, ok bool) {
 	scale := min(float64(bw)/float64(w), float64(bh)/float64(h))
 	ow = int(float64(w)*scale) &^ 1
 	oh = int(float64(h)*scale) &^ 1
+	return ow, oh, true
+}
+
+// Up is Fit's counterpart for upscaling: the largest even size inside
+// class target's frame that keeps the aspect ratio. ok is false when the
+// source is already at or above target, so callers can treat it as a no-op.
+//
+// Sources within 1% of the frame's aspect ratio (854×480 is 16:9 only to
+// rounding) snap to the frame exactly, so a "1080p" upscale is 1920×1080
+// rather than 1918×1078. Anything else rounds to the nearest even size.
+func Up(w, h, target int) (ow, oh int, ok bool) {
+	if target <= 0 || w <= 0 || h <= 0 || Class(w, h) >= target {
+		return w, h, false
+	}
+	bw, bh := box(target)
+	if math.Abs(float64(w)/float64(h)/(float64(bw)/float64(bh))-1) < 0.01 {
+		return bw, bh, true
+	}
+	scale := min(float64(bw)/float64(w), float64(bh)/float64(h))
+	ow = int(math.Round(float64(w)*scale/2)) * 2
+	oh = int(math.Round(float64(h)*scale/2)) * 2
 	return ow, oh, true
 }

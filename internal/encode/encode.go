@@ -79,6 +79,16 @@ type Settings struct {
 	// VMAFTarget > 0: before encoding, search samples for the smallest
 	// quality that scores at least this VMAF (Quality is the start point).
 	VMAFTarget float64 `json:"vmaf_target,omitempty"`
+
+	// Upscaling. UpscaleTo is a resolution class (720 | 1080 | 2160) above
+	// the source's; 0 = off. It is separate from MaxHeight, which only ever
+	// downscales. Upscale jobs never use VMAF (scoring an upscale against
+	// its own source is meaningless), so Normalize clears VMAFTarget.
+	UpscaleTo     int                `json:"upscale_to,omitempty"`
+	UpscaleTier   string             `json:"upscale_tier,omitempty"`   // shader | neural
+	UpscalePreset string             `json:"upscale_preset,omitempty"` // upscale registry id
+	UpscaleParams map[string]float64 `json:"upscale_params,omitempty"` // per-preset tunables
+	UpscaleOutput string             `json:"upscale_output,omitempty"` // replace | copy
 }
 
 // DefaultRenderNode is a last-resort fallback; node choice comes from
@@ -155,6 +165,15 @@ func (s *Settings) Normalize() {
 	if s.AudioPCMTarget == "" {
 		s.AudioPCMTarget = "flac"
 	}
+	if s.UpscaleTo > 0 {
+		s.VMAFTarget = 0
+		if s.UpscaleTier == "" {
+			s.UpscaleTier = "shader"
+		}
+		if s.UpscaleOutput == "" {
+			s.UpscaleOutput = "replace"
+		}
+	}
 }
 
 // Build constructs the primary command and (for hw-decode pipelines) a
@@ -178,6 +197,9 @@ func Build(s Settings, src *media.Probe, outPath string, clip *Clip) (primary, f
 		streams = streamPlan{maps: []string{"-map", fmt.Sprintf("0:%d", v.Index)}, codecs: []string{"-an", "-sn", "-dn"}}
 	}
 	if s.VideoCopy {
+		if s.UpscaleTo > 0 {
+			return nil, nil, fmt.Errorf("upscaling needs a re-encode; it can't be combined with video copy")
+		}
 		return buildCopy(s, src, v, outPath, container, streams), nil, nil
 	}
 	video, err := videoArgs(s)
