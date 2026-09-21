@@ -282,7 +282,7 @@ func TestUpscaleNoOpsAndErrors(t *testing.T) {
 	}
 	sd := probe("/m/b.mkv", "h264", "yuv420p", "", []string{"ac3"}, nil)
 	sd.Streams[0].Width, sd.Streams[0].Height = 854, 480
-	if _, _, err := Build(Settings{Codec: HEVC, Backend: QSV, UpscaleTo: 1080, UpscaleTier: "neural"}, sd, "/o.tmp", nil); err == nil {
+	if _, _, err := Build(Settings{Codec: HEVC, Backend: QSV, UpscaleTo: 1080, UpscalePreset: "neural-anime"}, sd, "/o.tmp", nil); err == nil {
 		t.Error("the neural tier must not be built by Build")
 	}
 	if _, _, err := Build(Settings{Codec: HEVC, Backend: QSV, UpscaleTo: 1080, UpscalePreset: "nope"}, sd, "/o.tmp", nil); err == nil {

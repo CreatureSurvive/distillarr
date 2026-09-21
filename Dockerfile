@@ -35,6 +35,21 @@ RUN curl -fsSL -o /tmp/ff.tar.xz \
     && mv /tmp/ffmpeg-*/bin/ffmpeg /ffmpeg-vmaf \
     && /ffmpeg-vmaf -hide_banner -filters | grep -q libvmaf
 
+# ---- Stage 1c: neural upscaler ----
+# Real-ESRGAN (ncnn/Vulkan) for the neural upscale tier. Pinned release with a
+# checksum; only the binary and its models are kept. Measured on the Arc A380:
+# ~2.4 fps for the light anime model at 480p input (roughly 0.1x realtime), so
+# it is an overnight, per-episode tool, not a per-film one.
+FROM debian:bookworm-slim AS ncnn
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl unzip \
+    && rm -rf /var/lib/apt/lists/*
+RUN curl -fsSL -o /tmp/rg.zip \
+      https://github.com/xinntao/Real-ESRGAN/releases/download/v0.2.5.0/realesrgan-ncnn-vulkan-20220424-ubuntu.zip \
+    && echo "e5aa6eb131234b87c0c51f82b89390f5e3e642b7b70f2b9bbe95b6a285a40c96  /tmp/rg.zip" | sha256sum -c - \
+    && mkdir -p /opt/realesrgan \
+    && unzip -q /tmp/rg.zip realesrgan-ncnn-vulkan 'models/*' -d /opt/realesrgan \
+    && chmod +x /opt/realesrgan/realesrgan-ncnn-vulkan
+
 # ---- Stage 2: backend ----
 FROM golang:1.23-bookworm AS build
 WORKDIR /src
@@ -56,6 +71,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         ca-certificates \
         gpg \
         curl \
+        libgomp1 \
         procps \
         tini \
     && rm -rf /var/lib/apt/lists/*
@@ -102,6 +118,7 @@ ENV LIBVA_DRIVERS_PATH="/usr/lib/x86_64-linux-gnu/dri" \
 
 COPY --from=build /out/mediatrans /usr/local/bin/mediatrans
 COPY --from=vmaf /ffmpeg-vmaf /usr/local/bin/ffmpeg-vmaf
+COPY --from=ncnn /opt/realesrgan /opt/realesrgan
 
 EXPOSE 8080
 

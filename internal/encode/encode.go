@@ -111,8 +111,15 @@ type CmdSpec struct {
 
 // Clip restricts a build to a span (previews). Zero value = whole file.
 type Clip struct {
-	Start, Dur float64
-	NoAudio    bool // video only (quality-search samples)
+	Start, Dur float64 // Dur == 0: no -ss/-t (the input is already exactly the span)
+	NoAudio    bool    // video only (quality-search samples)
+
+	// Neural-upscale chunks encode a numbered PNG sequence rather than a file:
+	InputArgs []string // input options placed before -i (e.g. -framerate)
+	ScaleW    int      // > 0: resize to exactly ScaleW×ScaleH instead of fitting a class
+	ScaleH    int
+	RGBInput  bool   // frames are RGB: convert to BT.709 YUV explicitly, not swscale's BT.601 default
+	Container string // overrides the preview default (mp4); chunks use mkv so they concatenate cleanly
 }
 
 // FFmpeg is the binary name.
@@ -172,11 +179,14 @@ func (s *Settings) Normalize() {
 	if s.UpscaleTo > 0 {
 		s.VMAFTarget = 0
 		s.MaxHeight = 0 // a downscale cap and an upscale target contradict
-		if s.UpscaleTier == "" {
-			s.UpscaleTier = upscale.TierShader
-		}
 		if s.UpscalePreset == "" {
 			s.UpscalePreset = upscale.DefaultPreset
+		}
+		// The preset decides the tier; the field only records it. An unknown
+		// preset is left as a shader job so Build reports the unknown name.
+		s.UpscaleTier = upscale.TierShader
+		if p, ok := upscale.Get(s.UpscalePreset); ok {
+			s.UpscaleTier = p.Tier
 		}
 	}
 }
@@ -191,6 +201,9 @@ func Build(s Settings, src *media.Probe, outPath string, clip *Clip) (primary, f
 		return nil, nil, fmt.Errorf("no video stream")
 	}
 	container := "mp4"
+	if clip != nil && clip.Container != "" {
+		container = clip.Container
+	}
 	if clip == nil {
 		if container, err = ChooseContainer(s, src); err != nil {
 			return nil, nil, err
@@ -220,6 +233,9 @@ func Build(s Settings, src *media.Probe, outPath string, clip *Clip) (primary, f
 		fitW, fitH = cw, ch
 	}
 	scaleW, scaleH, scale := res.Fit(fitW, fitH, s.MaxHeight)
+	if clip != nil && clip.ScaleW > 0 {
+		scaleW, scaleH, scale = clip.ScaleW, clip.ScaleH, true
+	}
 	upW, upH, up := UpscaleSize(s, v) // ok=false: already at/above target, plain encode
 	deint := s.Deinterlace == "on" || (s.Deinterlace == "auto" && v.Interlaced())
 	srcTen := v.BitDepth() >= 10
@@ -236,7 +252,7 @@ func Build(s Settings, src *media.Probe, outPath string, clip *Clip) (primary, f
 	}
 
 	var pre []string
-	if clip != nil {
+	if clip != nil && clip.Dur > 0 {
 		pre = []string{"-ss", fmt.Sprintf("%.3f", clip.Start), "-t", fmt.Sprintf("%.3f", clip.Dur)}
 	}
 
@@ -246,6 +262,9 @@ func Build(s Settings, src *media.Probe, outPath string, clip *Clip) (primary, f
 		args = append(args, devices...)
 		args = append(args, decode...)
 		args = append(args, pre...)
+		if clip != nil {
+			args = append(args, clip.InputArgs...)
+		}
 		args = append(args, "-i", src.Format.Filename)
 		args = append(args, streams.maps...)
 		if len(filters) > 0 {
@@ -267,6 +286,12 @@ func Build(s Settings, src *media.Probe, outPath string, clip *Clip) (primary, f
 
 	// Software pre-filters shared by every sw-decode path.
 	swPre := []string{}
+	if clip != nil && clip.RGBInput {
+		// RGB in: go to YUV with BT.709 (and tag it) before anything else, so no
+		// later stage falls back to swscale's BT.601 default. 4:4:4 keeps the
+		// chroma until the encoder's own format step.
+		swPre = append(swPre, "scale=out_color_matrix=bt709:out_range=tv", "format=yuv444p")
+	}
 	if crop {
 		swPre = append(swPre, fmt.Sprintf("crop=%d:%d:%d:%d", cw, ch, cx, cy))
 	}
@@ -756,11 +781,16 @@ func defaultAudioKbps(codec string, ch int) int {
 }
 
 // muxArgs returns container-level args.
-func muxArgs(container string) []string {
+func muxArgs(container string) []string { return muxArgsFrom(container, 0) }
+
+// muxArgsFrom is muxArgs with metadata and chapters taken from input idx (the
+// neural mux reads them from the original source, its second input).
+func muxArgsFrom(container string, idx int) []string {
+	i := itoa(idx)
 	if container == "mp4" {
-		return []string{"-map_metadata", "0", "-map_chapters", "0", "-movflags", "+faststart", "-f", "mp4"}
+		return []string{"-map_metadata", i, "-map_chapters", i, "-movflags", "+faststart", "-f", "mp4"}
 	}
-	return []string{"-map_metadata", "0", "-map_chapters", "0", "-default_mode", "infer_no_subs", "-f", "matroska"}
+	return []string{"-map_metadata", i, "-map_chapters", i, "-default_mode", "infer_no_subs", "-f", "matroska"}
 }
 
 // ChooseContainer resolves "auto". With PreferMP4 (Apple-friendly: HEVC

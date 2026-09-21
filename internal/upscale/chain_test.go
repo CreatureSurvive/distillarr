@@ -154,3 +154,55 @@ func TestShaderCacheIsBounded(t *testing.T) {
 		t.Errorf("shader cache grew to %d files", len(ents))
 	}
 }
+
+func TestNeuralRegistry(t *testing.T) {
+	a, ok := Get("neural-anime")
+	if !ok || !a.Neural() || a.Model() != "realesr-animevideov3" {
+		t.Fatalf("neural-anime: %+v %v", a, ok)
+	}
+	// Smallest native scale that reaches the target, else the largest.
+	for _, c := range []struct{ src, dst, want int }{
+		{720, 1920, 3}, {854, 1920, 3}, {1280, 1920, 2}, {1920, 3840, 2}, {320, 1920, 4}, {160, 3840, 4},
+	} {
+		if got := a.PickScale(c.src, c.dst); got != c.want {
+			t.Errorf("PickScale(%d→%d) = %d, want %d", c.src, c.dst, got, c.want)
+		}
+	}
+	if h, _ := Get("neural-anime-hq"); h.PickScale(720, 1920) != 4 {
+		t.Error("a single-scale model always uses its scale")
+	}
+	// Measured 2.4 fps at 720x400: a 24-minute episode is about 4 hours.
+	if hours := a.EstimateSeconds(24*60*24, 720, 400) / 3600; hours < 3.5 || hours > 4.5 {
+		t.Errorf("24-minute episode estimated %.1fh, measured ~4h", hours)
+	}
+	// Cost scales with input area: 1080p input is 7.2x the pixels of 720x400.
+	if r := a.EstimateSeconds(100, 1920, 1080) / a.EstimateSeconds(100, 720, 400); r < 7 || r > 7.4 {
+		t.Errorf("cost should scale with pixels, ratio %.2f", r)
+	}
+	// Neural presets are not filtergraph presets.
+	if _, err := (Spec{W: 1920, H: 1080, Preset: "neural-anime"}).Filter("rgba"); err == nil {
+		t.Error("a neural preset has no libplacebo filter")
+	}
+	for _, p := range All() {
+		if p.Neural() != (p.SPF > 0) {
+			t.Errorf("%s: only neural presets carry a per-frame cost", p.ID)
+		}
+	}
+}
+
+func TestNeuralAvailable(t *testing.T) {
+	old := NeuralDir
+	defer func() { NeuralDir = old }()
+	NeuralDir = t.TempDir()
+	if NeuralAvailable() {
+		t.Error("an empty directory is not an install")
+	}
+	os.WriteFile(NeuralBin(), []byte("x"), 0o755)
+	if NeuralAvailable() {
+		t.Error("the binary without models/ is not usable")
+	}
+	os.Mkdir(NeuralDir+"/models", 0o755)
+	if !NeuralAvailable() {
+		t.Error("binary plus models/ is an install")
+	}
+}

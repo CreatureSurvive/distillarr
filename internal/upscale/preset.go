@@ -7,6 +7,8 @@ package upscale
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"regexp"
 )
 
@@ -45,9 +47,15 @@ type Preset struct {
 	Tier    string  `json:"tier"`
 	Content string  `json:"content"` // film | anime | any
 	Params  []Param `json:"params"`
+	// SPF is a neural preset's measured seconds per frame at RefPixels of input
+	// (0 for shader presets, which run at encode speed). Clients scale it by the
+	// file's own size to show a time estimate before anything is queued.
+	SPF float64 `json:"sec_per_frame,omitempty"`
 
 	scaler  string   // libplacebo upscaler for the residual scale
 	shaders []string // embedded .glsl files, concatenated in order
+	model  string // neural: Real-ESRGAN model name
+	scales []int  // neural: the model's native scale factors
 	// tune rewrites the shader source for the resolved params (nil = as shipped),
 	// for shaders whose tunables are #defines rather than uniforms.
 	tune func(src string, v map[string]float64) string
@@ -66,6 +74,54 @@ var sharpnessRe = regexp.MustCompile(`(?m)^#define SHARPNESS [0-9.]+`)
 // *reduction* (0 = strongest), so the slider is inverted: higher = sharper.
 func fsrTune(src string, v map[string]float64) string {
 	return sharpnessRe.ReplaceAllString(src, fmt.Sprintf("#define SHARPNESS %.2f", 2-v["sharpness"]))
+}
+
+// RefPixels is the input size SPF was measured at (720x400, a 480p film).
+const RefPixels = 720 * 400
+
+// MaxNeuralHours is the longest estimated run the API will queue. Beyond it the
+// job would monopolise the GPU for days; use a shader preset instead.
+const MaxNeuralHours = 48
+
+// NeuralDir holds the realesrgan-ncnn-vulkan binary and its models/ (see the
+// Dockerfile). A variable so tests can point it elsewhere.
+var NeuralDir = "/opt/realesrgan"
+
+// NeuralBin is the ncnn upscaler executable.
+func NeuralBin() string { return filepath.Join(NeuralDir, "realesrgan-ncnn-vulkan") }
+
+// NeuralAvailable reports whether the neural tier is installed.
+func NeuralAvailable() bool {
+	if fi, err := os.Stat(NeuralBin()); err != nil || fi.IsDir() {
+		return false
+	}
+	fi, err := os.Stat(filepath.Join(NeuralDir, "models"))
+	return err == nil && fi.IsDir()
+}
+
+// Neural reports whether the preset runs on the neural tier.
+func (p Preset) Neural() bool { return p.Tier == TierNeural }
+
+// Model is the Real-ESRGAN model a neural preset runs.
+func (p Preset) Model() string { return p.model }
+
+// PickScale chooses the model's native scale for taking srcW to targetW: the
+// smallest one that reaches it (the result is then resized down to the exact
+// size), or the largest available when none does.
+func (p Preset) PickScale(srcW, targetW int) int {
+	best := 0
+	for _, s := range p.scales {
+		best = s
+		if srcW*s >= targetW {
+			return s
+		}
+	}
+	return best
+}
+
+// EstimateSeconds is the expected run time for frames of w×h input.
+func (p Preset) EstimateSeconds(frames float64, w, h int) float64 {
+	return frames * p.SPF * float64(w*h) / RefPixels
 }
 
 var presets = []Preset{
@@ -101,6 +157,21 @@ var presets = []Preset{
 		Desc:   "Anime4K Mode A, medium CNNs: cleaner lines and less blocking, roughly 20% slower.",
 		Params: commonParams, scaler: "ewa_lanczos",
 		shaders: []string{"Anime4K_Clamp_Highlights.glsl", "Anime4K_Restore_CNN_M.glsl", "Anime4K_Upscale_CNN_x2_M.glsl"},
+	},
+	{
+		ID: "neural-anime", Label: "Real-ESRGAN Anime Video", Tier: TierNeural, Content: Anime,
+		Desc: "Neural super-resolution trained on anime video. Far better line art and texture than any shader, but only ~2.4 fps on an Arc A380 (about 4 hours per 24-minute episode): an overnight job.",
+		SPF:  0.40, model: "realesr-animevideov3", scales: []int{2, 3, 4},
+	},
+	{
+		ID: "neural-anime-hq", Label: "Real-ESRGAN Anime (heavy)", Tier: TierNeural, Content: Anime,
+		Desc: "The large anime model: the best detail this app can produce, at ~0.24 fps. Practical for short clips only.",
+		SPF:  4.2, model: "realesrgan-x4plus-anime", scales: []int{4},
+	},
+	{
+		ID: "neural-general", Label: "Real-ESRGAN General", Tier: TierNeural, Content: Film,
+		Desc: "The general model, for live action and photographic content: strong detail recovery but ~0.06 fps. Practical for stills and very short clips.",
+		SPF:  15, model: "realesrgan-x4plus", scales: []int{4},
 	},
 }
 
