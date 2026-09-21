@@ -216,7 +216,7 @@ export default function ShowView({ live }: { live: LiveState }) {
                   </div>
                   <div className="ep-meta">
                     <CodecChip codec={f.video_codec} />
-                    <span className="chip">{resLabel(f.height)}</span>
+                    <span className="chip" title={`${f.width}×${f.height}`}>{resLabel(f.width, f.height)}</span>
                     {f.hdr && <span className="chip c-hdr">{hdrLabel(f.hdr)}</span>}
                     <span className="mono dim">{bitrate(f.video_bitrate)}</span>
                   </div>

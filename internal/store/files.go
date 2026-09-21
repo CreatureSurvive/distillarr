@@ -4,6 +4,8 @@ import (
 	"database/sql"
 	"encoding/json"
 	"strings"
+
+	"mediatrans/internal/res"
 )
 
 // AudioStream is the summary persisted in files.audio_json.
@@ -502,7 +504,7 @@ func (s *Store) ListSeries(titleLike, sort string, onlyWorth bool) ([]Series, er
 	rows, err := s.dbR.Query(`SELECT f.title, MAX(f.year), COUNT(DISTINCT f.season), COUNT(*),
 		COALESCE(MAX(j.series_id),''), SUM(f.size),
 		CAST(COALESCE(AVG(NULLIF(f.video_bitrate,0)),0) AS INTEGER),
-		COALESCE(GROUP_CONCAT(DISTINCT f.video_codec),''), MAX(f.height),
+		COALESCE(GROUP_CONCAT(DISTINCT f.video_codec),''), MAX(f.width), MAX(f.height),
 		SUM(`+worthExpr+`), CAST(SUM(`+savedExpr+`) AS INTEGER)
 		FROM files f LEFT JOIN jellyfin j ON j.path=f.path
 		WHERE `+where+` GROUP BY f.title COLLATE NOCASE`+having+` ORDER BY `+order, args...)
@@ -513,10 +515,12 @@ func (s *Store) ListSeries(titleLike, sort string, onlyWorth bool) ([]Series, er
 	out := []Series{}
 	for rows.Next() {
 		var se Series
+		var w, h int
 		if err := rows.Scan(&se.Title, &se.Year, &se.Seasons, &se.Episodes, &se.SeriesID,
-			&se.TotalSize, &se.AvgBitrate, &se.Codecs, &se.Height, &se.WorthCount, &se.Reclaimable); err != nil {
+			&se.TotalSize, &se.AvgBitrate, &se.Codecs, &w, &h, &se.WorthCount, &se.Reclaimable); err != nil {
 			return nil, err
 		}
+		se.Height = res.Class(w, h)
 		out = append(out, se)
 	}
 	return out, rows.Err()
@@ -538,7 +542,7 @@ type SeasonStat struct {
 // ListSeasons returns per-season aggregates for a show.
 func (s *Store) ListSeasons(show string) ([]SeasonStat, error) {
 	rows, err := s.dbR.Query(`SELECT f.season, COUNT(*), SUM(f.size),
-		CAST(COALESCE(AVG(NULLIF(f.video_bitrate,0)),0) AS INTEGER), MAX(f.height),
+		CAST(COALESCE(AVG(NULLIF(f.video_bitrate,0)),0) AS INTEGER), MAX(f.width), MAX(f.height),
 		COALESCE(GROUP_CONCAT(DISTINCT f.video_codec),''),
 		SUM(`+worthExpr+`), CAST(SUM(`+savedExpr+`) AS INTEGER), COALESCE(MAX(j.season_id),'')
 		FROM files f LEFT JOIN jellyfin j ON j.path=f.path
@@ -551,10 +555,12 @@ func (s *Store) ListSeasons(show string) ([]SeasonStat, error) {
 	out := []SeasonStat{}
 	for rows.Next() {
 		var se SeasonStat
-		if err := rows.Scan(&se.Season, &se.Episodes, &se.TotalSize, &se.AvgBitrate, &se.Height,
+		var w, h int
+		if err := rows.Scan(&se.Season, &se.Episodes, &se.TotalSize, &se.AvgBitrate, &w, &h,
 			&se.Codecs, &se.WorthCount, &se.Reclaimable, &se.SeasonID); err != nil {
 			return nil, err
 		}
+		se.Height = res.Class(w, h)
 		out = append(out, se)
 	}
 	return out, rows.Err()

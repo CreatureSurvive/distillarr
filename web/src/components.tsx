@@ -50,7 +50,7 @@ export function FileChips({ f }: { f: FileItem }) {
   return (
     <div className="chips">
       <CodecChip codec={f.video_codec} />
-      {f.height > 0 && <span className="chip">{resLabel(f.height)}</span>}
+      {f.height > 0 && <span className="chip" title={`${f.width}×${f.height}`}>{resLabel(f.width, f.height)}</span>}
       {f.hdr && <span className="chip c-hdr">{hdrLabel(f.hdr)}</span>}
     </div>
   );

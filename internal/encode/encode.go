@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"mediatrans/internal/media"
+	"mediatrans/internal/res"
 )
 
 // Backend selects the encoder family.
@@ -167,10 +168,9 @@ func Build(s Settings, src *media.Probe, outPath string, clip *Clip) (primary, f
 	}
 	video = append(video, colorArgs(s, v)...)
 
-	scaleH := 0
-	if s.MaxHeight > 0 && v.Height > s.MaxHeight {
-		scaleH = s.MaxHeight
-	}
+	// MaxHeight is a resolution class cap (1080 = fit inside 1920×1080),
+	// so letterboxed 1920×802 is never "above" a 1080p cap.
+	scaleW, scaleH, scale := res.Fit(v.Width, v.Height, s.MaxHeight)
 	deint := s.Deinterlace == "on" || (s.Deinterlace == "auto" && v.Interlaced())
 	srcTen := v.BitDepth() >= 10
 	tonemap := s.TonemapHDR && v.HDRType() != "" && v.HDRType() != "dolby_vision"
@@ -220,8 +220,8 @@ func Build(s Settings, src *media.Probe, outPath string, clip *Clip) (primary, f
 	case SW, "":
 		s.Backend = SW
 		f := append([]string{}, swPre...)
-		if scaleH > 0 {
-			f = append(f, fmt.Sprintf("scale=-2:%d:flags=lanczos", scaleH))
+		if scale {
+			f = append(f, fmt.Sprintf("scale=%d:%d:flags=lanczos", scaleW, scaleH))
 		}
 		return assemble(nil, nil, f, false), nil, nil
 
@@ -240,8 +240,8 @@ func Build(s Settings, src *media.Probe, outPath string, clip *Clip) (primary, f
 			devices = append(devices, "-init_hw_device", "qsv=qsv@va", "-filter_hw_device", "qsv")
 			decode = []string{"-hwaccel", "qsv", "-hwaccel_output_format", "qsv"}
 			vpp := "vpp_qsv=format=" + fmtOut
-			if scaleH > 0 {
-				vpp += fmt.Sprintf(":w=-2:h=%d", scaleH)
+			if scale {
+				vpp += fmt.Sprintf(":w=%d:h=%d", scaleW, scaleH)
 			}
 			if deint {
 				vpp += ":deinterlace=2"
@@ -254,8 +254,8 @@ func Build(s Settings, src *media.Probe, outPath string, clip *Clip) (primary, f
 				hwFilter = append(hwFilter, "deinterlace_vaapi")
 			}
 			sc := "scale_vaapi=format=" + fmtOut
-			if scaleH > 0 {
-				sc += fmt.Sprintf(":w=-2:h=%d", scaleH)
+			if scale {
+				sc += fmt.Sprintf(":w=%d:h=%d", scaleW, scaleH)
 			}
 			hwFilter = append(hwFilter, sc)
 		}
@@ -277,13 +277,13 @@ func Build(s Settings, src *media.Probe, outPath string, clip *Clip) (primary, f
 			hwf = append(hwf, "yadif_cuda")
 		}
 		sc := "scale_cuda=format=" + fmtOut
-		if scaleH > 0 {
-			sc = fmt.Sprintf("scale_cuda=-2:%d:format=%s", scaleH, fmtOut)
+		if scale {
+			sc = fmt.Sprintf("scale_cuda=%d:%d:format=%s", scaleW, scaleH, fmtOut)
 		}
 		hwf = append(hwf, sc)
 		upload := append(append([]string{}, swPre...), "format="+fmtOut, "hwupload_cuda")
-		if scaleH > 0 {
-			upload = append(upload, fmt.Sprintf("scale_cuda=-2:%d", scaleH))
+		if scale {
+			upload = append(upload, fmt.Sprintf("scale_cuda=%d:%d", scaleW, scaleH))
 		}
 		fb := assemble([]string{"-init_hw_device", "cuda=cu", "-filter_hw_device", "cu"}, nil, upload, false)
 		if tonemap {

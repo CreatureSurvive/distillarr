@@ -1,7 +1,7 @@
 import { type ReactNode } from "react";
 import { type AudioTrack, type FileItem, type HwReport, type Settings, type Stream } from "./api";
 import { Seg, Toggle } from "./components";
-import { backendLabel, channelsLabel, codecLabel } from "./format";
+import { backendLabel, channelsLabel, codecLabel, resClass, resLabel } from "./format";
 
 // Backends that passed a real test encode for a codec.
 export function workingBackends(rep: HwReport | null | undefined, codec: string): string[] {
@@ -125,9 +125,9 @@ export default function EncodeOptions({ value: s, onChange, file, streams, hw, a
             value={s.max_height || 0}
             onChange={(max_height) => set({ max_height })}
             options={[
-              { value: 0, label: `Keep ${file.height}p` },
-              ...(file.height > 1100 ? [{ value: 1080, label: "1080p" }] : []),
-              ...(file.height > 740 ? [{ value: 720, label: "720p" }] : []),
+              { value: 0, label: `Keep ${resLabel(file.width, file.height)} (${file.width}×${file.height})` },
+              ...(resClass(file.width, file.height) > 1080 ? [{ value: 1080, label: "1080p" }] : []),
+              ...(resClass(file.width, file.height) > 720 ? [{ value: 720, label: "720p" }] : []),
             ]}
           />
         </Row>

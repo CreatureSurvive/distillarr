@@ -111,3 +111,18 @@ func TestPreferMP4(t *testing.T) {
 		t.Error("copied TrueHD must keep MKV")
 	}
 }
+
+func TestResolutionCapUsesClass(t *testing.T) {
+	scope4k := probe("/m/s.mkv", "h264", "yuv420p", "", []string{"ac3"}, nil)
+	scope4k.Streams[0].Width, scope4k.Streams[0].Height = 3840, 1600
+	a, _, _ := joined(t, Settings{Codec: HEVC, Backend: QSV, MaxHeight: 1080}, scope4k, nil)
+	if !strings.Contains(a, "vpp_qsv=format=p010le:w=1920:h=800") {
+		t.Errorf("3840×1600 capped at 1080p should fit 1920×800: %s", a)
+	}
+	scope := probe("/m/b.mkv", "h264", "yuv420p", "", []string{"ac3"}, nil)
+	scope.Streams[0].Width, scope.Streams[0].Height = 1920, 802
+	a, _, _ = joined(t, Settings{Codec: HEVC, Backend: SW, MaxHeight: 1080}, scope, nil)
+	if strings.Contains(a, "scale=") {
+		t.Errorf("1920×802 is 1080p: a 1080p cap must not scale it: %s", a)
+	}
+}

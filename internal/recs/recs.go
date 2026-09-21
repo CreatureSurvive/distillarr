@@ -13,6 +13,7 @@ import (
 
 	"mediatrans/internal/config"
 	"mediatrans/internal/encode"
+	"mediatrans/internal/res"
 	"mediatrans/internal/store"
 )
 
@@ -139,14 +140,13 @@ func ModelRatio(f *store.File, s encode.Settings) float64 {
 	if f.VideoBitrate <= 0 || f.Width <= 0 || f.Height <= 0 {
 		return 0.6
 	}
-	outH := f.Height
-	if s.MaxHeight > 0 && f.Height > s.MaxHeight {
-		outH = s.MaxHeight
+	outCls, scale := res.Class(f.Width, f.Height), 1.0
+	if ow, _, ok := res.Fit(f.Width, f.Height, s.MaxHeight); ok {
+		outCls, scale = s.MaxHeight, float64(ow)/float64(f.Width)
 	}
-	scale := float64(outH) / float64(f.Height)
 	pixIn := float64(f.Width*f.Height) * fpsOr(f.FPS)
 	pixOut := pixIn * scale * scale
-	target := targetBPP(outH, s.Codec, s.Backend, s.Quality) * pixOut
+	target := targetBPP(outCls, s.Codec, s.Backend, s.Quality) * pixOut
 	srcEq := float64(f.VideoBitrate) * codecEff(f.VideoCodec)
 	r := 0.88 * math.Sqrt(target/srcEq)
 	return math.Max(0.1, math.Min(0.97, r))
@@ -183,7 +183,7 @@ func RecordObservation(f *store.File, s encode.Settings, observed float64) {
 		return
 	}
 	pred := ModelRatio(f, s)
-	key := CalibKey(s.Backend, s.Codec, f.VideoCodec, f.Height)
+	key := CalibKey(s.Backend, s.Codec, f.VideoCodec, res.Class(f.Width, f.Height))
 	cal.Lock()
 	b := cal.m[key]
 	if b == nil {
@@ -252,9 +252,10 @@ func Recommend(f *store.File, cfg config.Config) Recommendation {
 
 	pixRate := float64(f.Width*f.Height) * fpsOr(f.FPS)
 	r.SrcBPP = float64(f.VideoBitrate) / pixRate
-	r.Headroom = r.SrcBPP * codecEff(f.VideoCodec) / targetBPP(f.Height, s.Codec, s.Backend, 60)
+	cls := res.Class(f.Width, f.Height)
+	r.Headroom = r.SrcBPP * codecEff(f.VideoCodec) / targetBPP(cls, s.Codec, s.Backend, 60)
 	if f.VideoCodec == "hevc" && r.Headroom < 30 {
-		r.Reason = fmt.Sprintf("Already HEVC at %.1f Mb/s, which is reasonable for %dp.", float64(f.VideoBitrate)/1e6, f.Height)
+		r.Reason = fmt.Sprintf("Already HEVC at %.1f Mb/s, which is reasonable for %s.", float64(f.VideoBitrate)/1e6, res.Label(cls))
 		return r
 	}
 
@@ -275,10 +276,10 @@ func Recommend(f *store.File, cfg config.Config) Recommendation {
 		why = append(why, fmt.Sprintf("Healthy source bitrate (%.3f bits/pixel), so the default quality fits.", r.SrcBPP))
 	}
 	switch {
-	case f.Height <= 576:
+	case cls <= 576:
 		q += 4
 		why = append(why, "Standard-definition source: small frames show artifacts sooner (+4).")
-	case f.Height >= 1800:
+	case cls >= 2160:
 		q -= 3
 		why = append(why, "4K frames hide fine compression well (−3).")
 	}
@@ -316,8 +317,8 @@ func Recommend(f *store.File, cfg config.Config) Recommendation {
 	if f.BitDepth <= 8 && s.BitDepth == 10 {
 		notes = append(notes, "8-bit to 10-bit: better compression and less banding at the same size.")
 	}
-	if s.MaxHeight > 0 && f.Height > s.MaxHeight {
-		notes = append(notes, fmt.Sprintf("Downscaled %dp to %dp (Settings cap).", f.Height, s.MaxHeight))
+	if ow, oh, ok := res.Fit(f.Width, f.Height, s.MaxHeight); ok {
+		notes = append(notes, fmt.Sprintf("Downscaled %s to %s, %d×%d (Settings cap).", res.Label(cls), res.Label(s.MaxHeight), ow, oh))
 	}
 	r.Audio = audioPlan(f, s)
 	for _, a := range r.Audio {
@@ -338,8 +339,8 @@ func Recommend(f *store.File, cfg config.Config) Recommendation {
 	}
 	r.Action = "transcode"
 	r.Worth = true
-	r.Reason = fmt.Sprintf("%s %dp at %.1f Mb/s → %s %d-bit, quality %d: about %s → %s (−%.0f%%).",
-		label(f.VideoCodec), f.Height, float64(f.VideoBitrate)/1e6, label(string(s.Codec)), s.BitDepth,
+	r.Reason = fmt.Sprintf("%s %s at %.1f Mb/s → %s %d-bit, quality %d: about %s → %s (−%.0f%%).",
+		label(f.VideoCodec), res.Label(cls), float64(f.VideoBitrate)/1e6, label(string(s.Codec)), s.BitDepth,
 		s.Quality, gb(f.Size), gb(r.EstOut), r.Savings)
 	r.Score = score(r.Savings, f.Size)
 	return r
@@ -363,7 +364,7 @@ func Estimate(f *store.File, s encode.Settings, cfg config.Config) Recommendatio
 }
 
 func fillEstimate(r *Recommendation, f *store.File, s encode.Settings, cfg config.Config) {
-	factor, n := calFactor(CalibKey(s.Backend, s.Codec, f.VideoCodec, f.Height))
+	factor, n := calFactor(CalibKey(s.Backend, s.Codec, f.VideoCodec, res.Class(f.Width, f.Height)))
 	ratio := math.Max(0.06, math.Min(1.1, ModelRatio(f, s)*factor))
 	other := f.TotalBitrate - f.VideoBitrate
 	if other < 0 {
@@ -566,7 +567,7 @@ func Aggregate(files []*store.File, cfg config.Config) SeasonRec {
 		if f.VideoBitrate > 0 {
 			bitrates = append(bitrates, f.VideoBitrate)
 		}
-		heights[f.Height]++
+		heights[res.Class(f.Width, f.Height)]++
 		rec := Recommend(f, cfg)
 		switch rec.Action {
 		case "transcode":

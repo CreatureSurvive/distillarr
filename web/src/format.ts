@@ -118,10 +118,20 @@ export function seasonName(n: number): string {
 
 export const SPEEDS = ["faster", "fast", "medium", "slow", "slower"];
 
-export function resLabel(h: number): string {
-  if (h >= 2000) return "4K";
-  if (h >= 1000) return "1080p";
-  if (h >= 700) return "720p";
-  if (h > 0) return `${h}p`;
-  return "";
+// Nominal resolution class from width AND height (mirrors internal/res):
+// letterboxed 1920×802 is 1080p, 3840×1600 is 4K, 1440×1080 is 1080p.
+export function resClass(w: number, h: number): number {
+  if (w <= 0 && h <= 0) return 0;
+  if (w >= 3200 || h >= 1800) return 2160;
+  if (w >= 1700 || h >= 1000) return 1080;
+  if (w >= 1180 || h >= 700) return 720;
+  if (h > 500 || w > 860) return 576;
+  return 480;
+}
+
+// resLabel(width, height) for a file, or resLabel(class) for a class.
+export function resLabel(a: number, b?: number): string {
+  const c = b === undefined ? a : resClass(a, b);
+  if (!c) return "";
+  return c >= 2160 ? "4K" : `${c}p`;
 }
