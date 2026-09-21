@@ -458,9 +458,7 @@ func (s *Scanner) CropLoop(stop <-chan struct{}) {
 		}
 		// Container facts first: fast, and they feed the issues list.
 		if n := s.fillMeta(); n > 0 {
-			if n < 200 { // last batch: recompute issues once
-				s.RefreshRecsSoon()
-			}
+			s.RefreshRecsSoon() // debounced; issues fill in as batches land
 			continue
 		}
 		todo, err := s.st.FilesNeedingCrop(40)
