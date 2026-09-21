@@ -5,6 +5,11 @@
 // already knows about files and libraries.
 package upscale
 
+import (
+	"fmt"
+	"regexp"
+)
+
 // Tiers. The shader tier runs inside the one ffmpeg command; the neural
 // tier is a separate chunked runner and is not built by encode.Build.
 const (
@@ -16,6 +21,7 @@ const (
 const (
 	Film  = "film"  // live action
 	Anime = "anime" // animation / cel art
+	Any   = "any"   // content-agnostic
 )
 
 // DefaultPreset is used when a job asks for an upscale without naming one.
@@ -37,17 +43,29 @@ type Preset struct {
 	Label   string  `json:"label"`
 	Desc    string  `json:"desc"`
 	Tier    string  `json:"tier"`
-	Content string  `json:"content"`
+	Content string  `json:"content"` // film | anime | any
 	Params  []Param `json:"params"`
 
 	scaler  string   // libplacebo upscaler for the residual scale
 	shaders []string // embedded .glsl files, concatenated in order
+	// tune rewrites the shader source for the resolved params (nil = as shipped),
+	// for shaders whose tunables are #defines rather than uniforms.
+	tune func(src string, v map[string]float64) string
 }
 
 // Params shared by every shader-tier preset.
 var commonParams = []Param{
 	{Key: "sigmoid", Label: "Sigmoid light", Min: 0, Max: 1, Step: 1, Def: 1},
 	{Key: "deband", Label: "Deband", Min: 0, Max: 1, Step: 1, Def: 0},
+}
+
+// sharpnessRe matches FSR's RCAS strength define (see fsrTune).
+var sharpnessRe = regexp.MustCompile(`(?m)^#define SHARPNESS [0-9.]+`)
+
+// fsrTune sets RCAS sharpening. The shader's SHARPNESS counts stops of
+// *reduction* (0 = strongest), so the slider is inverted: higher = sharper.
+func fsrTune(src string, v map[string]float64) string {
+	return sharpnessRe.ReplaceAllString(src, fmt.Sprintf("#define SHARPNESS %.2f", 2-v["sharpness"]))
 }
 
 var presets = []Preset{
@@ -65,6 +83,12 @@ var presets = []Preset{
 		ID: "film-ginseng", Label: "Ginseng (EWA)", Tier: TierShader, Content: Film,
 		Desc:   "Softer, very low-ringing kernel: best for grainy or heavily compressed sources.",
 		Params: commonParams, scaler: "ewa_ginseng",
+	},
+	{
+		ID: "fsr", Label: "FSR 1.0 (EASU + RCAS)", Tier: TierShader, Content: Any,
+		Desc: "AMD FidelityFX Super Resolution: edge-directed upscale plus contrast-adaptive sharpening. Crisp on any content, cheap to run.",
+		Params: append([]Param{{Key: "sharpness", Label: "Sharpening", Min: 0, Max: 2, Step: 0.1, Def: 1.8}}, commonParams...),
+		scaler: "ewa_lanczos", shaders: []string{"FSR.glsl"}, tune: fsrTune,
 	},
 	{
 		ID: "anime-fast", Label: "Anime4K Fast", Tier: TierShader, Content: Anime,

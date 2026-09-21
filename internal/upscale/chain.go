@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 )
@@ -22,7 +23,7 @@ var writeMu sync.Mutex
 
 // shaderPath materialises a preset's concatenated shaders and returns the
 // file path, or "" for presets that use only a built-in scaler.
-func (p Preset) shaderPath() (string, error) {
+func (p Preset) shaderPath(v map[string]float64) (string, error) {
 	if len(p.shaders) == 0 {
 		return "", nil
 	}
@@ -35,7 +36,11 @@ func (p Preset) shaderPath() (string, error) {
 		buf.Write(b)
 		buf.WriteByte('\n')
 	}
-	sum := sha256.Sum256([]byte(buf.String()))
+	src := buf.String()
+	if p.tune != nil {
+		src = p.tune(src, v)
+	}
+	sum := sha256.Sum256([]byte(src))
 	path := filepath.Join(ShaderDir, fmt.Sprintf("%s-%x.glsl", p.ID, sum[:4]))
 
 	writeMu.Lock()
@@ -47,10 +52,30 @@ func (p Preset) shaderPath() (string, error) {
 		return "", err
 	}
 	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, []byte(buf.String()), 0o644); err != nil {
+	if err := os.WriteFile(tmp, []byte(src), 0o644); err != nil {
 		return "", err
 	}
+	pruneShaders()
 	return path, os.Rename(tmp, path)
+}
+
+// pruneShaders keeps the shader cache bounded: dragging a tuning slider writes
+// one file per value. The oldest go first; anything still in use is re-created
+// on demand, since files are named by content.
+func pruneShaders() {
+	const keep = 60
+	ents, err := os.ReadDir(ShaderDir)
+	if err != nil || len(ents) <= keep {
+		return
+	}
+	sort.Slice(ents, func(i, j int) bool {
+		a, _ := ents[i].Info()
+		b, _ := ents[j].Info()
+		return a != nil && b != nil && a.ModTime().Before(b.ModTime())
+	})
+	for _, e := range ents[:len(ents)-keep] {
+		os.Remove(filepath.Join(ShaderDir, e.Name()))
+	}
 }
 
 // Spec is one upscale stage: the output size, the preset and its params.
@@ -80,7 +105,7 @@ func (sp Spec) Filter(format string) (string, error) {
 		fmt.Sprintf("sigmoid=%d", int(v["sigmoid"])),
 		fmt.Sprintf("deband=%d", int(v["deband"])),
 	}
-	path, err := p.shaderPath()
+	path, err := p.shaderPath(v)
 	if err != nil {
 		return "", err
 	}

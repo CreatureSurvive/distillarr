@@ -106,3 +106,51 @@ func TestFilterErrors(t *testing.T) {
 		t.Error("a shader path needing filter escaping must be refused")
 	}
 }
+
+func TestFSRSharpnessParam(t *testing.T) {
+	ShaderDir = t.TempDir()
+	read := func(params map[string]float64) string {
+		f, err := Spec{W: 1920, H: 1080, Preset: "fsr", Params: params}.Filter("rgba")
+		if err != nil {
+			t.Fatal(err)
+		}
+		i := strings.Index(f, "custom_shader_path=") + len("custom_shader_path=")
+		b, err := os.ReadFile(f[i:strings.Index(f[i:], ":")+i])
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(b)
+	}
+	def, max, min := read(nil), read(map[string]float64{"sharpness": 2}), read(map[string]float64{"sharpness": 0})
+	// The slider is inverted: the shader counts stops of REDUCTION, so a higher
+	// slider must mean a LOWER define. The default (1.8) is the shader's own 0.2.
+	for _, c := range []struct{ name, src, want string }{
+		{"default", def, "#define SHARPNESS 0.20"},
+		{"max", max, "#define SHARPNESS 0.00"},
+		{"min", min, "#define SHARPNESS 2.00"},
+	} {
+		if !strings.Contains(c.src, c.want) {
+			t.Errorf("%s: want %q in the shader", c.name, c.want)
+		}
+	}
+	// Only that one line may differ: the rest is AMD's shader, untouched.
+	strip := func(s string) string { return sharpnessRe.ReplaceAllString(s, "") }
+	if strip(def) != strip(max) || strip(def) != strip(min) {
+		t.Error("tuning must change nothing but the SHARPNESS define")
+	}
+	if !strings.Contains(def, "FidelityFX Super Resolution v1.0.2 (EASU)") || !strings.Contains(def, "(RCAS)") {
+		t.Error("both FSR passes must be present")
+	}
+}
+
+func TestShaderCacheIsBounded(t *testing.T) {
+	ShaderDir = t.TempDir()
+	for i := 0; i < 90; i++ { // a slider drag: one distinct file per value
+		if _, err := (Spec{W: 1920, H: 1080, Preset: "fsr", Params: map[string]float64{"sharpness": float64(i) / 45}}).Filter("rgba"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if ents, _ := os.ReadDir(ShaderDir); len(ents) > 62 {
+		t.Errorf("shader cache grew to %d files", len(ents))
+	}
+}

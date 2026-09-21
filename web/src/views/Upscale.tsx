@@ -236,7 +236,9 @@ export default function UpscaleView() {
                   onClick={() => { setPresetId(p.id); setParams({}); }}>
                   <span className="up-preset-head">
                     <b>{p.label}</b>
-                    <span className={`chip ${p.content === "anime" ? "c-av1" : "c-hevc"}`}>{p.content === "anime" ? "Animation" : "Live action"}</span>
+                    <span className={`chip ${p.content === "anime" ? "c-av1" : p.content === "any" ? "" : "c-hevc"}`}>
+                      {p.content === "anime" ? "Animation" : p.content === "any" ? "Any content" : "Live action"}
+                    </span>
                     {p.id === suggested.preset && <span className="tag tag-save">suggested</span>}
                   </span>
                   <span className="dim small">{p.desc}</span>

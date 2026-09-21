@@ -168,7 +168,7 @@ export type UpscalePreset = {
   label: string;
   desc: string;
   tier: string;
-  content: "film" | "anime";
+  content: "film" | "anime" | "any";
   params: UpscaleParam[];
 };
 export type UpscaleInfo = {
