@@ -73,6 +73,11 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/v1/files/{id}", s.fileDetail)
 	mux.HandleFunc("POST /api/v1/files/{id}/plan", s.filePlan)
 	mux.HandleFunc("POST /api/v1/files/{id}/queue", s.queueFile)
+	mux.HandleFunc("POST /api/v1/files/{id}/fix", s.fixFile)
+	mux.HandleFunc("GET /api/v1/issues", s.issueSummary)
+	mux.HandleFunc("GET /api/v1/issues/mixed", s.mixedSeasons)
+	mux.HandleFunc("POST /api/v1/issues/{key}/fix", s.fixIssue)
+	mux.HandleFunc("GET /api/v1/libraries/composition", s.composition)
 	mux.HandleFunc("POST /api/v1/files/{id}/preview", s.createPreview)
 
 	// jobs + queue

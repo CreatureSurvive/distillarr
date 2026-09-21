@@ -450,6 +450,9 @@ func (s *Server) enqueue(f *store.File, st encode.Settings, runNow bool) (*store
 		Backend: string(st.Backend), Codec: string(st.Codec), Quality: st.Quality,
 		SettingsJSON: string(sj), MaxAttempts: max(1, cfg.MaxAttempts), SrcSize: f.Size,
 	}
+	if st.VideoCopy {
+		j.Backend, j.Codec, j.Quality = "remux", f.VideoCodec, 0
+	}
 	if err := s.st.CreateJob(j); err != nil {
 		return nil, err
 	}
