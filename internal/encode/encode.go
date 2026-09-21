@@ -89,7 +89,7 @@ type Settings struct {
 	UpscaleTier   string             `json:"upscale_tier,omitempty"`   // shader | neural
 	UpscalePreset string             `json:"upscale_preset,omitempty"` // upscale registry id
 	UpscaleParams map[string]float64 `json:"upscale_params,omitempty"` // per-preset tunables
-	UpscaleOutput string             `json:"upscale_output,omitempty"` // replace | copy
+	UpscaleOutput string             `json:"upscale_output,omitempty"` // replace | copy ("" = replace); the API fills it from config
 	// VulkanDevice is the Vulkan index the upscaler runs on, resolved from
 	// hwprobe (Vulkan picks by index, not render node). Index 0 is valid.
 	VulkanDevice int `json:"vulkan_device,omitempty"`
@@ -177,9 +177,6 @@ func (s *Settings) Normalize() {
 		}
 		if s.UpscalePreset == "" {
 			s.UpscalePreset = upscale.DefaultPreset
-		}
-		if s.UpscaleOutput == "" {
-			s.UpscaleOutput = "replace"
 		}
 	}
 }

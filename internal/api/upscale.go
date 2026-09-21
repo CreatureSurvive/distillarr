@@ -9,6 +9,7 @@ import (
 	"mediatrans/internal/recs"
 	"mediatrans/internal/res"
 	"mediatrans/internal/still"
+	"mediatrans/internal/store"
 	"mediatrans/internal/upscale"
 )
 
@@ -70,6 +71,40 @@ func (s *Server) upscaleInfo(w http.ResponseWriter, r *http.Request) {
 		"vulkan":    devs,
 		"available": hwprobe.BestVulkan(rep, "") != nil,
 	})
+}
+
+// checkUpscale rejects, before anything is queued or rendered, an upscale
+// that can't work: no usable Vulkan GPU, nothing to upscale (the source already
+// meets the target), or settings Build refuses (HDR without tone-mapping, an
+// unknown preset, the neural tier). It also snapshots the configured output
+// policy into the settings, so a job keeps the choice made when it was queued.
+// Non-upscale settings pass untouched.
+func (s *Server) checkUpscale(r *http.Request, f *store.File, st *encode.Settings) error {
+	if st.UpscaleTo <= 0 {
+		return nil
+	}
+	if hwprobe.BestVulkan(s.eng.Report(), "") == nil {
+		return fmt.Errorf("no working Vulkan device: upscaling is unavailable on this host")
+	}
+	if st.UpscaleOutput == "" {
+		st.UpscaleOutput = s.cfg.Get().UpscaleOutput
+	}
+	src, err := probeOf(r, f.Path)
+	if err != nil {
+		return err
+	}
+	v := src.Video()
+	if v == nil {
+		return fmt.Errorf("no video stream")
+	}
+	cst := s.concrete(*st)
+	if _, _, ok := encode.UpscaleSize(cst, v); !ok {
+		return fmt.Errorf("nothing to upscale: the source is already %dx%d", v.Width, v.Height)
+	}
+	if _, _, err := encode.Build(cst, src, "/path/to/output", nil); err != nil {
+		return err
+	}
+	return nil
 }
 
 // stillReq asks for one A/B frame.

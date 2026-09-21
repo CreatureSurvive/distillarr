@@ -10,6 +10,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"mediatrans/internal/media"
 )
 
 // VulkanDevice is one Vulkan-capable GPU as libplacebo (the upscaler) sees
@@ -115,30 +117,8 @@ func vulkanProbeArgs(idx int) []string {
 		"-init_hw_device", "vulkan=vk:"+strconv.Itoa(idx), "-filter_hw_device", "vk")
 }
 
-var chromaRe = regexp.MustCompile(`lavfi\.signalstats\.([UV])AVG=([0-9.]+)`)
-
 // chromaAvg averages the U and V means over every frame in signalstats output.
-func chromaAvg(out string) (u, v float64, ok bool) {
-	var su, sv float64
-	var nu, nv int
-	for _, m := range chromaRe.FindAllStringSubmatch(out, -1) {
-		f, err := strconv.ParseFloat(m[2], 64)
-		if err != nil {
-			continue
-		}
-		if m[1] == "U" {
-			su += f
-			nu++
-		} else {
-			sv += f
-			nv++
-		}
-	}
-	if nu == 0 || nv == 0 {
-		return 0, 0, false
-	}
-	return su / float64(nu), sv / float64(nv), true
-}
+func chromaAvg(out string) (u, v float64, ok bool) { return media.MeanChroma(out) }
 
 // chromaTolerance is how far (of 255) the candidate's mean chroma may sit from
 // the reference's. The two decode the pattern with slightly different

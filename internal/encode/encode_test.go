@@ -301,8 +301,8 @@ func TestUpscaleSettings(t *testing.T) {
 	if s.VMAFTarget != 0 {
 		t.Error("an upscale job must not carry a VMAF target: scoring against its own source is meaningless")
 	}
-	if s.UpscaleTier != "shader" || s.UpscaleOutput != "replace" {
-		t.Errorf("upscale defaults: tier %q output %q", s.UpscaleTier, s.UpscaleOutput)
+	if s.UpscaleTier != "shader" || s.UpscaleOutput != "" {
+		t.Errorf("upscale defaults: tier %q; output must be left for the API to fill from config, got %q", s.UpscaleTier, s.UpscaleOutput)
 	}
 	off := Settings{VMAFTarget: 93}
 	off.Normalize()

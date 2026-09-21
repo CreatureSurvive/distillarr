@@ -80,6 +80,13 @@ type VerifySpec struct {
 	WantTransfer   string // e.g. smpte2084 for HDR10 passthrough ("" = don't check)
 	Container      string // "mp4" → also require moov-before-mdat and hvc1 for HEVC
 	SrcSize        int64
+
+	// Upscale jobs. WantWidth/WantHeight is the exact expected picture size (0 =
+	// don't check): a silently skipped upscale filter still yields a valid file.
+	// ColorRef is the source whose mean chroma the output must match: a broken
+	// GPU readback returns clean, correctly sized video with the colour gone.
+	WantWidth, WantHeight int
+	ColorRef              string
 }
 
 // Verify probes the temp file and enforces output sanity. Returns
@@ -114,6 +121,15 @@ func Verify(ctx context.Context, tempPath string, spec VerifySpec) ([]string, er
 	}
 	if spec.Want10Bit && v.BitDepth() < 10 {
 		return nil, fmt.Errorf("output is %d-bit, wanted 10-bit (pix_fmt %s)", v.BitDepth(), v.PixFmt)
+	}
+	if spec.WantWidth > 0 && (v.Width != spec.WantWidth || v.Height != spec.WantHeight) {
+		return nil, fmt.Errorf("output is %dx%d, wanted %dx%d (the upscale did not apply)",
+			v.Width, v.Height, spec.WantWidth, spec.WantHeight)
+	}
+	if spec.ColorRef != "" {
+		if err := checkChroma(ctx, spec.ColorRef, tempPath, dur); err != nil {
+			return nil, err
+		}
 	}
 	if n := len(p.Audios()); n != spec.WantAudioCount {
 		return nil, fmt.Errorf("audio streams %d != expected %d", n, spec.WantAudioCount)
@@ -305,4 +321,72 @@ func copyFile(src, dst string, st *SrcStat) error {
 		_ = RestoreTimes(tmp, st)
 	}
 	return os.Rename(tmp, dst)
+}
+
+// chromaTolerance is how far (of 255) the output's mean chroma may sit from
+// the source's. Different matrices and scalers move it by a couple of levels;
+// a corrupt readback moves it by ~128.
+const chromaTolerance = 25.0
+
+// chromaClose reports whether the output's mean chroma agrees with the source's.
+func chromaClose(su, sv, ou, ov float64) bool {
+	return abs(su-ou) <= chromaTolerance && abs(sv-ov) <= chromaTolerance
+}
+
+func abs(f float64) float64 {
+	if f < 0 {
+		return -f
+	}
+	return f
+}
+
+// checkChroma samples the same three points of the source and the output and
+// fails when the colour differs. Three points keep one scene change between the
+// two decodes from being mistaken for corruption.
+func checkChroma(ctx context.Context, srcPath, outPath string, dur float64) error {
+	if dur <= 0 {
+		return nil
+	}
+	at := []float64{dur * 0.2, dur * 0.5, dur * 0.8}
+	su, sv, err := media.SampleChroma(ctx, srcPath, at, 8)
+	if err != nil {
+		return nil // can't judge from an unreadable source: don't fail the job over it
+	}
+	ou, ov, err := media.SampleChroma(ctx, outPath, at, 8)
+	if err != nil {
+		return fmt.Errorf("colour check: %w", err)
+	}
+	if !chromaClose(su, sv, ou, ov) {
+		return fmt.Errorf("output colour is wrong (mean U/V %.0f/%.0f, source %.0f/%.0f): the upscaler produced corrupt frames",
+			ou, ov, su, sv)
+	}
+	return nil
+}
+
+// AddCopy installs a finished encode beside its source instead of replacing
+// it. The original is untouched and nothing goes to trash. The link makes it
+// atomic and no-clobber: an existing destination is an error, never
+// overwritten.
+func AddCopy(tempPath, destPath string, st *SrcStat) error {
+	if f, err := os.Open(tempPath); err == nil {
+		_ = unix.Fsync(int(f.Fd()))
+		f.Close()
+	}
+	if err := os.Link(tempPath, destPath); err != nil {
+		if os.IsExist(err) {
+			return fmt.Errorf("%s already exists", destPath)
+		}
+		return err
+	}
+	if err := os.Remove(tempPath); err != nil {
+		return err
+	}
+	if st != nil && st.Mode != 0 {
+		_ = os.Chmod(destPath, os.FileMode(st.Mode&0o7777))
+	}
+	if d, err := os.Open(filepath.Dir(destPath)); err == nil {
+		_ = unix.Fsync(int(d.Fd()))
+		d.Close()
+	}
+	return nil
 }

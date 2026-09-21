@@ -65,6 +65,11 @@ type Config struct {
 	// VMAFTarget is the quality every encode is tuned to (0 = use the
 	// quality number as-is). 93 ≈ indistinguishable at normal viewing.
 	VMAFTarget *float64 `json:"vmaf_target"`
+	// UpscaleOutput is what an upscale job does with the source: "copy"
+	// writes a new file beside it and never touches the original (default:
+	// upscaling is subjective and its result can't be undone by re-encoding),
+	// "replace" swaps it in place with the original kept in trash.
+	UpscaleOutput string `json:"upscale_output"`
 
 	JellyfinURL    string `json:"jellyfin_url"`
 	JellyfinAPIKey string `json:"jellyfin_api_key"`
@@ -169,6 +174,11 @@ func (m *Manager) normalize() {
 	case "faster", "fast", "medium", "slow", "slower":
 	default:
 		m.cfg.DefaultSpeed = "medium"
+	}
+	switch m.cfg.UpscaleOutput {
+	case "copy", "replace":
+	default:
+		m.cfg.UpscaleOutput = "copy"
 	}
 	if m.cfg.TrashDays <= 0 {
 		m.cfg.TrashDays = 14

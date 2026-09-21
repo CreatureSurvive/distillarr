@@ -483,6 +483,10 @@ func (s *Server) queueFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	st, _ := s.resolve(f, req.Settings)
+	if err := s.checkUpscale(r, f, &st); err != nil {
+		fail(w, http.StatusConflict, err)
+		return
+	}
 	j, err := s.enqueue(f, st, req.RunNow)
 	if err != nil {
 		fail(w, 500, err)
@@ -504,6 +508,10 @@ func (s *Server) createPreview(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	st, _ := s.resolve(f, req.Settings)
+	if err := s.checkUpscale(r, f, &st); err != nil {
+		fail(w, http.StatusConflict, err)
+		return
+	}
 	st = s.concrete(st)
 	manual := req.Starts
 	if manual == nil && req.Segments > 1 && req.Segments <= 5 {

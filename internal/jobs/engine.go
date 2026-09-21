@@ -22,6 +22,7 @@ import (
 	"mediatrans/internal/media"
 	"mediatrans/internal/recs"
 	"mediatrans/internal/replace"
+	"mediatrans/internal/res"
 	"mediatrans/internal/scan"
 	"mediatrans/internal/store"
 	"mediatrans/internal/tune"
@@ -281,6 +282,29 @@ func (e *Engine) runJob(j *store.Job, resume bool) {
 	if rep != nil && settings.Backend != encode.SW && !settings.VideoCopy {
 		settings.RenderNode = hwprobe.NodeFor(rep, settings.Backend, settings.Codec)
 	}
+
+	// Upscale jobs: refuse the ones that can't do what was asked, before any
+	// GPU time is spent, and pick the Vulkan device (by index, not render node).
+	var upW, upH int
+	upscaling := settings.UpscaleTo > 0 && !settings.VideoCopy
+	if upscaling {
+		vid := src.Video()
+		if vid == nil {
+			e.fail(j, "no video stream", "")
+			return
+		}
+		var ok bool
+		if upW, upH, ok = encode.UpscaleSize(settings, vid); !ok {
+			e.fail(j, fmt.Sprintf("nothing to upscale: the source is already %dx%d", vid.Width, vid.Height), "")
+			return
+		}
+		dev := hwprobe.BestVulkan(rep, settings.RenderNode)
+		if dev == nil {
+			e.fail(j, "no working Vulkan device for upscaling (see Settings, Hardware)", "")
+			return
+		}
+		settings.VulkanDevice = dev.Index
+	}
 	if !resume {
 		settings = e.tuneQuality(ctx, j, settings, src)
 		if ctx.Err() != nil {
@@ -339,6 +363,11 @@ func (e *Engine) runJob(j *store.Job, resume bool) {
 	if !settings.TonemapHDR && (v.HDRType() == "hdr10" || v.HDRType() == "hlg") {
 		vspec.WantTransfer = v.ColorTransfer
 	}
+	if upscaling {
+		// A skipped upscale filter or a corrupt GPU readback both produce a
+		// valid file, so check the picture size and colour explicitly.
+		vspec.WantWidth, vspec.WantHeight, vspec.ColorRef = upW, upH, j.SrcPath
+	}
 	if _, verr := replace.Verify(ctx, tempPath, vspec); verr != nil {
 		e.fail(j, fmt.Sprintf("verification failed: %v", verr), "")
 		removeTemp(tempPath)
@@ -361,8 +390,17 @@ func (e *Engine) runJob(j *store.Job, resume bool) {
 	if container != srcExt && !(container == "mp4" && srcExt == "m4v") {
 		destPath = strings.TrimSuffix(j.SrcPath, filepath.Ext(j.SrcPath)) + "." + container
 	}
-	trashPath, err := replace.Replace(tempPath, j.SrcPath, destPath, st, trashDir)
-	if err != nil {
+	// An upscale in copy mode is installed beside the source, which is never
+	// touched: no trash entry, no old path to clear, no Jellyfin item to patch.
+	copyMode := upscaling && settings.UpscaleOutput == "copy"
+	var trashPath string
+	if copyMode {
+		destPath = upscaleDest(j.SrcPath, container, settings.UpscaleTo)
+		if err = replace.AddCopy(tempPath, destPath, st); err != nil {
+			e.fail(j, fmt.Sprintf("add upscaled copy: %v", err), "")
+			return
+		}
+	} else if trashPath, err = replace.Replace(tempPath, j.SrcPath, destPath, st, trashDir); err != nil {
 		e.fail(j, fmt.Sprintf("replace: %v", err), "")
 		return
 	}
@@ -375,8 +413,10 @@ func (e *Engine) runJob(j *store.Job, resume bool) {
 	_ = e.st.SetJobDest(j.ID, destPath)
 	newSize, _ := statSize(destPath)
 
-	// Feed the size model with what really happened.
-	if !settings.VideoCopy && before != nil && before.VideoBitrate > 0 && before.Duration > 0 && noAudioChanges(settings, before) {
+	// Feed the size model with what really happened. An upscale's output
+	// grew on purpose, so it says nothing about re-encode savings and would
+	// poison the calibration buckets keyed on the source's resolution.
+	if !settings.VideoCopy && settings.UpscaleTo == 0 && before != nil && before.VideoBitrate > 0 && before.Duration > 0 && noAudioChanges(settings, before) {
 		srcVideo := float64(before.VideoBitrate) * before.Duration / 8
 		outVideo := float64(newSize) - (float64(st.Size) - srcVideo)
 		if outVideo > 0 {
@@ -389,14 +429,21 @@ func (e *Engine) runJob(j *store.Job, resume bool) {
 
 	if e.scan != nil {
 		_ = e.scan.ProbeSingle(destPath)
-		if destPath != j.SrcPath {
+		if destPath != j.SrcPath && !copyMode {
 			_ = e.st.ClearOldPath(j.SrcPath)
 		}
 		e.scan.RefreshRecsSoon()
 	}
-	if e.OnReplaced != nil {
+	if e.OnReplaced != nil && !copyMode {
 		go e.OnReplaced(destPath, st)
 	}
+}
+
+// upscaleDest is where an upscale in copy mode lands: beside the source,
+// named for its new resolution so Jellyfin lists it as a version of the same
+// title ("Movie (2007) - 1080p upscale.mp4").
+func upscaleDest(src, container string, class int) string {
+	return strings.TrimSuffix(src, filepath.Ext(src)) + " - " + res.Label(class) + " upscale." + container
 }
 
 // tuneQuality runs the per-file VMAF search when the settings ask for a
