@@ -153,7 +153,33 @@ export type Settings = {
   extra_args?: string;
   crop?: string;
   vmaf_target?: number;
+  upscale_to?: number;
+  upscale_tier?: string;
+  upscale_preset?: string;
+  upscale_params?: Record<string, number>;
+  upscale_output?: string;
+  vulkan_device?: number;
 };
+
+export type UpscaleTarget = { class: number; w: number; h: number };
+export type UpscaleParam = { key: string; label: string; min: number; max: number; step: number; def: number };
+export type UpscalePreset = {
+  id: string;
+  label: string;
+  desc: string;
+  tier: string;
+  content: "film" | "anime";
+  params: UpscaleParam[];
+};
+export type UpscaleInfo = {
+  source: { w: number; h: number; class: number };
+  targets: UpscaleTarget[];
+  suggested: { to: number; preset: string; content: "film" | "anime"; why: string };
+  presets: UpscalePreset[];
+  vulkan: { index: number; name: string; ok: boolean; discrete: boolean; error?: string }[];
+  available: boolean;
+};
+export type Still = { key: string; w: number; h: number; at: number; ms: number; cached: boolean; a_url: string; b_url: string };
 
 export type VMAF = { mean: number; p5: number; min: number };
 
@@ -510,8 +536,11 @@ export const api = {
   plan: (id: number, settings?: Settings) => post<Plan>(`/api/v1/files/${id}/plan`, { settings }),
   queueFile: (id: number, body: { settings?: Settings; run_now?: boolean }) =>
     post<Job>(`/api/v1/files/${id}/queue`, body),
-  previewFile: (id: number, body: { settings?: Settings; segments?: number }) =>
+  previewFile: (id: number, body: { settings?: Settings; segments?: number; starts?: number[] }) =>
     post<Preview>(`/api/v1/files/${id}/preview`, body),
+  upscaleInfo: (id: number) => req<UpscaleInfo>(`/api/v1/files/${id}/upscale`),
+  still: (id: number, settings: Settings, at: number) =>
+    post<Still>(`/api/v1/files/${id}/still`, { settings, at }),
 
   fixFile: (id: number, run_now = false) => post<Job>(`/api/v1/files/${id}/fix`, { run_now }),
   issues: () => req<{ types: IssueType[] }>("/api/v1/issues"),

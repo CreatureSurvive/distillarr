@@ -10,6 +10,7 @@ import FileDetail from "./views/FileDetail";
 import Queue from "./views/Queue";
 import Issues from "./views/Issues";
 import PreviewView from "./views/Preview";
+import UpscaleView from "./views/Upscale";
 import SettingsView from "./views/Settings";
 
 export type LiveState = {
@@ -119,6 +120,7 @@ export default function App() {
           <Route path="/issues" element={<Issues live={live} />} />
           <Route path="/queue" element={<Queue live={live} />} />
           <Route path="/preview/:id" element={<PreviewView live={live} />} />
+          <Route path="/upscale/:id" element={<UpscaleView />} />
           <Route path="/settings" element={<SettingsView live={live} onJellyfin={() => setLive((l) => ({ ...l, jfVersion: l.jfVersion + 1 }))} />} />
         </Routes>
       </main>

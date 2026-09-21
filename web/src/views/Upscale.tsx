@@ -1,0 +1,257 @@
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Link, useNavigate, useParams } from "react-router-dom";
+import { api, type FileItem, type Settings, type Still, type UpscaleInfo } from "../api";
+import { Empty, Seg, Toggle, toast } from "../components";
+import { dur, resLabel } from "../format";
+
+type View = "split" | "a" | "b";
+type Zoom = "fit" | 1 | 2;
+
+const classLabel = (c: number) => (c === 2160 ? "4K" : `${c}p`);
+
+// Tune an upscale against real frames: a standard Lanczos resize (A) and the
+// same frame through the chosen upscaler (B), with a wipe divider. Frames
+// render on the server in about a second and are cached, so the sliders feel live.
+export default function UpscaleView() {
+  const id = Number(useParams<{ id: string }>().id);
+  const nav = useNavigate();
+  const [file, setFile] = useState<FileItem | null>(null);
+  const [info, setInfo] = useState<UpscaleInfo | null>(null);
+  const [loadErr, setLoadErr] = useState("");
+
+  const [to, setTo] = useState(0);
+  const [presetId, setPresetId] = useState("");
+  const [params, setParams] = useState<Record<string, number>>({});
+  const [at, setAt] = useState(0);
+
+  const [still, setStill] = useState<Still | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [stillErr, setStillErr] = useState("");
+  const [split, setSplit] = useState(0.5);
+  const [view, setView] = useState<View>("split");
+  const [zoom, setZoom] = useState<Zoom>("fit");
+  const [clipBusy, setClipBusy] = useState(false);
+  const seq = useRef(0);
+  const wrap = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    Promise.all([api.file(id), api.upscaleInfo(id)])
+      .then(([f, u]) => {
+        setFile(f.file);
+        setInfo(u);
+        const t = u.targets.find((x) => x.class === u.suggested.to) ?? u.targets[0];
+        setTo(t ? t.class : 0);
+        setPresetId(u.suggested.preset);
+        setAt(Math.floor(f.file.duration * 0.3)); // mid-film: avoids titles and credits
+      })
+      .catch((e) => setLoadErr(e.message));
+  }, [id]);
+
+  const preset = info?.presets.find((p) => p.id === presetId);
+
+  const settings = useMemo<Settings>(
+    () => ({ codec: "hevc", quality: 60, upscale_to: to, upscale_preset: presetId, upscale_params: params }),
+    [to, presetId, params],
+  );
+
+  // Debounced render. A response that arrives after a newer request started is
+  // dropped, so fast slider drags never flash an older frame.
+  useEffect(() => {
+    if (!info?.available || !to || !presetId) return;
+    const n = ++seq.current;
+    const t = setTimeout(async () => {
+      setBusy(true);
+      try {
+        const r = await api.still(id, settings, at);
+        if (n === seq.current) { setStill(r); setStillErr(""); }
+      } catch (e: any) {
+        if (n === seq.current) setStillErr(e.message);
+      } finally {
+        if (n === seq.current) setBusy(false);
+      }
+    }, 250);
+    return () => clearTimeout(t);
+  }, [id, info, settings, at, to, presetId]);
+
+  if (loadErr) return <Empty title="Couldn't load this file">{loadErr}</Empty>;
+  if (!file || !info) return <div className="dim">Loading…</div>;
+
+  const back = <div className="crumbs"><Link to={`/file/${file.id}`}>← Back to file</Link></div>;
+
+  if (!info.available) {
+    return (
+      <div>
+        {back}
+        <Empty title="Upscaling isn't available on this host">
+          <div className="dim">No Vulkan GPU passed the upscaler self-test.</div>
+          {info.vulkan.map((d) => (
+            <div key={d.index} className="mono small dim" style={{ marginTop: 6 }}>{d.name}: {d.error || "not usable"}</div>
+          ))}
+        </Empty>
+      </div>
+    );
+  }
+  if (info.targets.length === 0) {
+    return <div>{back}<Empty title="Nothing to upscale to">This file is already {classLabel(info.source.class)}.</Empty></div>;
+  }
+
+  const setParam = (k: string, v: number) => setParams((p) => ({ ...p, [k]: v }));
+  const pick = (e: React.PointerEvent) => {
+    const r = wrap.current?.getBoundingClientRect();
+    if (r && r.width > 0) setSplit(Math.min(1, Math.max(0, (e.clientX - r.left) / r.width)));
+  };
+
+  const renderClip = async () => {
+    setClipBusy(true);
+    try {
+      const p = await api.previewFile(id, { settings, starts: [Math.max(0, at - 2)] });
+      nav(`/preview/${p.id}`);
+    } catch (e: any) {
+      toast(e.message, "err");
+    } finally {
+      setClipBusy(false);
+    }
+  };
+
+  const dim = zoom === "fit" ? undefined : { width: (still?.w ?? 0) * zoom };
+  const sharp = zoom === "fit" ? undefined : ({ imageRendering: "pixelated" } as const);
+  const suggested = info.suggested;
+  const maxT = Math.max(1, Math.floor(file.duration));
+
+  return (
+    <div>
+      {back}
+      <div className="page-head">
+        <div>
+          <h1 className="page-title">Upscale</h1>
+          <div className="page-sub">
+            {file.title} · {file.width}×{file.height} ({resLabel(file.width, file.height)}) → {classLabel(to)}
+          </div>
+        </div>
+      </div>
+
+      <div className="up-layout">
+        <div>
+          <div className="toolbar" style={{ marginBottom: 10 }}>
+            <Seg<View> value={view} onChange={setView} label="Compare"
+              options={[{ value: "split", label: "Split" }, { value: "a", label: "A only" }, { value: "b", label: "B only" }]} />
+            <Seg<Zoom> value={zoom} onChange={setZoom} label="Zoom"
+              options={[{ value: "fit", label: "Fit" }, { value: 1, label: "1:1" }, { value: 2, label: "2:1" }]} />
+            <span className="mono dim small" style={{ marginLeft: "auto" }}>
+              {busy ? "rendering…" : still ? `${still.w}×${still.h} · ${still.cached ? "cached" : `${still.ms} ms`}` : ""}
+            </span>
+          </div>
+
+          <div className={`up-stage${busy ? " busy" : ""}`}>
+            {still ? (
+              <div className="up-viewport" style={zoom === "fit" ? undefined : { overflow: "auto", maxHeight: "72vh" }}>
+                <div
+                  ref={wrap}
+                  className="up-wrap"
+                  style={dim}
+                  onPointerDown={(e) => { e.currentTarget.setPointerCapture(e.pointerId); pick(e); }}
+                  onPointerMove={(e) => { if (e.buttons) pick(e); }}
+                >
+                  <img className="up-img" style={sharp} src={still.a_url} alt="Standard Lanczos resize" draggable={false} />
+                  {view !== "a" && (
+                    <img
+                      className="up-img up-b"
+                      style={{ ...sharp, clipPath: view === "split" ? `inset(0 0 0 ${split * 100}%)` : "none" }}
+                      src={still.b_url}
+                      alt="Upscaled"
+                      draggable={false}
+                    />
+                  )}
+                  {view === "split" && <div className="up-handle" style={{ left: `${split * 100}%` }} />}
+                  {view !== "b" && <span className="up-tag up-tag-a">A · standard Lanczos</span>}
+                  {view !== "a" && <span className="up-tag up-tag-b">B · {preset?.label}</span>}
+                </div>
+              </div>
+            ) : (
+              <div className="up-empty dim">{stillErr ? "" : "Rendering the first frame…"}</div>
+            )}
+            {stillErr && <div className="up-err mono small">{stillErr}</div>}
+          </div>
+
+          <div className="up-time">
+            <span className="stat-label">Frame</span>
+            <input type="range" min={0} max={maxT} step={1} value={Math.round(at)}
+              onChange={(e) => setAt(Number(e.target.value))} aria-label="Position in the file" />
+            <span className="mono small">{dur(at)}</span>
+          </div>
+          <div className="toolbar" style={{ marginTop: 8 }}>
+            {[0.1, 0.3, 0.5, 0.7, 0.9].map((f) => (
+              <button key={f} className="chip chip-btn" onClick={() => setAt(Math.floor(file.duration * f))}>
+                {Math.round(f * 100)}% · {dur(file.duration * f)}
+              </button>
+            ))}
+          </div>
+          <p className="dim small" style={{ marginTop: 12 }}>
+            Compare fine detail, edges and dark areas at 1:1. Stills are 8-bit SDR frames: they judge sharpness and
+            artefacts, not colour grading.
+          </p>
+        </div>
+
+        <aside className="up-controls">
+          <section className="panel">
+            <div className="eyebrow">Target</div>
+            <Seg<number> value={to} onChange={setTo} label="Target resolution"
+              options={info.targets.map((t) => ({ value: t.class, label: classLabel(t.class), hint: `${t.w}×${t.h}` }))} />
+            <div className="dim small" style={{ marginTop: 8 }}>
+              {info.targets.find((t) => t.class === to)?.w}×{info.targets.find((t) => t.class === to)?.h}, from{" "}
+              {info.source.w}×{info.source.h}
+            </div>
+          </section>
+
+          <section className="panel">
+            <div className="eyebrow">Method</div>
+            <div className="up-presets">
+              {info.presets.filter((p) => p.tier === "shader").map((p) => (
+                <button key={p.id} className={`up-preset${p.id === presetId ? " on" : ""}`}
+                  onClick={() => { setPresetId(p.id); setParams({}); }}>
+                  <span className="up-preset-head">
+                    <b>{p.label}</b>
+                    <span className={`chip ${p.content === "anime" ? "c-av1" : "c-hevc"}`}>{p.content === "anime" ? "Animation" : "Live action"}</span>
+                    {p.id === suggested.preset && <span className="tag tag-save">suggested</span>}
+                  </span>
+                  <span className="dim small">{p.desc}</span>
+                </button>
+              ))}
+            </div>
+            <div className="dim small" style={{ marginTop: 8 }}>Suggested: {suggested.why}.</div>
+          </section>
+
+          {preset && preset.params.length > 0 && (
+            <section className="panel">
+              <div className="eyebrow">Tuning</div>
+              <div className="up-params">
+              {preset.params.map((p) => {
+                const v = params[p.key] ?? p.def;
+                return p.max === 1 && p.step === 1 ? (
+                  <Toggle key={p.key} on={v >= 1} onChange={(on) => setParam(p.key, on ? 1 : 0)} label={p.label} />
+                ) : (
+                  <label key={p.key} className="field">
+                    <span>{p.label} <span className="mono dim">{v}</span></span>
+                    <input type="range" min={p.min} max={p.max} step={p.step} value={v}
+                      onChange={(e) => setParam(p.key, Number(e.target.value))} />
+                  </label>
+                );
+              })}
+              </div>
+            </section>
+          )}
+
+          <section className="panel">
+            <div className="eyebrow">Confirm motion</div>
+            <p className="dim small" style={{ marginTop: 0 }}>
+              Encode a 20-second clip with these settings and compare it against the source, playing side by side.
+            </p>
+            <button className="btn btn-primary" disabled={clipBusy} onClick={renderClip}>
+              {clipBusy ? "Starting…" : "Render 20s clip"}
+            </button>
+          </section>
+        </aside>
+      </div>
+    </div>
+  );
+}

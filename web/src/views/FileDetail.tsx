@@ -3,7 +3,7 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import { api, type FileItem, type HwReport, type Plan, type Settings, type Stream } from "../api";
 import { Art, Copyable, Empty, FileChips, IssueChips, SavingsGauge, hasQuickFix, toast } from "../components";
 import EncodeOptions, { hasBars } from "../options";
-import { backendLabel, bitrate, bytes, channelsLabel, codecLabel, dur, se } from "../format";
+import { backendLabel, bitrate, bytes, channelsLabel, codecLabel, dur, resClass, se } from "../format";
 import type { LiveState } from "../App";
 
 export default function FileDetail({ live }: { live: LiveState }) {
@@ -179,6 +179,9 @@ export default function FileDetail({ live }: { live: LiveState }) {
               <button className="btn" disabled={!!busy} onClick={() => act("preview")}>
                 {busy === "preview" ? "Starting…" : settings.vmaf_target ? "Measure & compare" : "Preview & compare"}
               </button>
+              {resClass(file.width, file.height) < 2160 && (
+                <Link className="btn" to={`/upscale/${file.id}`} title="Tune an upscale against real frames">Upscale…</Link>
+              )}
               <button className="btn" disabled={!!busy || file.queued} onClick={() => act("queue")}>
                 {file.queued ? "In queue" : busy === "queue" ? "Adding…" : "Add to queue"}
               </button>

@@ -91,6 +91,9 @@ func main() {
 		sc.RefreshRecsSoon()
 	}
 	pv.OnMeasured = func(fileID int64, s encode.Settings, ratio float64) {
+		if s.UpscaleTo > 0 {
+			return // an upscale's output size says nothing about re-encode savings
+		}
 		if f, err := st.GetFile(fileID); err == nil && f != nil {
 			recs.RecordObservation(f, s, ratio)
 			sc.RefreshRecsSoon()
