@@ -270,8 +270,10 @@ func (e *Engine) runJob(j *store.Job, resume bool) {
 	// the exact plan (also used to verify stream counts on resume).
 	settings.Normalize()
 	rep := e.Report()
-	settings.Backend = e.resolveBackend(rep, settings, j.Backend)
-	if rep != nil && settings.Backend != encode.SW {
+	if !settings.VideoCopy {
+		settings.Backend = e.resolveBackend(rep, settings, j.Backend)
+	}
+	if rep != nil && settings.Backend != encode.SW && !settings.VideoCopy {
 		settings.RenderNode = hwprobe.NodeFor(rep, settings.Backend, settings.Codec)
 	}
 	if !resume {
@@ -322,7 +324,7 @@ func (e *Engine) runJob(j *store.Job, resume bool) {
 	v := src.Video()
 	vspec := replace.VerifySpec{
 		WantVideoCodec: string(settings.Codec),
-		Want10Bit:      settings.BitDepth != 8,
+		Want10Bit:      settings.BitDepth != 8 && !settings.VideoCopy,
 		SrcDuration:    src.DurationSec(),
 		WantAudioCount: primary.ExpectAudio,
 		WantSubCount:   primary.ExpectSubs,
@@ -369,7 +371,7 @@ func (e *Engine) runJob(j *store.Job, resume bool) {
 	newSize, _ := statSize(destPath)
 
 	// Feed the size model with what really happened.
-	if before != nil && before.VideoBitrate > 0 && before.Duration > 0 && noAudioChanges(settings, before) {
+	if !settings.VideoCopy && before != nil && before.VideoBitrate > 0 && before.Duration > 0 && noAudioChanges(settings, before) {
 		srcVideo := float64(before.VideoBitrate) * before.Duration / 8
 		outVideo := float64(newSize) - (float64(st.Size) - srcVideo)
 		if outVideo > 0 {
@@ -397,7 +399,7 @@ func (e *Engine) runJob(j *store.Job, resume bool) {
 // the settings with Quality set to what the search found. On any failure
 // it keeps the given quality: tuning never blocks an encode.
 func (e *Engine) tuneQuality(ctx context.Context, j *store.Job, s encode.Settings, src *media.Probe) encode.Settings {
-	if s.VMAFTarget <= 0 || !media.VMAFAvailable() {
+	if s.VMAFTarget <= 0 || s.VideoCopy || !media.VMAFAvailable() {
 		return s
 	}
 	f, _ := e.st.GetFileByPath(j.SrcPath)
