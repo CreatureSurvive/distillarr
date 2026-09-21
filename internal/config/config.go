@@ -37,6 +37,11 @@ type Config struct {
 	Paused    bool      `json:"paused"`
 	Schedules []Schedule `json:"schedules"`
 
+	// Overnight measuring: VMAF quality searches on candidates while
+	// the GPU is otherwise idle, so estimates become measurements.
+	MeasureEnabled   *bool      `json:"measure_enabled"`
+	MeasureSchedules []Schedule `json:"measure_schedules"`
+
 	DefaultCodec       string `json:"default_codec"`        // "hevc" | "av1"
 	DefaultQuality     int    `json:"default_quality"`      // 0..100
 	PreferredBackend   string `json:"preferred_backend"`   // auto|qsv|vaapi|nvenc|sw
@@ -174,6 +179,19 @@ func (m *Manager) normalize() {
 	if m.cfg.Schedules == nil {
 		m.cfg.Schedules = []Schedule{}
 	}
+	if m.cfg.MeasureSchedules == nil {
+		m.cfg.MeasureSchedules = []Schedule{{ID: 1, Label: "Overnight", Days: 0x7F, Start: 60, End: 420}}
+	}
+}
+
+// Measure reports whether overnight measuring is on (default on).
+func (c Config) Measure() bool { return c.MeasureEnabled == nil || *c.MeasureEnabled }
+
+// MeasureOpen reports whether a measurement may start at t. Unlike the
+// encode queue, no schedules means never (measuring is opt-in by window).
+func (m *Manager) MeasureOpen(t time.Time) bool {
+	c := m.Get()
+	return c.Measure() && inWindows(c.MeasureSchedules, t)
 }
 
 // Get returns a copy of the current config.
@@ -247,10 +265,15 @@ func (m *Manager) WindowOpen(t time.Time) bool {
 	if len(c.Schedules) == 0 {
 		return true
 	}
+	return inWindows(c.Schedules, t)
+}
+
+// inWindows reports whether t falls inside any schedule.
+func inWindows(scheds []Schedule, t time.Time) bool {
 	min := t.Hour()*60 + t.Minute()
 	// weekday: Monday=0 … Sunday=6 → bitmap bit
 	bit := 1 << int((int(t.Weekday())+6)%7)
-	for _, s := range c.Schedules {
+	for _, s := range scheds {
 		if s.Days&bit == 0 {
 			continue
 		}

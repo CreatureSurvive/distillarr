@@ -800,3 +800,37 @@ func (s *Store) LibraryStats(lib string) (LibraryStat, error) {
 	}
 	return st, rows.Err()
 }
+
+// MeasureCandidates lists never-measured files whose estimate is at or
+// near the savings threshold (minPct), biggest first — the files where
+// a real measurement changes decisions the most.
+func (s *Store) MeasureCandidates(minPct float64, limit int) ([]*File, error) {
+	rows, err := s.dbR.Query(`SELECT `+fileCols+` FROM files
+		WHERE missing=0 AND tune_json='' AND rec_json!='' AND duration>=120
+		AND json_extract(rec_json,'$.action')!='caution'
+		AND json_extract(rec_json,'$.savings_pct')>=?
+		ORDER BY size DESC LIMIT ?`, minPct, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []*File{}
+	for rows.Next() {
+		fl, err := scanFile(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, fl)
+	}
+	return out, rows.Err()
+}
+
+// MeasureProgress counts measured files and remaining candidates.
+func (s *Store) MeasureProgress(minPct float64) (measured, remaining int) {
+	_ = s.dbR.QueryRow(`SELECT COALESCE(SUM(tune_json!=''),0),
+		COALESCE(SUM(tune_json='' AND rec_json!='' AND duration>=120
+			AND json_extract(rec_json,'$.action')!='caution'
+			AND json_extract(rec_json,'$.savings_pct')>=?),0)
+		FROM files WHERE missing=0`, minPct).Scan(&measured, &remaining)
+	return
+}

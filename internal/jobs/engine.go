@@ -61,6 +61,8 @@ type Engine struct {
 	hwReport *hwprobe.Report
 	hwFails  map[string][]time.Time
 
+	ms measurer
+
 	stopCh chan struct{}
 	wg     sync.WaitGroup
 	kick   chan struct{}
@@ -93,6 +95,8 @@ func (e *Engine) Start() {
 	go e.dispatcherLoop()
 	e.wg.Add(1)
 	go e.housekeepingLoop()
+	e.wg.Add(1)
+	go e.measureLoop()
 	// Probe hardware in the background on first boot.
 	if e.Report() == nil {
 		go func() {
