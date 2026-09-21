@@ -28,6 +28,8 @@ type Stream struct {
 	PixFmt         string            `json:"pix_fmt,omitempty"`
 	ColorTransfer  string            `json:"color_transfer,omitempty"`
 	ColorPrimaries string            `json:"color_primaries,omitempty"`
+	ColorSpace     string            `json:"color_space,omitempty"`
+	FieldOrder     string            `json:"field_order,omitempty"` // progressive|tt|bb|tb|bt
 	Channels       int               `json:"channels,omitempty"`
 	BitRate        string            `json:"bit_rate,omitempty"`   // ffprobe emits a string
 	AvgFrameRate   string            `json:"avg_frame_rate,omitempty"` // "24000/1001"
@@ -241,6 +243,15 @@ func (s *Stream) HDRType() string {
 		return "hlg"
 	}
 	return ""
+}
+
+// Interlaced reports field-coded video.
+func (s *Stream) Interlaced() bool {
+	switch s.FieldOrder {
+	case "tt", "bb", "tb", "bt":
+		return true
+	}
+	return false
 }
 
 // IsPCM reports uncompressed/linear audio codecs worth converting.

@@ -34,9 +34,10 @@ type Scanner struct {
 	st  *store.Store
 	cfg *config.Manager
 
-	mu      sync.Mutex
-	running bool
-	stats   Stats
+	mu           sync.Mutex
+	running      bool
+	stats        Stats
+	refreshTimer *time.Timer
 
 	// Progress is called (from the scan goroutine) on updates.
 	Progress func(Stats)
@@ -270,6 +271,7 @@ func buildFile(lib, path string, p *media.Probe) *store.File {
 		f.BitDepth = v.BitDepth()
 		f.FPS = v.FPS()
 		f.HDR = v.HDRType()
+		f.Interlaced = v.Interlaced()
 		f.VideoBitrate = p.VideoBitrate()
 	}
 	return f
@@ -352,6 +354,45 @@ func (s *Scanner) markMissing(seen map[string]bool) {
 	if err := s.st.MarkNotSeen(); err != nil {
 		log.Printf("scan: mark missing: %v", err)
 	}
+}
+
+// RefreshRecs recomputes every cached recommendation (after settings,
+// hardware or size-model calibration change). Cheap: no probing.
+func (s *Scanner) RefreshRecs() {
+	cfg := s.cfg.Get()
+	batch := map[int64][2]any{}
+	flush := func() {
+		if len(batch) > 0 {
+			if err := s.st.UpdateRecs(batch); err != nil {
+				log.Printf("scan: refresh recs: %v", err)
+			}
+			batch = map[int64][2]any{}
+		}
+	}
+	_ = s.st.EachFile(func(f *store.File) error {
+		r := recs.Recommend(f, cfg)
+		batch[f.ID] = [2]any{r.Score, r.JSON()}
+		if len(batch) >= 500 {
+			flush()
+		}
+		return nil
+	})
+	flush()
+	if s.Progress != nil {
+		st := s.Stats()
+		st.Phase = "recommendations refreshed"
+		s.Progress(st)
+	}
+}
+
+// RefreshRecsSoon debounces RefreshRecs (many triggers → one pass).
+func (s *Scanner) RefreshRecsSoon() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.refreshTimer != nil {
+		s.refreshTimer.Stop()
+	}
+	s.refreshTimer = time.AfterFunc(3*time.Second, s.RefreshRecs)
 }
 
 // ProbeSingle re-probes one path now (used after a successful

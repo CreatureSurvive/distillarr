@@ -1,6 +1,7 @@
 // Package encode builds ffmpeg command lines for every encoder
 // backend (software x265/SVT-AV1, Intel QSV, VA-API, NVENC) from one
-// quality knob, and derives fallbacks.
+// Settings value: explicit per-stream mapping, speed/quality/bit-depth,
+// deinterlace, scaling, tone-mapping, and a software-decode fallback.
 package encode
 
 import (
@@ -32,45 +33,71 @@ const (
 // AllBackends is the preference-ordered default chain.
 var AllBackends = []Backend{QSV, VAAPI, NVENC, SW}
 
+// Speeds, fastest → slowest. Mapped per encoder in speedFor.
+var Speeds = []string{"faster", "fast", "medium", "slow", "slower"}
+
+// AudioTrack is a per-source-stream audio decision.
+type AudioTrack struct {
+	Index    int    `json:"index"`              // source stream index
+	Action   string `json:"action"`             // copy | convert | drop
+	Codec    string `json:"codec,omitempty"`    // flac | aac | eac3 | opus (convert)
+	Bitrate  int    `json:"bitrate,omitempty"`  // kbps, lossy convert only
+	Channels int    `json:"channels,omitempty"` // 0 keep, 2 = downmix to stereo
+}
+
+// SubTrack is a per-source-stream subtitle decision.
+type SubTrack struct {
+	Index  int    `json:"index"`
+	Action string `json:"action"` // keep | drop
+}
+
 // Settings fully describes one encode.
 type Settings struct {
-	Codec          Codec   `json:"codec"`
-	Backend        Backend `json:"backend"`
-	Quality        int     `json:"quality"`          // 0..100, 60 default
-	Preset         string  `json:"preset,omitempty"` // "" = backend default
-	MaxHeight      int     `json:"max_height,omitempty"` // 0 = keep resolution
-	TonemapHDR     bool    `json:"tonemap_hdr,omitempty"`
-	FilmGrain      int     `json:"film_grain,omitempty"` // SVT-AV1 only
-	AudioPCMTarget string  `json:"audio_pcm_target,omitempty"` // flac|aac|eac3|copy
-	Container      string  `json:"container,omitempty"` // mkv|mp4|auto (default auto)
-	RenderNode     string  `json:"render_node,omitempty"` // /dev/dri/renderD128
+	Codec          Codec        `json:"codec"`
+	Backend        Backend      `json:"backend"`
+	Quality        int          `json:"quality"`                // 0..100
+	Speed          string       `json:"speed,omitempty"`        // faster..slower
+	BitDepth       int          `json:"bit_depth,omitempty"`    // 8 | 10 (default 10)
+	MaxHeight      int          `json:"max_height,omitempty"`   // 0 = keep
+	Deinterlace    string       `json:"deinterlace,omitempty"`  // auto | on | off
+	TonemapHDR     bool         `json:"tonemap_hdr,omitempty"`  // HDR10/HLG → SDR BT.709
+	FilmGrain      int          `json:"film_grain,omitempty"`   // SVT-AV1 synthesis 0..50
+	Tune           string       `json:"tune,omitempty"`         // "" | animation | grain (x265)
+	Container      string       `json:"container,omitempty"`    // auto | mkv | mp4
+	RenderNode     string       `json:"render_node,omitempty"`  // resolved from probe
+	AudioPCMTarget string       `json:"audio_pcm_target,omitempty"`
+	Audio          []AudioTrack `json:"audio,omitempty"` // nil = policy default
+	Subs           []SubTrack   `json:"subs,omitempty"`  // nil = keep all
+	ExtraArgs      string       `json:"extra_args,omitempty"` // appended output options
+	PreferMP4      bool         `json:"prefer_mp4,omitempty"` // auto container: MP4 whenever tracks fit
 }
 
-// DefaultRenderNode is only a last-resort fallback — real node choice
-// always comes from hwprobe results (on this host the Arc A380 is
-// renderD129; the UHD 630 is renderD128 — verify via the probe, not
-// stale docs).
+// DefaultRenderNode is a last-resort fallback; node choice comes from
+// hwprobe (on this host the Arc A380 is renderD129).
 const DefaultRenderNode = "/dev/dri/renderD129"
 
-// CmdSpec is a complete ffmpeg invocation.
+// CmdSpec is a complete ffmpeg invocation plus what it will produce.
 type CmdSpec struct {
-	Args     []string // argv after the binary
-	SemKey   string   // hw semaphore key: qsv|vaapi|nvenc|sw
-	HWDecode bool     // uses hw decode → eligible for sw-decode fallback retry
+	Args        []string `json:"args"`
+	SemKey      string   `json:"sem_key"`
+	HWDecode    bool     `json:"hw_decode"`
+	Container   string   `json:"container"`
+	ExpectAudio int      `json:"expect_audio"`
+	ExpectSubs  int      `json:"expect_subs"`
 }
 
-// FFmpeg is the binary name (overridable for tests).
+// Clip restricts a build to a span (previews). Zero value = whole file.
+type Clip struct {
+	Start, Dur float64
+}
+
+// FFmpeg is the binary name.
 var FFmpeg = "ffmpeg"
 
 // CRFForQuality maps the 0..100 knob to the software-CRF scale.
 func CRFForQuality(q int) int {
-	if q < 0 {
-		q = 0
-	}
-	if q > 100 {
-		q = 100
-	}
-	return clamp(23 - int(math.Round(float64(q-50)/5)), 14, 30)
+	q = clamp(q, 0, 100)
+	return clamp(23-int(math.Round(float64(q-50)/5)), 12, 34)
 }
 
 func clamp(v, lo, hi int) int {
@@ -83,338 +110,516 @@ func clamp(v, lo, hi int) int {
 	return v
 }
 
-func node(s Settings) string {
+func (s Settings) node() string {
 	if s.RenderNode != "" {
 		return s.RenderNode
 	}
 	return DefaultRenderNode
 }
 
-// Build constructs the primary command plus (for hw-decode pipelines)
-// a software-decode fallback variant. src is the source probe.
-func Build(s Settings, src *media.Probe, outPath string) (primary, fallback *CmdSpec, err error) {
+func (s Settings) tenBit() bool { return s.BitDepth != 8 }
+
+// Normalize fills defaults.
+func (s *Settings) Normalize() {
 	if s.Quality == 0 {
 		s.Quality = 60
+	}
+	if s.Codec == "" {
+		s.Codec = HEVC
+	}
+	if s.Speed == "" {
+		s.Speed = "medium"
+	}
+	if s.BitDepth != 8 {
+		s.BitDepth = 10
+	}
+	if s.Deinterlace == "" {
+		s.Deinterlace = "auto"
+	}
+	if s.Container == "" {
+		s.Container = "auto"
 	}
 	if s.AudioPCMTarget == "" {
 		s.AudioPCMTarget = "flac"
 	}
-	container, err := ChooseContainer(s, src)
+}
+
+// Build constructs the primary command and (for hw-decode pipelines) a
+// software-decode fallback. clip != nil builds a browser-playable
+// preview sample (mp4, first audio track as AAC stereo, no subtitles).
+func Build(s Settings, src *media.Probe, outPath string, clip *Clip) (primary, fallback *CmdSpec, err error) {
+	s.Normalize()
+	v := src.Video()
+	if v == nil {
+		return nil, nil, fmt.Errorf("no video stream")
+	}
+	container := "mp4"
+	if clip == nil {
+		if container, err = ChooseContainer(s, src); err != nil {
+			return nil, nil, err
+		}
+	}
+
+	streams := planStreams(s, src, container, clip != nil)
+	video, err := videoArgs(s)
 	if err != nil {
 		return nil, nil, err
 	}
-	mux := muxArgs(container)
-	scaleNeeded := s.MaxHeight > 0 && src.Video() != nil && src.Video().Height > s.MaxHeight
+	video = append(video, colorArgs(s, v)...)
+
+	scaleH := 0
+	if s.MaxHeight > 0 && v.Height > s.MaxHeight {
+		scaleH = s.MaxHeight
+	}
+	deint := s.Deinterlace == "on" || (s.Deinterlace == "auto" && v.Interlaced())
+	srcTen := v.BitDepth() >= 10
+	tonemap := s.TonemapHDR && v.HDRType() != "" && v.HDRType() != "dolby_vision"
+
+	var pre []string
+	if clip != nil {
+		pre = []string{"-ss", fmt.Sprintf("%.3f", clip.Start), "-t", fmt.Sprintf("%.3f", clip.Dur)}
+	}
+
+	assemble := func(devices, decode, filters []string, hw bool) *CmdSpec {
+		args := []string{"-hide_banner", "-loglevel", "warning", "-nostdin",
+			"-progress", "pipe:1", "-nostats", "-stats_period", "0.5"}
+		args = append(args, devices...)
+		args = append(args, decode...)
+		args = append(args, pre...)
+		args = append(args, "-i", src.Format.Filename)
+		args = append(args, streams.maps...)
+		if len(filters) > 0 {
+			args = append(args, "-vf", strings.Join(filters, ","))
+		}
+		args = append(args, video...)
+		args = append(args, streams.codecs...)
+		args = append(args, muxArgs(container)...)
+		if s.Codec == HEVC && container == "mp4" {
+			args = append(args, "-tag:v", "hvc1")
+		}
+		if clip == nil {
+			args = append(args, SplitArgs(s.ExtraArgs)...)
+		}
+		args = append(args, "-y", outPath)
+		return &CmdSpec{Args: args, SemKey: string(s.Backend), HWDecode: hw,
+			Container: container, ExpectAudio: streams.nAudio, ExpectSubs: streams.nSubs}
+	}
+
+	// Software pre-filters shared by every sw-decode path.
+	swPre := []string{}
+	if deint && s.Backend == SW {
+		swPre = append(swPre, "bwdif=mode=send_frame")
+	}
+	if tonemap {
+		swPre = append(swPre,
+			"zscale=t=linear:npl=100", "format=gbrpf32le", "zscale=p=bt709",
+			"tonemap=tonemap=hable:desat=0", "zscale=t=bt709:m=bt709:r=tv")
+	}
 
 	switch s.Backend {
-	case SW:
-		spec, err := buildSW(s, src, outPath, container, scaleNeeded, mux)
-		if err != nil {
-			return nil, nil, err
+	case SW, "":
+		s.Backend = SW
+		f := append([]string{}, swPre...)
+		if scaleH > 0 {
+			f = append(f, fmt.Sprintf("scale=-2:%d:flags=lanczos", scaleH))
 		}
-		return spec, nil, nil
+		return assemble(nil, nil, f, false), nil, nil
+
 	case QSV, VAAPI:
-		spec, fb, err := buildIntel(s, src, outPath, container, scaleNeeded, mux)
-		if err != nil {
-			return nil, nil, err
+		devices := []string{"-init_hw_device", "vaapi=va:" + s.node()}
+		var decode, hwFilter []string
+		fmtOut := "nv12"
+		if s.tenBit() {
+			fmtOut = "p010le"
 		}
-		return spec, fb, nil
+		upFmt := "nv12"
+		if srcTen || tonemap {
+			upFmt = "p010le"
+		}
+		if s.Backend == QSV {
+			devices = append(devices, "-init_hw_device", "qsv=qsv@va", "-filter_hw_device", "qsv")
+			decode = []string{"-hwaccel", "qsv", "-hwaccel_output_format", "qsv"}
+			vpp := "vpp_qsv=format=" + fmtOut
+			if scaleH > 0 {
+				vpp += fmt.Sprintf(":w=-2:h=%d", scaleH)
+			}
+			if deint {
+				vpp += ":deinterlace=2"
+			}
+			hwFilter = []string{vpp}
+		} else {
+			devices = append(devices, "-filter_hw_device", "va")
+			decode = []string{"-hwaccel", "vaapi", "-hwaccel_output_format", "vaapi"}
+			if deint {
+				hwFilter = append(hwFilter, "deinterlace_vaapi")
+			}
+			sc := "scale_vaapi=format=" + fmtOut
+			if scaleH > 0 {
+				sc += fmt.Sprintf(":w=-2:h=%d", scaleH)
+			}
+			hwFilter = append(hwFilter, sc)
+		}
+		upload := append(append([]string{}, swPre...), "format="+upFmt, "hwupload=extra_hw_frames=64")
+		fb := assemble(devices, nil, append(upload, hwFilter...), false)
+		if tonemap {
+			// Tone-mapping is a CPU filter: the sw-decode path IS the primary.
+			return fb, nil, nil
+		}
+		return assemble(devices, decode, hwFilter, true), fb, nil
+
 	case NVENC:
-		spec, fb, err := buildNVENC(s, src, outPath, container, scaleNeeded, mux)
-		if err != nil {
-			return nil, nil, err
+		fmtOut := "yuv420p"
+		if s.tenBit() {
+			fmtOut = "p010le"
 		}
-		return spec, fb, nil
+		var hwf []string
+		if deint {
+			hwf = append(hwf, "yadif_cuda")
+		}
+		sc := "scale_cuda=format=" + fmtOut
+		if scaleH > 0 {
+			sc = fmt.Sprintf("scale_cuda=-2:%d:format=%s", scaleH, fmtOut)
+		}
+		hwf = append(hwf, sc)
+		upload := append(append([]string{}, swPre...), "format="+fmtOut, "hwupload_cuda")
+		if scaleH > 0 {
+			upload = append(upload, fmt.Sprintf("scale_cuda=-2:%d", scaleH))
+		}
+		fb := assemble([]string{"-init_hw_device", "cuda=cu", "-filter_hw_device", "cu"}, nil, upload, false)
+		if tonemap {
+			return fb, nil, nil
+		}
+		return assemble(nil, []string{"-hwaccel", "cuda", "-hwaccel_output_format", "cuda"}, hwf, true), fb, nil
 	}
 	return nil, nil, fmt.Errorf("unknown backend %q", s.Backend)
 }
 
-// buildSW builds libx265 / libsvtav1 invocations.
-func buildSW(s Settings, src *media.Probe, out, container string, scale bool, mux []string) (*CmdSpec, error) {
-	if s.TonemapHDR && scale {
-		return nil, fmt.Errorf("tonemap + scale combination not supported on sw yet")
-	}
-	var filters []string
-	pixFmt := "p010le"
-	if s.Codec == AV1 {
-		pixFmt = "yuv420p10le"
-	}
-	if s.TonemapHDR {
-		filters = append(filters,
-			"zscale=t=linear:npl=100",
-			"format=gbrpf32le",
-			"zscale=p=bt709",
-			"tonemap=tonemap=hable:desat=0",
-			"zscale=t=bt709:m=bt709:r=tv",
-			"format="+pixFmt)
-	} else if scale {
-		filters = append(filters, fmt.Sprintf("scale=-2:%d:flags=lanczos,format=%s", s.MaxHeight, pixFmt))
-	}
-
+// videoArgs returns the encoder + rate-control args.
+func videoArgs(s Settings) ([]string, error) {
 	crf := CRFForQuality(s.Quality)
-	var video []string
-	switch s.Codec {
-	case HEVC:
-		video = []string{"-c:v", "libx265", "-crf", itoa(crf), "-preset", presetOr(s.Preset, "medium"),
-			"-pix_fmt", pixFmt, "-x265-params", "log-level=error"}
-	case AV1:
-		video = []string{"-c:v", "libsvtav1", "-crf", itoa(clampMin(crf+11, 55)),
-			"-preset", presetOr(s.Preset, "6"), "-pix_fmt", pixFmt}
+	sp := speedFor(s.Backend, s.Codec, s.Speed)
+	switch {
+	case s.Backend == SW && s.Codec == HEVC:
+		pix := "yuv420p10le"
+		if !s.tenBit() {
+			pix = "yuv420p"
+		}
+		a := []string{"-c:v", "libx265", "-crf", itoa(crf), "-preset", sp, "-pix_fmt", pix}
+		if s.Tune == "animation" || s.Tune == "grain" {
+			a = append(a, "-tune", s.Tune)
+		}
+		return append(a, "-x265-params", "log-level=error"), nil
+	case s.Backend == SW && s.Codec == AV1:
+		pix := "yuv420p10le"
+		if !s.tenBit() {
+			pix = "yuv420p"
+		}
+		a := []string{"-c:v", "libsvtav1", "-crf", itoa(clamp(crf+11, 1, 63)), "-preset", sp, "-pix_fmt", pix}
 		if s.FilmGrain > 0 {
-			video = append(video, "-svtav1-params",
-				fmt.Sprintf("film-grain=%d:film-grain-denoise=1", s.FilmGrain))
+			a = append(a, "-svtav1-params", fmt.Sprintf("film-grain=%d:film-grain-denoise=1", clamp(s.FilmGrain, 1, 50)))
+		}
+		return a, nil
+	case s.Backend == QSV && s.Codec == HEVC:
+		prof := "main10"
+		if !s.tenBit() {
+			prof = "main"
+		}
+		return []string{"-c:v", "hevc_qsv", "-rc_mode", "LA_ICQ", "-global_quality", itoa(crf + 3),
+			"-look_ahead", "1", "-preset", sp, "-profile:v", prof}, nil
+	case s.Backend == QSV && s.Codec == AV1:
+		return []string{"-c:v", "av1_qsv", "-rc_mode", "ICQ", "-global_quality", itoa(crf + 3),
+			"-async_depth", "4", "-preset", sp}, nil
+	case s.Backend == VAAPI && s.Codec == HEVC:
+		prof := "main10"
+		if !s.tenBit() {
+			prof = "main"
+		}
+		return []string{"-c:v", "hevc_vaapi", "-rc_mode", "CQP", "-qp", itoa(crf + 2),
+			"-bf", "2", "-profile:v", prof}, nil
+	case s.Backend == VAAPI && s.Codec == AV1:
+		return []string{"-c:v", "av1_vaapi", "-rc_mode", "CQP", "-qp", itoa(crf + 2)}, nil
+	case s.Backend == NVENC:
+		return []string{"-c:v", string(s.Codec) + "_nvenc", "-preset", sp, "-tune", "hq",
+			"-rc", "vbr", "-cq", itoa(crf + 4), "-b:v", "0", "-spatial-aq", "1", "-temporal-aq", "1"}, nil
+	}
+	return nil, fmt.Errorf("unsupported backend/codec %s/%s", s.Backend, s.Codec)
+}
+
+// speedFor maps the generic speed to each encoder's preset vocabulary.
+func speedFor(b Backend, c Codec, speed string) string {
+	i := 2
+	for k, v := range Speeds {
+		if v == speed {
+			i = k
 		}
 	}
-	return assemble(s, src, out, container, nil, filters, video, mux)
-}
-
-func clampMin(v, min int) int {
-	if v < min {
-		return min
-	}
-	return v
-}
-
-// buildIntel builds QSV and VA-API pipelines with hw decode primary
-// and software-decode fallback.
-func buildIntel(s Settings, src *media.Probe, out, container string, scale bool, mux []string) (*CmdSpec, *CmdSpec, error) {
-	if s.TonemapHDR {
-		return nil, nil, fmt.Errorf("HDR tone-mapping requires the software backend")
-	}
-
-	hw := fmt.Sprintf("vaapi=va:%s", node(s))
-	scalePart := ""
-	if scale {
-		scalePart = fmt.Sprintf(":w=-2:h=%d", s.MaxHeight)
-	}
-	crf := CRFForQuality(s.Quality)
-
-	var video []string
 	switch {
-	case s.Backend == QSV && s.Codec == HEVC:
-		video = []string{"-c:v", "hevc_qsv", "-rc_mode", "LA_ICQ",
-			"-global_quality", itoa(crf + 3), "-look_ahead", "1",
-			"-preset", presetOr(s.Preset, "medium"), "-profile:v", "main10"}
-	case s.Backend == QSV && s.Codec == AV1:
-		video = []string{"-c:v", "av1_qsv", "-rc_mode", "ICQ",
-			"-global_quality", itoa(crf + 3), "-async_depth", "4",
-			"-preset", presetOr(s.Preset, "medium")}
-	case s.Backend == VAAPI && s.Codec == HEVC:
-		video = []string{"-c:v", "hevc_vaapi", "-rc_mode", "CQP",
-			"-qp", itoa(crf + 2), "-bf", "2", "-profile:v", "main10"}
-	case s.Backend == VAAPI && s.Codec == AV1:
-		video = []string{"-c:v", "av1_vaapi", "-rc_mode", "CQP", "-qp", itoa(crf + 2)}
-	default:
-		return nil, nil, fmt.Errorf("unsupported backend/codec %s/%s", s.Backend, s.Codec)
+	case b == SW && c == AV1:
+		return []string{"10", "8", "6", "5", "4"}[i]
+	case b == NVENC:
+		return []string{"p3", "p4", "p5", "p6", "p7"}[i]
+	case b == VAAPI:
+		return "" // VA-API has no preset
 	}
-
-	var decodeHW, initHW []string
-	var filterHW, filterFB []string
-	if s.Backend == QSV {
-		initHW = []string{"-init_hw_device", hw, "-init_hw_device", "qsv=qsv@va", "-filter_hw_device", "qsv"}
-		decodeHW = []string{"-hwaccel", "qsv", "-hwaccel_output_format", "qsv"}
-		filterHW = []string{fmt.Sprintf("vpp_qsv=format=p010le%s", scalePart)}
-		filterFB = []string{"format=nv12|p010le", "hwupload=extra_hw_frames=64",
-			fmt.Sprintf("vpp_qsv=format=p010le%s", scalePart)}
-	} else {
-		initHW = []string{"-init_hw_device", hw, "-filter_hw_device", "va"}
-		decodeHW = []string{"-hwaccel", "vaapi", "-hwaccel_output_format", "vaapi"}
-		filterHW = []string{fmt.Sprintf("scale_vaapi=format=p010le%s", scalePart)}
-		filterFB = []string{"format=p010le", "hwupload=extra_hw_frames=32",
-			fmt.Sprintf("scale_vaapi=format=p010le%s", scalePart)}
-	}
-
-	primary, err := assemble(s, src, out, container, initHW, mustConcat(decodeHW, filterHW), video, mux)
-	if err != nil {
-		return nil, nil, err
-	}
-	primary.HWDecode = true
-	fb, err := assemble(s, src, out, container, initHW, filterFB, video, mux)
-	if err != nil {
-		return nil, nil, err
-	}
-	return primary, fb, nil
+	return Speeds[i] // x265 + QSV share names
 }
 
-func mustConcat(a, b []string) []string {
-	if len(a) == 0 {
-		return b
+// colorArgs tags the output with the source's colour description so
+// HDR10/HLG signalling survives (unless tone-mapped to SDR).
+func colorArgs(s Settings, v *media.Stream) []string {
+	if s.TonemapHDR && v.HDRType() != "" {
+		return []string{"-color_primaries", "bt709", "-color_trc", "bt709", "-colorspace", "bt709"}
 	}
-	return append(append([]string{}, a...), b...)
+	var a []string
+	if v.ColorPrimaries != "" && v.ColorPrimaries != "unknown" {
+		a = append(a, "-color_primaries", v.ColorPrimaries)
+	}
+	if v.ColorTransfer != "" && v.ColorTransfer != "unknown" {
+		a = append(a, "-color_trc", v.ColorTransfer)
+	}
+	if v.ColorSpace != "" && v.ColorSpace != "unknown" {
+		a = append(a, "-colorspace", v.ColorSpace)
+	}
+	return a
 }
 
-// buildNVENC builds CUDA pipelines.
-func buildNVENC(s Settings, src *media.Probe, out, container string, scale bool, mux []string) (*CmdSpec, *CmdSpec, error) {
-	if s.TonemapHDR {
-		return nil, nil, fmt.Errorf("HDR tone-mapping requires the software backend")
-	}
-	crf := CRFForQuality(s.Quality)
-	video := []string{"-c:v", string(s.Codec) + "_nvenc", "-preset", presetOr(s.Preset, "p5"),
-		"-tune", "hq", "-rc", "vbr", "-cq", itoa(crf + 4), "-b:v", "0",
-		"-spatial-aq", "1", "-temporal-aq", "1", "-pix_fmt", "p010le"}
-	var filterHW, filterFB []string
-	if scale {
-		filterHW = []string{fmt.Sprintf("scale_cuda=-2:%d:format=p010le", s.MaxHeight)}
-		filterFB = []string{fmt.Sprintf("format=p010le,hwupload_cuda,scale_cuda=-2:%d", s.MaxHeight)}
-	}
-	primary, err := assemble(s, src, out, container, nil, mustConcat([]string{"-hwaccel", "cuda",
-		"-hwaccel_output_format", "cuda"}, filterHW), video, mux)
-	if err != nil {
-		return nil, nil, err
-	}
-	primary.HWDecode = true
-	fb, err := assemble(s, src, out, container, nil, filterFB, video, mux)
-	if err != nil {
-		return nil, nil, err
-	}
-	return primary, fb, nil
+// streamPlan is the concrete mapping + per-output-stream codec args.
+type streamPlan struct {
+	maps   []string
+	codecs []string
+	nAudio int
+	nSubs  int
 }
 
-// assemble composes the common scaffold.
-func assemble(s Settings, src *media.Probe, out, container string, preInput []string,
-	filters, video, mux []string) (*CmdSpec, error) {
-
-	args := []string{"-hide_banner", "-loglevel", "warning", "-nostdin",
-		"-progress", "pipe:1", "-nostats", "-stats_period", "0.5"}
-	args = append(args, preInput...)
-	args = append(args, "-i", src.Format.Filename)
-
-	// Stream mapping: first video, all audio, subtitles (optional),
-	// attachments for mkv (fonts for ASS subs).
-	args = append(args, "-map", "0:v:0", "-map", "0:a", "-map", "0:s?")
-	if container == "mkv" {
-		args = append(args, "-map", "0:t?")
+// AudioDecision resolves what happens to one source audio stream.
+func AudioDecision(s Settings, a media.Stream, container string) AudioTrack {
+	for _, t := range s.Audio {
+		if t.Index == a.Index {
+			if t.Action == "" {
+				t.Action = "copy"
+			}
+			return t
+		}
 	}
-	if len(filters) > 0 {
-		args = append(args, "-vf", strings.Join(filters, ","))
+	if a.IsPCM() && s.AudioPCMTarget != "copy" {
+		return AudioTrack{Index: a.Index, Action: "convert", Codec: s.AudioPCMTarget}
 	}
-	args = append(args, video...)
+	if container == "mp4" && !isMP4AudioSafe(a.CodecName) {
+		return AudioTrack{Index: a.Index, Action: "convert", Codec: "aac"}
+	}
+	return AudioTrack{Index: a.Index, Action: "copy"}
+}
 
-	// Audio: copy by default, per-output-stream override for PCM.
-	args = append(args, "-c:a", "copy")
-	pcmTarget := s.AudioPCMTarget
-	if pcmTarget == "" || pcmTarget == "copy" {
-		pcmTarget = "flac"
+func subKept(s Settings, sub media.Stream, container string) bool {
+	for _, t := range s.Subs {
+		if t.Index == sub.Index && t.Action == "drop" {
+			return false
+		}
 	}
-	for ord, a := range src.Audios() {
-		if a.IsPCM() {
-			switch pcmTarget {
-			case "flac":
-				args = append(args, "-c:a:"+itoa(ord), "flac")
-			case "aac":
-				args = append(args, "-c:a:"+itoa(ord), "aac",
-					"-b:a:"+itoa(ord), itoa(channelsBitrate(a.Channels, 96000)))
-			case "eac3":
-				args = append(args, "-c:a:"+itoa(ord), "eac3",
-					"-b:a:"+itoa(ord), itoa(clampInt(channelsBitrate(a.Channels, 128000), 96000, 1536000)))
+	return container != "mp4" || sub.IsTextSubtitle()
+}
+
+func planStreams(s Settings, src *media.Probe, container string, preview bool) streamPlan {
+	p := streamPlan{}
+	v := src.Video()
+	p.maps = append(p.maps, "-map", fmt.Sprintf("0:%d", v.Index))
+
+	if preview {
+		// Browser sample: first non-dropped audio → AAC stereo, no subs.
+		for _, a := range src.Audios() {
+			if AudioDecision(s, a, container).Action != "drop" {
+				p.maps = append(p.maps, "-map", fmt.Sprintf("0:%d", a.Index))
+				p.codecs = append(p.codecs, "-c:a", "aac", "-b:a", "192k", "-ac", "2")
+				p.nAudio = 1
+				break
 			}
 		}
+		p.codecs = append(p.codecs, "-sn", "-dn")
+		return p
 	}
 
-	// Subtitles: copy in mkv; mov_text in mp4 (text subs only — bitmap
-	// subs force mkv in ChooseContainer).
-	if container == "mp4" {
-		args = append(args, "-c:s", "mov_text")
-		if s.Codec == HEVC {
-			args = append(args, "-tag:v", "hvc1")
+	for _, a := range src.Audios() {
+		d := AudioDecision(s, a, container)
+		if d.Action == "drop" {
+			continue
 		}
-	} else {
-		args = append(args, "-c:s", "copy")
+		k := itoa(p.nAudio)
+		p.maps = append(p.maps, "-map", fmt.Sprintf("0:%d", a.Index))
+		if d.Action == "copy" {
+			p.codecs = append(p.codecs, "-c:a:"+k, "copy")
+		} else {
+			codec := d.Codec
+			if codec == "" {
+				codec = "flac"
+			}
+			if codec == "opus" {
+				codec = "libopus"
+			}
+			p.codecs = append(p.codecs, "-c:a:"+k, codec)
+			ch := a.Channels
+			if d.Channels > 0 {
+				ch = d.Channels
+				p.codecs = append(p.codecs, "-ac:a:"+k, itoa(d.Channels))
+			}
+			if codec != "flac" {
+				br := d.Bitrate
+				if br <= 0 {
+					br = defaultAudioKbps(codec, ch)
+				}
+				p.codecs = append(p.codecs, "-b:a:"+k, fmt.Sprintf("%dk", br))
+			}
+		}
+		p.nAudio++
 	}
 
-	args = append(args, mux...)
-	args = append(args, out)
-	return &CmdSpec{Args: args, SemKey: string(s.Backend)}, nil
+	for _, sub := range src.Subtitles() {
+		if !subKept(s, sub, container) {
+			continue
+		}
+		p.maps = append(p.maps, "-map", fmt.Sprintf("0:%d", sub.Index))
+		p.nSubs++
+	}
+	if p.nSubs > 0 {
+		if container == "mp4" {
+			p.codecs = append(p.codecs, "-c:s", "mov_text")
+		} else {
+			p.codecs = append(p.codecs, "-c:s", "copy")
+		}
+	}
+	if container == "mkv" {
+		p.maps = append(p.maps, "-map", "0:t?")
+		p.codecs = append(p.codecs, "-c:t", "copy")
+	}
+	return p
 }
 
-func channelsBitrate(ch, perCh int) int {
+// defaultAudioKbps picks a transparent bitrate by codec and channels.
+func defaultAudioKbps(codec string, ch int) int {
 	if ch <= 0 {
 		ch = 2
 	}
-	br := ch * perCh
-	if br < 192000 {
-		br = 192000
+	per := map[string]int{"aac": 96, "libopus": 64, "eac3": 112}[codec]
+	if per == 0 {
+		per = 96
+	}
+	br := per * ch
+	if br < 128 {
+		br = 128
+	}
+	if codec == "eac3" && br > 1024 {
+		br = 1024
 	}
 	return br
 }
 
-func clampInt(v, lo, hi int) int {
-	if v < lo {
-		return lo
-	}
-	if v > hi {
-		return hi
-	}
-	return v
-}
-
-// muxArgs returns muxer args for the chosen container.
+// muxArgs returns container-level args.
 func muxArgs(container string) []string {
 	if container == "mp4" {
-		return []string{"-map_metadata", "0", "-map_chapters", "0",
-			"-movflags", "+faststart", "-f", "mp4"}
+		return []string{"-map_metadata", "0", "-map_chapters", "0", "-movflags", "+faststart", "-f", "mp4"}
 	}
-	return []string{"-map_metadata", "0", "-map_chapters", "0",
-		"-default_mode", "infer_no_subs", "-f", "matroska"}
+	return []string{"-map_metadata", "0", "-map_chapters", "0", "-default_mode", "infer_no_subs", "-f", "matroska"}
 }
 
-// ChooseContainer resolves the "auto" policy: keep mp4 only when every
-// stream is mp4-compatible, else mkv.
+// ChooseContainer resolves "auto". With PreferMP4 (Apple-friendly: HEVC
+// tagged hvc1, moov atom first) any source goes to MP4 when every kept
+// track fits; otherwise the source container is kept (MP4 only when the
+// source is MP4). Bitmap subs, styled ASS subs and copied TrueHD/DTS/FLAC
+// audio force MKV rather than being silently degraded.
 func ChooseContainer(s Settings, src *media.Probe) (string, error) {
+	if src.Video() == nil {
+		return "", fmt.Errorf("no video stream")
+	}
 	switch s.Container {
 	case "mkv":
 		return "mkv", nil
 	case "mp4":
-		for _, sub := range src.Subtitles() {
-			if !sub.IsTextSubtitle() {
-				return "mkv", nil // silently fall back rather than fail
-			}
-		}
-		return "mp4", nil
+		return "mp4", nil // incompatible streams are converted/dropped by planStreams
 	}
-	// auto
-	if src.Video() == nil {
-		return "", fmt.Errorf("no video stream")
+	name := strings.ToLower(src.Format.Filename)
+	srcMP4 := strings.HasSuffix(name, ".mp4") || strings.HasSuffix(name, ".m4v")
+	if !srcMP4 && !s.PreferMP4 {
+		return "mkv", nil
 	}
-	if src.Format.FormatName != "" && strings.Contains(src.Format.FormatName, "mp4") &&
-		strings.HasSuffix(strings.ToLower(src.Format.Filename), ".mp4") &&
-		src.Video().CodecName != "" && isMP4VideoSafe(src.Video().CodecName) {
-		for _, sub := range src.Subtitles() {
-			if !sub.IsTextSubtitle() {
-				return "mkv", nil
-			}
-		}
-		for _, a := range src.Audios() {
-			if !isMP4AudioSafe(a.CodecName) && !a.IsPCM() {
-				return "mkv", nil
-			}
-		}
-		return "mp4", nil
+	if !fitsMP4(s, src) {
+		return "mkv", nil
 	}
-	return "mkv", nil
+	return "mp4", nil
 }
 
-func isMP4VideoSafe(codec string) bool {
-	switch codec {
-	case "h264", "hevc", "av1":
-		return true
+func fitsMP4(s Settings, src *media.Probe) bool {
+	for _, sub := range src.Subtitles() {
+		if !subKept(s, sub, "mkv") {
+			continue
+		}
+		switch sub.CodecName {
+		case "subrip", "srt", "mov_text", "webvtt", "text":
+		default:
+			return false // PGS/VobSub images or styled ASS
+		}
 	}
-	return false
+	for _, a := range src.Audios() {
+		d := AudioDecision(s, a, "mkv")
+		if d.Action == "copy" && !isMP4AudioSafe(a.CodecName) {
+			return false
+		}
+		if d.Action == "convert" && d.Codec == "flac" {
+			return false
+		}
+	}
+	return true
 }
 
 func isMP4AudioSafe(codec string) bool {
 	switch codec {
-	case "aac", "mp3", "ac3", "eac3", "alac":
+	case "aac", "mp3", "ac3", "eac3", "alac", "opus":
 		return true
 	}
 	return false
 }
 
-func presetOr(p, def string) string {
-	if p == "" {
-		return def
+// SplitArgs splits user-supplied extra args with simple shell quoting.
+func SplitArgs(s string) []string {
+	var out []string
+	var cur strings.Builder
+	var quote rune
+	has := false
+	for _, r := range s {
+		switch {
+		case quote != 0:
+			if r == quote {
+				quote = 0
+			} else {
+				cur.WriteRune(r)
+			}
+		case r == '"' || r == '\'':
+			quote, has = r, true
+		case r == ' ' || r == '\t' || r == '\n':
+			if has {
+				out = append(out, cur.String())
+				cur.Reset()
+				has = false
+			}
+		default:
+			cur.WriteRune(r)
+			has = true
+		}
 	}
-	return p
+	if has {
+		out = append(out, cur.String())
+	}
+	return out
+}
+
+// CommandString renders argv as a copy-pasteable shell command.
+func CommandString(args []string) string {
+	parts := []string{FFmpeg}
+	for _, a := range args {
+		if a == "" || strings.ContainsAny(a, " '\"$`\\|&;()<>*?[]#~!") {
+			a = "'" + strings.ReplaceAll(a, "'", `'\''`) + "'"
+		}
+		parts = append(parts, a)
+	}
+	return strings.Join(parts, " ")
 }
 
 func itoa(i int) string { return fmt.Sprintf("%d", i) }

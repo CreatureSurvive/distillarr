@@ -16,9 +16,11 @@ import (
 
 	"mediatrans/internal/api"
 	"mediatrans/internal/config"
+	"mediatrans/internal/encode"
 	"mediatrans/internal/jellyfin"
 	"mediatrans/internal/jobs"
 	"mediatrans/internal/preview"
+	"mediatrans/internal/recs"
 	"mediatrans/internal/replace"
 	"mediatrans/internal/scan"
 	"mediatrans/internal/store"
@@ -54,6 +56,12 @@ func main() {
 	sc := scan.New(st, cfg)
 	eng := jobs.New(st, cfg, sc)
 
+	// Recommendations resolve "auto" against probed hardware, learn from
+	// real results, and use Jellyfin genres (animation) when synced.
+	recs.InitCalibration(st)
+	recs.ResolveBackend = func(pref string, c encode.Codec) encode.Backend { return eng.ResolveFor(pref, c) }
+	recs.Genres = st.GenresFor
+
 	// Preview notify is bound to the hub once the API server exists.
 	var hubNotify func(string, any)
 	pv := preview.NewManager(prevRoot, eng.AcquireSem,
@@ -64,6 +72,12 @@ func main() {
 		})
 	srv := api.NewServer(st, cfg, sc, eng, pv, webFS())
 	hubNotify = srv.Hub().Broadcast
+	pv.OnMeasured = func(fileID int64, s encode.Settings, ratio float64) {
+		if f, err := st.GetFile(fileID); err == nil && f != nil {
+			recs.RecordObservation(f, s, ratio)
+			sc.RefreshRecsSoon()
+		}
+	}
 
 	// Jellyfin post-replace hook: refresh the item and restore its
 	// DateCreated from the original file's birth time (Linux can't
@@ -93,6 +107,12 @@ func main() {
 
 	eng.Start()
 	defer eng.Stop()
+	// Recommendations depend on settings + hardware + calibration;
+	// recompute once at boot so cached ones never go stale.
+	go func() {
+		time.Sleep(8 * time.Second)
+		sc.RefreshRecs()
+	}()
 
 	// First boot: kick an incremental scan shortly after start.
 	go func() {

@@ -3,7 +3,6 @@ package store
 import (
 	"database/sql"
 	"encoding/json"
-	"fmt"
 	"strings"
 )
 
@@ -57,26 +56,28 @@ type File struct {
 	Missing     bool   `json:"missing"`
 	ScannedAt   string `json:"scanned_at"`
 	UpdatedAt   string `json:"updated_at"`
+	Interlaced  bool   `json:"interlaced"`
 }
 
 const fileCols = `id, path, library, title, year, season, episode, ep_title, quality_tag,
 	size, mtime_ns, container, duration, video_codec, width, height, bit_depth, fps, hdr,
 	video_bitrate, total_bitrate, audio_json, sub_count, sidecars_json, transcode_score,
-	rec_json, missing, scanned_at, updated_at`
+	rec_json, missing, scanned_at, updated_at, interlaced`
 
 func scanFile(row interface{ Scan(...any) error }) (*File, error) {
 	f := &File{}
 	var audio, sidecars string
-	var missing int
+	var missing, interlaced int
 	err := row.Scan(&f.ID, &f.Path, &f.Library, &f.Title, &f.Year, &f.Season, &f.Episode,
 		&f.EpTitle, &f.QualityTag, &f.Size, &f.MtimeNS, &f.Container, &f.Duration,
 		&f.VideoCodec, &f.Width, &f.Height, &f.BitDepth, &f.FPS, &f.HDR,
 		&f.VideoBitrate, &f.TotalBitrate, &audio, &f.SubCount, &sidecars,
-		&f.TranscodeScore, &f.RecJSON, &missing, &f.ScannedAt, &f.UpdatedAt)
+		&f.TranscodeScore, &f.RecJSON, &missing, &f.ScannedAt, &f.UpdatedAt, &interlaced)
 	if err != nil {
 		return nil, err
 	}
 	f.Missing = missing != 0
+	f.Interlaced = interlaced != 0
 	_ = json.Unmarshal([]byte(audio), &f.Audio)
 	if f.Audio == nil {
 		f.Audio = []AudioStream{}
@@ -141,6 +142,9 @@ func (s *Store) UpsertFile(f *File, streams []Stream) error {
 		}
 	}
 	f.ID = id
+	if _, err := tx.Exec(`UPDATE files SET interlaced=? WHERE id=?`, b2i(f.Interlaced), id); err != nil {
+		return err
+	}
 	for i := range streams {
 		streams[i].FileID = id
 		if _, err := tx.Exec(`INSERT INTO streams(file_id, kind, stream_index, codec, lang, title,
@@ -242,7 +246,7 @@ type FileFilter struct {
 	Library   string // movies | tvshows | ""
 	Title     string // LIKE substring
 	Show      string // exact show title (tv)
-	Season    int    // with Show
+	Season    int    // with Show; -1 = every season
 	Codec     string
 	HDR       string
 	MinHeight int
@@ -252,45 +256,90 @@ type FileFilter struct {
 	SeriesKey string // title for grouping
 }
 
-// ListFiles returns files matching filter, keyset-paginated by
-// (title COLLATE NOCASE, id) unless Episode ordering applies (shows),
-// in which case it pages by (season, episode, id).
-func (s *Store) ListFiles(f FileFilter, cursorTitle string, cursorID, limit int) ([]*File, bool, error) {
+// Sort orders accepted by ListFiles.
+var sortSQL = map[string]string{
+	"title":   "title COLLATE NOCASE ASC, year ASC, season ASC, episode ASC, id ASC",
+	"size":    "size DESC, id ASC",
+	"savings": "(CASE WHEN json_extract(rec_json,'$.worth') THEN size - json_extract(rec_json,'$.est_out_bytes') ELSE 0 END) DESC, size DESC, id ASC",
+	"bitrate": "video_bitrate DESC, id ASC",
+	"added":   "mtime_ns DESC, id ASC",
+	"episode": "season ASC, episode ASC, id ASC",
+}
+
+// ListFiles returns one page of files matching filter plus the total.
+func (s *Store) ListFiles(f FileFilter, sort string, offset, limit int) ([]*File, int, error) {
 	where, args := f.where()
-	orderBy := "title COLLATE NOCASE ASC, id ASC"
-	if f.Show != "" {
-		orderBy = "season ASC, episode ASC, id ASC"
-	}
-	if cursorID > 0 {
+	orderBy, ok := sortSQL[sort]
+	if !ok {
+		orderBy = sortSQL["title"]
 		if f.Show != "" {
-			return nil, false, fmt.Errorf("cursor unsupported for episode lists")
+			orderBy = sortSQL["episode"]
 		}
-		where += " AND (title COLLATE NOCASE > ? OR (title COLLATE NOCASE = ? AND id > ?))"
-		args = append(args, cursorTitle, cursorTitle, cursorID)
 	}
-	if limit <= 0 || limit > 200 {
-		limit = 100
+	if limit <= 0 || limit > 2000 {
+		limit = 60
+	}
+	if offset < 0 {
+		offset = 0
+	}
+	var total int
+	if err := s.dbR.QueryRow(`SELECT COUNT(*) FROM files WHERE `+where, args...).Scan(&total); err != nil {
+		return nil, 0, err
 	}
 	rows, err := s.dbR.Query(`SELECT `+fileCols+` FROM files WHERE `+where+`
-		ORDER BY `+orderBy+` LIMIT ?`, append(args, limit+1)...)
+		ORDER BY `+orderBy+` LIMIT ? OFFSET ?`, append(args, limit, offset)...)
 	if err != nil {
-		return nil, false, err
+		return nil, 0, err
 	}
 	defer rows.Close()
 	out := []*File{}
 	for rows.Next() {
 		fl, err := scanFile(rows)
 		if err != nil {
-			return nil, false, err
+			return nil, 0, err
 		}
 		out = append(out, fl)
 	}
-	more := false
-	if len(out) > limit {
-		out = out[:limit]
-		more = true
+	return out, total, rows.Err()
+}
+
+// EachFile streams every present file (recommendation refresh).
+func (s *Store) EachFile(fn func(*File) error) error {
+	rows, err := s.dbR.Query(`SELECT ` + fileCols + ` FROM files WHERE missing=0`)
+	if err != nil {
+		return err
 	}
-	return out, more, rows.Err()
+	var all []*File
+	for rows.Next() {
+		fl, err := scanFile(rows)
+		if err != nil {
+			rows.Close()
+			return err
+		}
+		all = append(all, fl)
+	}
+	rows.Close()
+	for _, fl := range all {
+		if err := fn(fl); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// UpdateRecs writes refreshed recommendation caches in one transaction.
+func (s *Store) UpdateRecs(recs map[int64][2]any) error {
+	tx, err := s.dbW.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	for id, v := range recs {
+		if _, err := tx.Exec(`UPDATE files SET transcode_score=?, rec_json=? WHERE id=?`, v[0], v[1], id); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
 }
 
 func (f FileFilter) where() (string, []any) {
@@ -305,8 +354,12 @@ func (f FileFilter) where() (string, []any) {
 		a = append(a, "%"+escapeLike(f.Title)+"%")
 	}
 	if f.Show != "" {
-		w = append(w, "title=? AND season=?")
-		a = append(a, f.Show, f.Season)
+		w = append(w, "library='tvshows' AND title=? COLLATE NOCASE")
+		a = append(a, f.Show)
+		if f.Season >= 0 {
+			w = append(w, "season=?")
+			a = append(a, f.Season)
+		}
 	}
 	if f.Codec != "" {
 		w = append(w, "video_codec=?")
@@ -405,33 +458,54 @@ type Stream struct {
 
 // ---- TV aggregation ----
 
-// Series is an aggregated show/season rollup for browsing and
-// season-level recommendations.
+const worthExpr = `CASE WHEN json_extract(f.rec_json,'$.worth') THEN 1 ELSE 0 END`
+const savedExpr = `CASE WHEN json_extract(f.rec_json,'$.worth') THEN f.size - json_extract(f.rec_json,'$.est_out_bytes') ELSE 0 END`
+
+// Series is an aggregated show rollup for browsing.
 type Series struct {
-	Title string `json:"title"`
-	Year  int    `json:"year"`
-	Episodes int `json:"episodes"`
-	TotalSize int64 `json:"total_size"`
-	AvgBitrate int64 `json:"avg_bitrate"`
-	Codecs string `json:"codecs"`     // distinct, comma-joined
-	AvgScore float64 `json:"avg_score"`
+	Title       string `json:"title"`
+	Year        int    `json:"year"`
+	Episodes    int    `json:"episodes"`
+	Seasons     int    `json:"seasons"`
+	TotalSize   int64  `json:"total_size"`
+	AvgBitrate  int64  `json:"avg_bitrate"`
+	Codecs      string `json:"codecs"`
+	Height      int    `json:"height"`
+	WorthCount  int    `json:"worth_count"`
+	Reclaimable int64  `json:"reclaimable"`
+	SeriesID    string `json:"series_id,omitempty"`
+	Overview    string `json:"overview,omitempty"`
+}
+
+var seriesSort = map[string]string{
+	"title":       "f.title COLLATE NOCASE",
+	"reclaimable": "11 DESC, f.title COLLATE NOCASE",
+	"size":        "6 DESC, f.title COLLATE NOCASE",
+	"episodes":    "4 DESC, f.title COLLATE NOCASE",
 }
 
 // ListSeries returns per-show aggregates for the tvshows library.
-func (s *Store) ListSeries(titleLike string, limit int) ([]Series, error) {
-	where, args := "missing=0 AND library='tvshows'", []any{}
+func (s *Store) ListSeries(titleLike, sort string, onlyWorth bool) ([]Series, error) {
+	where, args := "f.missing=0 AND f.library='tvshows'", []any{}
 	if titleLike != "" {
-		where += " AND title LIKE ? COLLATE NOCASE"
+		where += " AND f.title LIKE ? COLLATE NOCASE"
 		args = append(args, "%"+escapeLike(titleLike)+"%")
 	}
-	if limit <= 0 {
-		limit = 500
+	order, ok := seriesSort[sort]
+	if !ok {
+		order = seriesSort["title"]
 	}
-	rows, err := s.dbR.Query(`SELECT title, MAX(year), COUNT(*), SUM(size),
-		CAST(AVG(CASE WHEN duration>0 THEN video_bitrate ELSE NULL END) AS INTEGER),
-		GROUP_CONCAT(DISTINCT video_codec), CAST(AVG(transcode_score) AS REAL)
-		FROM files WHERE `+where+` GROUP BY title COLLATE NOCASE
-		ORDER BY title COLLATE NOCASE LIMIT ?`, append(args, limit)...)
+	having := ""
+	if onlyWorth {
+		having = " HAVING SUM(" + worthExpr + ") > 0"
+	}
+	rows, err := s.dbR.Query(`SELECT f.title, MAX(f.year), COUNT(DISTINCT f.season), COUNT(*),
+		COALESCE(MAX(j.series_id),''), SUM(f.size),
+		CAST(COALESCE(AVG(NULLIF(f.video_bitrate,0)),0) AS INTEGER),
+		COALESCE(GROUP_CONCAT(DISTINCT f.video_codec),''), MAX(f.height),
+		SUM(`+worthExpr+`), CAST(SUM(`+savedExpr+`) AS INTEGER)
+		FROM files f LEFT JOIN jellyfin j ON j.path=f.path
+		WHERE `+where+` GROUP BY f.title COLLATE NOCASE`+having+` ORDER BY `+order, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -439,12 +513,10 @@ func (s *Store) ListSeries(titleLike string, limit int) ([]Series, error) {
 	out := []Series{}
 	for rows.Next() {
 		var se Series
-		var avg sql.NullFloat64
-		if err := rows.Scan(&se.Title, &se.Year, &se.Episodes, &se.TotalSize, &se.AvgBitrate,
-			&se.Codecs, &avg); err != nil {
+		if err := rows.Scan(&se.Title, &se.Year, &se.Seasons, &se.Episodes, &se.SeriesID,
+			&se.TotalSize, &se.AvgBitrate, &se.Codecs, &se.Height, &se.WorthCount, &se.Reclaimable); err != nil {
 			return nil, err
 		}
-		se.AvgScore = avg.Float64
 		out = append(out, se)
 	}
 	return out, rows.Err()
@@ -452,21 +524,26 @@ func (s *Store) ListSeries(titleLike string, limit int) ([]Series, error) {
 
 // SeasonStat is one season of a show.
 type SeasonStat struct {
-	Season int `json:"season"`
-	Episodes int `json:"episodes"`
-	TotalSize int64 `json:"total_size"`
-	AvgBitrate int64 `json:"avg_bitrate"`
-	AvgScore float64 `json:"avg_score"`
-	Height int `json:"height"`
+	Season      int    `json:"season"`
+	Episodes    int    `json:"episodes"`
+	TotalSize   int64  `json:"total_size"`
+	AvgBitrate  int64  `json:"avg_bitrate"`
+	Height      int    `json:"height"`
+	Codecs      string `json:"codecs"`
+	WorthCount  int    `json:"worth_count"`
+	Reclaimable int64  `json:"reclaimable"`
+	SeasonID    string `json:"season_id,omitempty"`
 }
 
 // ListSeasons returns per-season aggregates for a show.
 func (s *Store) ListSeasons(show string) ([]SeasonStat, error) {
-	rows, err := s.dbR.Query(`SELECT season, COUNT(*), SUM(size),
-		CAST(AVG(CASE WHEN duration>0 THEN video_bitrate ELSE NULL END) AS INTEGER),
-		CAST(AVG(transcode_score) AS REAL), CAST(AVG(height) AS INTEGER)
-		FROM files WHERE missing=0 AND library='tvshows' AND title=? COLLATE NOCASE
-		GROUP BY season ORDER BY season`, show)
+	rows, err := s.dbR.Query(`SELECT f.season, COUNT(*), SUM(f.size),
+		CAST(COALESCE(AVG(NULLIF(f.video_bitrate,0)),0) AS INTEGER), MAX(f.height),
+		COALESCE(GROUP_CONCAT(DISTINCT f.video_codec),''),
+		SUM(`+worthExpr+`), CAST(SUM(`+savedExpr+`) AS INTEGER), COALESCE(MAX(j.season_id),'')
+		FROM files f LEFT JOIN jellyfin j ON j.path=f.path
+		WHERE f.missing=0 AND f.library='tvshows' AND f.title=? COLLATE NOCASE
+		GROUP BY f.season ORDER BY f.season`, show)
 	if err != nil {
 		return nil, err
 	}
@@ -474,11 +551,10 @@ func (s *Store) ListSeasons(show string) ([]SeasonStat, error) {
 	out := []SeasonStat{}
 	for rows.Next() {
 		var se SeasonStat
-		var avg sql.NullFloat64
-		if err := rows.Scan(&se.Season, &se.Episodes, &se.TotalSize, &se.AvgBitrate, &avg, &se.Height); err != nil {
+		if err := rows.Scan(&se.Season, &se.Episodes, &se.TotalSize, &se.AvgBitrate, &se.Height,
+			&se.Codecs, &se.WorthCount, &se.Reclaimable, &se.SeasonID); err != nil {
 			return nil, err
 		}
-		se.AvgScore = avg.Float64
 		out = append(out, se)
 	}
 	return out, rows.Err()

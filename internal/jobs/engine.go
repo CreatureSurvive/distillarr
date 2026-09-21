@@ -255,42 +255,53 @@ func (e *Engine) runJob(j *store.Job, resume bool) {
 	}
 	stJSON, _ := json.Marshal(st)
 
-	var tempPath string
-	var container string
-
-	if resume {
-		// Continue from an existing temp (verify/replace phases).
-		tempPath = j.TempPath
-		container = strings.TrimSuffix(filepath.Ext(strings.TrimSuffix(tempPath, ".tmp")), ".")
-	} else {
-		// Resolve backend + node against live hardware.
-		rep := e.Report()
-		backend := resolveBackend(rep, settings, j.Backend)
-		settings.Backend = backend
-		if rep != nil {
-			settings.RenderNode = hwprobe.NodeFor(rep, backend, settings.Codec)
+	// Original timestamps: prefer the snapshot taken when the job first
+	// started (a resumed job must not re-read a half-touched source).
+	if j.SrcStatJSON != "" {
+		var saved replace.SrcStat
+		if json.Unmarshal([]byte(j.SrcStatJSON), &saved) == nil && saved.MtimeSec > 0 {
+			st = &saved
+			stJSON = []byte(j.SrcStatJSON)
 		}
-		container, err = encode.ChooseContainer(settings, src)
+	}
+
+	// Resolve backend + render node against live hardware, then build
+	// the exact plan (also used to verify stream counts on resume).
+	settings.Normalize()
+	rep := e.Report()
+	settings.Backend = e.resolveBackend(rep, settings, j.Backend)
+	if rep != nil && settings.Backend != encode.SW {
+		settings.RenderNode = hwprobe.NodeFor(rep, settings.Backend, settings.Codec)
+	}
+	tempPath := j.TempPath
+	if !resume || tempPath == "" {
+		c, err := encode.ChooseContainer(settings, src)
 		if err != nil {
 			e.fail(j, err.Error(), "")
 			return
 		}
-		tempPath = filepath.Join(filepath.Dir(j.SrcPath),
-			fmt.Sprintf(".mediatrans-%d.%s.tmp", j.ID, container))
+		tempPath = filepath.Join(filepath.Dir(j.SrcPath), fmt.Sprintf(".mediatrans-%d.%s.tmp", j.ID, c))
+	}
+	primary, fallback, err := encode.Build(settings, src, tempPath, nil)
+	if err != nil {
+		e.fail(j, err.Error(), "")
+		return
+	}
+	container := primary.Container
+	if !resume {
 		if err := e.st.SetJobTemp(j.ID, tempPath, string(stJSON)); err != nil {
 			log.Printf("jobs: set temp: %v", err)
 		}
+		_ = e.st.SetJobCmd(j.ID, encode.CommandString(primary.Args))
 		j.TempPath = tempPath
-	}
-
-	if !resume {
-		if serr := e.encode(ctx, j, settings, src, tempPath); serr != nil {
+		if serr := e.encode(ctx, j, primary, fallback, src); serr != nil {
 			if ctx.Err() != nil {
 				e.st.FinishJob(j.ID, store.StatusCanceled, 0, "canceled", "")
 				removeTemp(tempPath)
 				e.notify(EvJob, map[string]any{"id": j.ID, "status": store.StatusCanceled})
 				return
 			}
+			removeTemp(tempPath)
 			e.handleEncodeFailure(j, settings, serr)
 			return
 		}
@@ -299,27 +310,18 @@ func (e *Engine) runJob(j *store.Job, resume bool) {
 	// Verify.
 	e.st.UpdateJobStatus(j.ID, store.StatusVerifying, "")
 	e.notify(EvJob, map[string]any{"id": j.ID, "status": store.StatusVerifying})
-	wantSubs := len(src.Subtitles())
-	if container == "mp4" {
-		wantSubs = 0
-		for _, s := range src.Subtitles() {
-			if s.IsTextSubtitle() {
-				wantSubs++
-			}
-		}
-	}
+	v := src.Video()
 	vspec := replace.VerifySpec{
 		WantVideoCodec: string(settings.Codec),
-		Want10Bit:      !settings.TonemapHDR,
+		Want10Bit:      settings.BitDepth != 8,
 		SrcDuration:    src.DurationSec(),
-		SrcAudioCount:  len(src.Audios()),
-		WantSubCount:   wantSubs,
-		SrcSize:        j.SrcSize,
+		WantAudioCount: primary.ExpectAudio,
+		WantSubCount:   primary.ExpectSubs,
+		SrcSize:        st.Size,
+		Container:      container,
 	}
-	if j.SrcSize == 0 {
-		if fi, err := statSize(j.SrcPath); err == nil {
-			vspec.SrcSize = fi
-		}
+	if !settings.TonemapHDR && (v.HDRType() == "hdr10" || v.HDRType() == "hlg") {
+		vspec.WantTransfer = v.ColorTransfer
 	}
 	if _, verr := replace.Verify(ctx, tempPath, vspec); verr != nil {
 		e.fail(j, fmt.Sprintf("verification failed: %v", verr), "")
@@ -333,62 +335,84 @@ func (e *Engine) runJob(j *store.Job, resume bool) {
 	cfg := e.cfg.Get()
 	trashDir := ""
 	if cfg.TrashEnabled {
-		trashDir = "/config/trash"
+		trashDir = cfg.TrashDir
 	}
+	before, _ := e.st.GetFileByPath(j.SrcPath)
 
 	// Destination: the original path unless the container changed.
 	destPath := j.SrcPath
 	srcExt := strings.TrimPrefix(strings.ToLower(filepath.Ext(j.SrcPath)), ".")
-	if container != srcExt {
+	if container != srcExt && !(container == "mp4" && srcExt == "m4v") {
 		destPath = strings.TrimSuffix(j.SrcPath, filepath.Ext(j.SrcPath)) + "." + container
 	}
-	if err := replace.Replace(tempPath, j.SrcPath, destPath, st, trashDir); err != nil {
+	trashPath, err := replace.Replace(tempPath, j.SrcPath, destPath, st, trashDir)
+	if err != nil {
 		e.fail(j, fmt.Sprintf("replace: %v", err), "")
 		return
 	}
-	// External subs keep pairing under the new stem.
-	if destPath != j.SrcPath {
-		_ = replace.LinkSidecars(j.SrcPath, destPath)
+	if trashPath != "" {
+		_ = e.st.AddTrash(store.TrashItem{OrigPath: j.SrcPath, TrashPath: trashPath,
+			CurrentPath: destPath, Size: st.Size, JobID: j.ID})
 	}
+	// External subtitles pair by filename stem, which never changes (only
+	// the extension may), so sidecars keep working untouched.
+	_ = e.st.SetJobDest(j.ID, destPath)
 	newSize, _ := statSize(destPath)
+
+	// Feed the size model with what really happened.
+	if before != nil && before.VideoBitrate > 0 && before.Duration > 0 && noAudioChanges(settings, before) {
+		srcVideo := float64(before.VideoBitrate) * before.Duration / 8
+		outVideo := float64(newSize) - (float64(st.Size) - srcVideo)
+		if outVideo > 0 {
+			recs.RecordObservation(before, settings, outVideo/srcVideo)
+		}
+	}
 
 	e.st.FinishJob(j.ID, store.StatusDone, newSize, "", "")
 	e.notify(EvJob, map[string]any{"id": j.ID, "status": store.StatusDone, "output_size": newSize})
 
-	// Re-probe the library row for the new file.
 	if e.scan != nil {
 		_ = e.scan.ProbeSingle(destPath)
 		if destPath != j.SrcPath {
-			// The old name is gone; flag its row missing so a sweep
-			// removes it on the next pass.
 			_ = e.st.ClearOldPath(j.SrcPath)
 		}
+		e.scan.RefreshRecsSoon()
 	}
 	if e.OnReplaced != nil {
 		go e.OnReplaced(destPath, st)
 	}
 }
 
-// encode runs ffmpeg with fallback retry.
-func (e *Engine) encode(ctx context.Context, j *store.Job, s encode.Settings,
-	src *media.Probe, tempPath string) error {
-
-	primary, fallback, err := encode.Build(s, src, tempPath)
-	if err != nil {
-		return err
+// noAudioChanges reports whether audio was passed through untouched (so
+// the size delta is purely video and safe to learn from).
+func noAudioChanges(s encode.Settings, f *store.File) bool {
+	for _, t := range s.Audio {
+		if t.Action != "" && t.Action != "copy" {
+			return false
+		}
 	}
+	for _, a := range f.Audio {
+		if strings.HasPrefix(a.Codec, "pcm_") && s.AudioPCMTarget != "copy" {
+			return false
+		}
+	}
+	return true
+}
+
+// encode runs ffmpeg, retrying once with software decode on a
+// hardware-decode startup failure.
+func (e *Engine) encode(ctx context.Context, j *store.Job, primary, fallback *encode.CmdSpec, src *media.Probe) error {
 	release := e.AcquireSem(primary.SemKey)
 	defer release()
 
 	sawFrames := false
 	var lastPct float64
 	lastPersist := time.Now().Add(-time.Hour)
-
-	tail, runErr := encode.Runner(ctx, *primary, src.DurationSec(), func(p encode.Progress) {
+	onProgress := func(p encode.Progress) {
 		if p.Frame > 0 {
 			sawFrames = true
 		}
-		if p.Pct() >= lastPct+0.005 || p.Pct() == 1 { // ~0.5% steps
+		if p.Pct() >= lastPct+0.002 || p.Pct() == 1 {
 			lastPct = p.Pct()
 			e.notify(EvProgress, map[string]any{
 				"job_id": j.ID, "pct": p.Pct(), "fps": p.FPS,
@@ -400,27 +424,21 @@ func (e *Engine) encode(ctx context.Context, j *store.Job, s encode.Settings,
 			pj, _ := json.Marshal(p)
 			_ = e.st.SetJobProgress(j.ID, string(pj))
 		}
-	})
-
-	// One software-decode retry for hardware-ish startup failures.
-	if runErr != nil && fallback != nil && encode.LooksLikeHWFailure(tail.String(), sawFrames) {
-		log.Printf("jobs: %d: hw decode failed (%v); retrying with software decode", j.ID, runErr)
-		e.notify(EvJob, map[string]any{"id": j.ID, "status": "running", "note": "retrying with software decode"})
-		sawFrames = false
-		tail, runErr = encode.Runner(ctx, *fallback, src.DurationSec(), func(p encode.Progress) {
-			if p.Frame > 0 {
-				sawFrames = true
-			}
-			e.notify(EvProgress, map[string]any{
-				"job_id": j.ID, "pct": p.Pct(), "fps": p.FPS,
-				"speed": p.Speed, "eta_sec": p.ETA(), "size": p.TotalSize,
-			})
-		})
 	}
 
+	tail, runErr := encode.Runner(ctx, *primary, src.DurationSec(), onProgress)
+	if runErr != nil && ctx.Err() == nil && fallback != nil && encode.LooksLikeHWFailure(tail.String(), sawFrames) {
+		log.Printf("jobs: %d: hw decode failed (%v); retrying with software decode", j.ID, runErr)
+		e.notify(EvJob, map[string]any{"id": j.ID, "status": "running", "note": "hardware decode failed, using software decode"})
+		sawFrames, lastPct = false, 0
+		_ = e.st.SetJobCmd(j.ID, encode.CommandString(fallback.Args))
+		tail, runErr = encode.Runner(ctx, *fallback, src.DurationSec(), onProgress)
+	}
 	if runErr != nil {
-		e.noteHWFailure(primary.SemKey)
-		return fmt.Errorf("ffmpeg: %v — %s", runErr, lastLines(tail.String(), 3))
+		if ctx.Err() == nil {
+			e.noteHWFailure(primary.SemKey)
+		}
+		return fmt.Errorf("ffmpeg: %v: %s", runErr, lastLines(tail.String(), 4))
 	}
 	return nil
 }
@@ -511,6 +529,26 @@ func (e *Engine) ResetHealth(backend string) {
 	_ = e.st.KVSet("hw_health."+backend, "ok")
 }
 
+func (e *Engine) resolveBackend(rep *hwprobe.Report, s encode.Settings, jobBackend string) encode.Backend {
+	b := resolveBackend(rep, s, jobBackend)
+	if b != encode.SW && e.BackendDegraded(string(b)) {
+		if rep != nil {
+			for _, alt := range rep.BackendsFor(s.Codec) {
+				if alt != b && !e.BackendDegraded(string(alt)) {
+					return alt
+				}
+			}
+		}
+		return encode.SW
+	}
+	return b
+}
+
+// ResolveFor is the non-job resolver used by recommendations + previews.
+func (e *Engine) ResolveFor(pref string, c encode.Codec) encode.Backend {
+	return e.resolveBackend(e.Report(), encode.Settings{Backend: encode.Backend(pref), Codec: c}, pref)
+}
+
 func resolveBackend(rep *hwprobe.Report, s encode.Settings, jobBackend string) encode.Backend {
 	b := s.Backend
 	if b == "" || b == "auto" {
@@ -582,14 +620,18 @@ func srcUnchanged(j *store.Job) bool {
 func (e *Engine) housekeepingLoop() {
 	defer e.wg.Done()
 	e.sweepStaleTemps()
-	ticker := time.NewTicker(24 * time.Hour)
+	e.PurgeTrash(false)
+	ticker := time.NewTicker(time.Hour)
 	defer ticker.Stop()
-	for {
+	for n := 1; ; n++ {
 		select {
 		case <-ticker.C:
-			e.sweepStaleTemps()
-			if n, err := e.st.SweepMissing(); err == nil && n > 0 {
-				log.Printf("jobs: sweeped %d missing files", n)
+			e.PurgeTrash(false)
+			if n%24 == 0 {
+				e.sweepStaleTemps()
+				if n, err := e.st.SweepMissing(); err == nil && n > 0 {
+					log.Printf("jobs: swept %d missing files", n)
+				}
 			}
 		case <-e.stopCh:
 			return
@@ -609,13 +651,85 @@ func (e *Engine) sweepStaleTemps() {
 			if err != nil {
 				return nil
 			}
-			if base := filepath.Base(path); strings.HasPrefix(base, ".mediatrans-") {
-				if !keep[path] {
-					removeTemp(path)
-				}
+			if d.IsDir() && d.Name() == ".mediatrans-manual" {
+				return filepath.SkipDir
+			}
+			if !d.IsDir() && strings.HasPrefix(d.Name(), ".mediatrans-") && strings.HasSuffix(d.Name(), ".tmp") && !keep[path] {
+				removeTemp(path)
 			}
 			return nil
 		})
+	}
+}
+
+// PurgeTrash deletes retained originals older than the retention
+// window (all of them when all=true) and returns bytes freed.
+func (e *Engine) PurgeTrash(all bool) (int64, int) {
+	cfg := e.cfg.Get()
+	days := cfg.TrashDays
+	if all {
+		days = -1
+	}
+	items, err := e.st.ExpiredTrash(days)
+	if err != nil {
+		log.Printf("trash: %v", err)
+		return 0, 0
+	}
+	var freed int64
+	for _, t := range items {
+		if err := os.Remove(t.TrashPath); err != nil && !os.IsNotExist(err) {
+			log.Printf("trash: remove %s: %v", t.TrashPath, err)
+			continue
+		}
+		pruneEmptyDirs(filepath.Dir(t.TrashPath), cfg.TrashDir)
+		_ = e.st.DeleteTrash(t.ID)
+		freed += t.Size
+	}
+	if len(items) > 0 {
+		log.Printf("trash: purged %d originals", len(items))
+	}
+	return freed, len(items)
+}
+
+// RestoreTrash puts an original back and removes the encoded file.
+func (e *Engine) RestoreTrash(id int64) error {
+	t, err := e.st.GetTrash(id)
+	if err != nil || t == nil {
+		return fmt.Errorf("trash item %d not found", id)
+	}
+	if err := replace.Restore(t.TrashPath, t.OrigPath, t.CurrentPath); err != nil {
+		return err
+	}
+	pruneEmptyDirs(filepath.Dir(t.TrashPath), e.cfg.Get().TrashDir)
+	_ = e.st.DeleteTrash(id)
+	if e.scan != nil {
+		_ = e.scan.ProbeSingle(t.OrigPath)
+		if t.CurrentPath != t.OrigPath {
+			_ = e.st.ClearOldPath(t.CurrentPath)
+		}
+	}
+	return nil
+}
+
+// DeleteTrashItem permanently removes one retained original.
+func (e *Engine) DeleteTrashItem(id int64) error {
+	t, err := e.st.GetTrash(id)
+	if err != nil || t == nil {
+		return fmt.Errorf("trash item %d not found", id)
+	}
+	if err := os.Remove(t.TrashPath); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	pruneEmptyDirs(filepath.Dir(t.TrashPath), e.cfg.Get().TrashDir)
+	return e.st.DeleteTrash(id)
+}
+
+func pruneEmptyDirs(dir, stop string) {
+	stop = filepath.Clean(stop)
+	for dir = filepath.Clean(dir); strings.HasPrefix(dir, stop+"/"); dir = filepath.Dir(dir) {
+		if os.Remove(dir) != nil {
+			return
+		}
 	}
 }
 

@@ -28,16 +28,22 @@ func New(base, key string) *Client {
 		HC: &http.Client{Timeout: 30 * time.Second}}
 }
 
+// auth sends the key in the Authorization header. Jellyfin 10.11+
+// rejects the legacy ?api_key= query parameter by default.
+func (c *Client) auth(req *http.Request) {
+	req.Header.Set("Authorization", fmt.Sprintf(`MediaBrowser Client="mediatrans", Device="mediatrans", DeviceId="mediatrans", Version="1", Token="%s"`, c.Key))
+}
+
 func (c *Client) get(ctx context.Context, out any, path string, q url.Values) error {
 	if c == nil || c.Base == "" || c.Key == "" {
 		return fmt.Errorf("jellyfin not configured")
 	}
-	q.Set("api_key", c.Key)
 	u := c.Base + path + "?" + q.Encode()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
 	if err != nil {
 		return err
 	}
+	c.auth(req)
 	resp, err := c.HC.Do(req)
 	if err != nil {
 		return err
@@ -54,7 +60,6 @@ func (c *Client) post(ctx context.Context, path string, q url.Values, body any) 
 	if c == nil || c.Base == "" || c.Key == "" {
 		return fmt.Errorf("jellyfin not configured")
 	}
-	q.Set("api_key", c.Key)
 	u := c.Base + path + "?" + q.Encode()
 	var buf bytes.Buffer
 	if body != nil {
@@ -67,6 +72,7 @@ func (c *Client) post(ctx context.Context, path string, q url.Values, body any) 
 		return err
 	}
 	req.Header.Set("Content-Type", "application/json")
+	c.auth(req)
 	resp, err := c.HC.Do(req)
 	if err != nil {
 		return err
@@ -96,6 +102,20 @@ func (c *Client) Test(ctx context.Context) (*SystemInfo, error) {
 	return &si, nil
 }
 
+// Folder is one Jellyfin library with its on-disk locations.
+type Folder struct {
+	Name           string   `json:"Name"`
+	CollectionType string   `json:"CollectionType"`
+	Locations      []string `json:"Locations"`
+}
+
+// Libraries lists the server's libraries (used to verify path mapping).
+func (c *Client) Libraries(ctx context.Context) ([]Folder, error) {
+	var f []Folder
+	err := c.get(ctx, &f, "/Library/VirtualFolders", url.Values{})
+	return f, err
+}
+
 // Item is the subset of a Jellyfin item we cache.
 type Item struct {
 	ID               string            `json:"Id"`
@@ -111,6 +131,7 @@ type Item struct {
 	IndexNumber      int               `json:"IndexNumber"`       // episode
 	SeriesName       string            `json:"SeriesName"`
 	ImageTags        map[string]string `json:"ImageTags"`
+	Genres           []string          `json:"Genres"`
 }
 
 type itemsResp struct {
@@ -120,13 +141,22 @@ type itemsResp struct {
 
 // WalkItems pages through every Movie/Episode with its Path.
 func (c *Client) WalkItems(ctx context.Context, fn func([]Item) error) error {
+	return c.walk(ctx, "Movie,Episode", fn)
+}
+
+// WalkSeries pages through every Series (genres + overview live there).
+func (c *Client) WalkSeries(ctx context.Context, fn func([]Item) error) error {
+	return c.walk(ctx, "Series", fn)
+}
+
+func (c *Client) walk(ctx context.Context, types string, fn func([]Item) error) error {
 	const page = 1000
 	for start := 0; ; start += page {
 		var r itemsResp
 		q := url.Values{
 			"Recursive":        {"true"},
-			"IncludeItemTypes": {"Movie,Episode"},
-			"Fields":           {"Path,Overview,ParentId"},
+			"IncludeItemTypes": {types},
+			"Fields":           {"Path,Overview,ParentId,Genres"},
 			"SortBy":           {"Id"},
 			"SortOrder":        {"Ascending"},
 			"StartIndex":       {fmt.Sprint(start)},
@@ -148,16 +178,20 @@ func (c *Client) WalkItems(ctx context.Context, fn func([]Item) error) error {
 }
 
 // ImageURL builds an image URL for server-side proxying.
-func (c *Client) ImageURL(itemID string) string {
-	return c.Base + "/Items/" + itemID + "/Images/Primary?api_key=" + url.QueryEscape(c.Key)
+func (c *Client) ImageURL(itemID, kind string, maxW int) string {
+	if kind == "" {
+		kind = "Primary"
+	}
+	return fmt.Sprintf("%s/Items/%s/Images/%s?maxWidth=%d&quality=85", c.Base, itemID, kind, maxW)
 }
 
-// FetchImage downloads an item image.
-func (c *Client) FetchImage(ctx context.Context, itemID string) ([]byte, string, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.ImageURL(itemID), nil)
+// FetchImage downloads an item image (kind: Primary | Backdrop | Thumb).
+func (c *Client) FetchImage(ctx context.Context, itemID, kind string, maxW int) ([]byte, string, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.ImageURL(itemID, kind, maxW), nil)
 	if err != nil {
 		return nil, "", err
 	}
+	c.auth(req)
 	resp, err := c.HC.Do(req)
 	if err != nil {
 		return nil, "", err
@@ -205,5 +239,5 @@ func (c *Client) PatchDateCreated(ctx context.Context, itemID string, btimeUTC t
 		return err
 	}
 	item["DateCreated"] = btimeUTC.UTC().Format("2006-01-02T15:04:05.0000000Z")
-	return c.post(ctx, "/Users/"+uid.ID+"/Items/"+itemID, url.Values{}, item)
+	return c.post(ctx, "/Items/"+itemID, url.Values{}, item)
 }

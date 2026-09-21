@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { api, type Preview } from "../api";
-import { bytes, codecLabel, dur } from "../format";
+import { backendLabel, bytes, codecLabel, dur } from "../format";
+import { Copyable } from "../components";
 import type { LiveState } from "../App";
-import "../components.css";
 
 // A/B compare: dual synced players over the same timeline.
 export default function PreviewView({ live }: { live: LiveState }) {
@@ -65,19 +65,20 @@ export default function PreviewView({ live }: { live: LiveState }) {
   return (
     <div>
       <div className="crumbs">
-        <Link to="/">library</Link> / <Link to={`/file/${p.file_id}`}>file</Link> / <span className="dim">preview</span>
+        <Link to={`/file/${p.file_id}`}>← Back to file</Link>
       </div>
 
       <div className="page-head">
         <div>
           <h1 className="page-title">A / B Compare</h1>
           <div className="page-sub">
-            {codecLabel(p.settings.codec)} 10-bit · quality {p.settings.quality} · {(p.settings.backend || "auto").toUpperCase()}
+            {codecLabel(p.settings.codec)} {p.settings.bit_depth === 8 ? "8" : "10"}-bit · quality {p.settings.quality} · {p.settings.speed || "medium"} · {backendLabel(p.settings.backend || "auto")}
+            {p.measured_ratio ? <> · <span className="teal">video {Math.round((1 - p.measured_ratio) * 100)}% smaller across all samples</span></> : null}
           </div>
         </div>
         <div className="toolbar">
           <button className="btn" onClick={() => setSync(!sync)}>
-            {sync ? "🔒 synced" : "🔓 independent"}
+            {sync ? "Players linked" : "Players independent"}
           </button>
         </div>
       </div>
@@ -133,10 +134,10 @@ export default function PreviewView({ live }: { live: LiveState }) {
 
           <div className="toolbar" style={{ justifyContent: "center", marginTop: 14 }}>
             <button className="btn" onClick={() => seekRel(-2)}>−2s</button>
-            <button className="btn btn-primary" onClick={togglePlay}>play / pause</button>
+            <button className="btn btn-primary" onClick={togglePlay}>Play / pause</button>
             <button className="btn" onClick={() => seekRel(2)}>+2s</button>
             <button className="btn" onClick={() => setSwapping(!swapping)}>
-              {swapping ? "stacked" : "side by side"}
+              {swapping ? "Side by side" : "Stacked"}
             </button>
           </div>
 
@@ -147,10 +148,16 @@ export default function PreviewView({ live }: { live: LiveState }) {
                 #{i + 1} · {dur(s.start)} in
               </button>
             ))}
-            <span className="dim" style={{ fontSize: 12, marginLeft: 6 }}>
+            <span className="dim small" style={{ marginLeft: 6 }}>
               20s each, spread across the file. Compare fine grain and dark scenes.
             </span>
           </div>
+          {p.command && (
+            <details className="panel cmd-panel" style={{ marginTop: 18 }}>
+              <summary>ffmpeg command for the B side</summary>
+              <Copyable text={p.command} />
+            </details>
+          )}
         </>
       )}
     </div>

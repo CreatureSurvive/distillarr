@@ -5,6 +5,7 @@ package config
 
 import (
 	"log"
+	"strings"
 	"sync"
 	"time"
 
@@ -47,9 +48,17 @@ type Config struct {
 	RecompressHEVC     bool   `json:"recompress_hevc"`     // allow re-encoding existing HEVC
 	MaxHeight          int    `json:"max_height"`          // 0 = keep; e.g. 1080 caps output
 	TonemapHDR         bool   `json:"tonemap_hdr"`         // HDR10→SDR profile off by default
+	DefaultSpeed       string `json:"default_speed"`       // faster|fast|medium|slow|slower
+	TrashDir           string `json:"trash_dir"`           // on the media pool → hardlinks, no copy
+	// PreferMP4 makes "auto" output MP4 (HEVC tagged hvc1, moov first)
+	// whenever every kept track fits, for Apple/direct-play clients.
+	PreferMP4 *bool `json:"prefer_mp4"`
 
 	JellyfinURL    string `json:"jellyfin_url"`
 	JellyfinAPIKey string `json:"jellyfin_api_key"`
+	// JellyfinPathMap rewrites Jellyfin's view of paths to ours,
+	// "from=to" (e.g. "/data=/srv/media" when Jellyfin mounts the library as /data).
+	JellyfinPathMap string `json:"jellyfin_path_map"`
 }
 
 // Default returns the initial configuration for a new install.
@@ -68,6 +77,9 @@ func Default() Config {
 		AudioPCMTarget:     "flac",
 		TrashEnabled:       true,
 		TrashDays:          14,
+		TrashDir:           "/srv/media/.mediatrans-trash",
+		DefaultSpeed:       "medium",
+		JellyfinPathMap:    "/data=/srv/media",
 		MaxAttempts:        3,
 		RecompressHEVC:     false,
 		JellyfinURL:        "http://host.docker.internal:8096",
@@ -125,6 +137,21 @@ func (m *Manager) normalize() {
 	default:
 		m.cfg.AudioPCMTarget = "flac"
 	}
+	if m.cfg.PreferMP4 == nil {
+		t := true
+		m.cfg.PreferMP4 = &t
+	}
+	if m.cfg.TrashDir == "" {
+		m.cfg.TrashDir = d.TrashDir
+	}
+	if m.cfg.JellyfinPathMap == "" {
+		m.cfg.JellyfinPathMap = d.JellyfinPathMap
+	}
+	switch m.cfg.DefaultSpeed {
+	case "faster", "fast", "medium", "slow", "slower":
+	default:
+		m.cfg.DefaultSpeed = "medium"
+	}
 	if m.cfg.TrashDays <= 0 {
 		m.cfg.TrashDays = 14
 	}
@@ -171,6 +198,22 @@ func (m *Manager) Subscribe() chan struct{} {
 	ch := make(chan struct{}, 1)
 	m.subs = append(m.subs, ch)
 	return ch
+}
+
+// MP4 reports the effective prefer-MP4 setting (default on).
+func (c Config) MP4() bool { return c.PreferMP4 == nil || *c.PreferMP4 }
+
+// MapJellyfinPath rewrites a Jellyfin-side path to the local view.
+func (c Config) MapJellyfinPath(p string) string {
+	from, to, ok := strings.Cut(c.JellyfinPathMap, "=")
+	from, to = strings.TrimRight(from, "/"), strings.TrimRight(to, "/")
+	if !ok || from == "" {
+		return p
+	}
+	if p == from || strings.HasPrefix(p, from+"/") {
+		return to + strings.TrimPrefix(p, from)
+	}
+	return p
 }
 
 // WindowOpen reports whether the queue may start new jobs right now.

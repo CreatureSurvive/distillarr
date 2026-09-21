@@ -75,8 +75,10 @@ type VerifySpec struct {
 	WantVideoCodec string  // "hevc" | "av1"
 	Want10Bit      bool
 	SrcDuration    float64
-	SrcAudioCount  int
-	WantSubCount   int // exact expected (container-aware)
+	WantAudioCount int    // exact, from the stream plan
+	WantSubCount   int    // exact, from the stream plan
+	WantTransfer   string // e.g. smpte2084 for HDR10 passthrough ("" = don't check)
+	Container      string // "mp4" → also require moov-before-mdat and hvc1 for HEVC
 	SrcSize        int64
 }
 
@@ -113,11 +115,23 @@ func Verify(ctx context.Context, tempPath string, spec VerifySpec) ([]string, er
 	if spec.Want10Bit && v.BitDepth() < 10 {
 		return nil, fmt.Errorf("output is %d-bit, wanted 10-bit (pix_fmt %s)", v.BitDepth(), v.PixFmt)
 	}
-	if n := len(p.Audios()); n < spec.SrcAudioCount {
-		return nil, fmt.Errorf("audio streams %d < source %d", n, spec.SrcAudioCount)
+	if n := len(p.Audios()); n != spec.WantAudioCount {
+		return nil, fmt.Errorf("audio streams %d != expected %d", n, spec.WantAudioCount)
+	}
+	if spec.WantTransfer != "" && v.ColorTransfer != spec.WantTransfer {
+		return nil, fmt.Errorf("colour transfer is %q, expected %q (HDR signalling lost)", v.ColorTransfer, spec.WantTransfer)
 	}
 	if n := len(p.Subtitles()); n != spec.WantSubCount {
 		return nil, fmt.Errorf("subtitle streams %d != expected %d", n, spec.WantSubCount)
+	}
+
+	if spec.Container == "mp4" {
+		if spec.WantVideoCodec == "hevc" && v.CodecTagString != "hvc1" {
+			return nil, fmt.Errorf("HEVC in MP4 is tagged %q, Apple players need hvc1", v.CodecTagString)
+		}
+		if err := moovFirst(tempPath); err != nil {
+			return nil, err
+		}
 	}
 
 	fi, err := os.Stat(tempPath)
@@ -137,6 +151,45 @@ func Verify(ctx context.Context, tempPath string, spec VerifySpec) ([]string, er
 		return nil, fmt.Errorf("mid-file decode check failed: %w", err)
 	}
 	return warns, nil
+}
+
+// moovFirst walks top-level MP4 boxes and requires the moov (index) box
+// before mdat, so playback and streaming can start without the whole file.
+func moovFirst(path string) error {
+	f, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	var off int64
+	hdr := make([]byte, 16)
+	for i := 0; i < 64; i++ {
+		if _, err := f.ReadAt(hdr[:8], off); err != nil {
+			return fmt.Errorf("mp4 box walk: %w", err)
+		}
+		size := int64(uint32(hdr[0])<<24 | uint32(hdr[1])<<16 | uint32(hdr[2])<<8 | uint32(hdr[3]))
+		typ := string(hdr[4:8])
+		if size == 1 {
+			if _, err := f.ReadAt(hdr[8:16], off+8); err != nil {
+				return err
+			}
+			size = 0
+			for _, b := range hdr[8:16] {
+				size = size<<8 | int64(b)
+			}
+		}
+		switch typ {
+		case "moov":
+			return nil
+		case "mdat":
+			return fmt.Errorf("moov atom is after the media data (faststart failed)")
+		}
+		if size < 8 {
+			return fmt.Errorf("mp4 box walk: bad size for %q", typ)
+		}
+		off += size
+	}
+	return fmt.Errorf("mp4 box walk: no moov found")
 }
 
 // spotCheck decodes ~200 frames from ~5% into the file.
@@ -162,22 +215,23 @@ func spotCheck(ctx context.Context, path string) error {
 // changed (e.g. .avi → .mkv), in which case the original path is
 // removed after the new file is in place (the trash copy already
 // preserves it). trashDir == "" skips retention (not recommended).
-func Replace(tempPath, srcPath, destPath string, st *SrcStat, trashDir string) error {
+func Replace(tempPath, srcPath, destPath string, st *SrcStat, trashDir string) (trashPath string, err error) {
 	if destPath == "" {
 		destPath = srcPath
 	}
 	// 1. Make the encoded file durable.
 	f, err := os.Open(tempPath)
 	if err != nil {
-		return err
+		return "", err
 	}
 	_ = unix.Fsync(int(f.Fd()))
 	f.Close()
 
 	// 2. Retain the original first (crash-safety anchor).
 	if trashDir != "" {
-		if err := retain(srcPath, trashDir, st); err != nil {
-			return fmt.Errorf("trash retention: %w", err)
+		trashPath = TrashPath(trashDir, srcPath)
+		if err := retain(srcPath, trashPath, st); err != nil {
+			return "", fmt.Errorf("trash retention: %w", err)
 		}
 	}
 
@@ -185,7 +239,7 @@ func Replace(tempPath, srcPath, destPath string, st *SrcStat, trashDir string) e
 	// create=mfs this may be a copy-then-unlink across branches —
 	// data-safe because step 2 already duplicated the original.)
 	if err := os.Rename(tempPath, destPath); err != nil {
-		return fmt.Errorf("rename: %w", err)
+		return trashPath, fmt.Errorf("rename: %w", err)
 	}
 
 	// 3b. Restore the original permission bits (Samba-writable group
@@ -197,14 +251,14 @@ func Replace(tempPath, srcPath, destPath string, st *SrcStat, trashDir string) e
 	// 4. When the container changed, drop the old name (trash has it).
 	if destPath != srcPath {
 		if err := os.Remove(srcPath); err != nil {
-			return fmt.Errorf("remove old name %s: %w", srcPath, err)
+			return trashPath, fmt.Errorf("remove old name %s: %w", srcPath, err)
 		}
 	}
 
 	// 5. Restore original atime+mtime.
 	if st != nil {
 		if err := RestoreTimes(destPath, st); err != nil {
-			return fmt.Errorf("restore timestamps: %w", err)
+			return trashPath, fmt.Errorf("restore timestamps: %w", err)
 		}
 	}
 
@@ -213,14 +267,39 @@ func Replace(tempPath, srcPath, destPath string, st *SrcStat, trashDir string) e
 		_ = unix.Fsync(int(d.Fd()))
 		d.Close()
 	}
+	return trashPath, nil
+}
+
+// TrashPath maps an original to its place in the trash tree, keeping
+// the path relative to the trash dir's parent (the media pool root)
+// so the link stays on the same mergerfs branch and is instant.
+func TrashPath(trashDir, srcPath string) string {
+	root := filepath.Dir(filepath.Clean(trashDir))
+	rel := strings.TrimPrefix(srcPath, "/")
+	if r, err := filepath.Rel(root, srcPath); err == nil && !strings.HasPrefix(r, "..") {
+		rel = r
+	}
+	return filepath.Join(trashDir, rel)
+}
+
+// Restore swaps a trashed original back to origPath, removing the
+// encoded file at currentPath (when it differs, e.g. .mp4 → .mkv).
+func Restore(trashPath, origPath, currentPath string) error {
+	if _, err := os.Stat(trashPath); err != nil {
+		return fmt.Errorf("original not in trash: %w", err)
+	}
+	if err := os.Rename(trashPath, origPath); err != nil {
+		return fmt.Errorf("restore: %w", err)
+	}
+	if currentPath != "" && currentPath != origPath {
+		_ = os.Remove(currentPath)
+	}
 	return nil
 }
 
 // retain hard-links the original into the trash tree; falls back to a
 // streamed copy when the link crosses mergerfs branches (EXDEV).
-func retain(srcPath, trashDir string, st *SrcStat) error {
-	rel := strings.TrimPrefix(srcPath, "/")
-	dst := filepath.Join(trashDir, rel)
+func retain(srcPath, dst string, st *SrcStat) error {
 	if _, err := os.Stat(dst); err == nil {
 		return nil // already retained (job retry)
 	}
@@ -263,43 +342,4 @@ func copyFile(src, dst string, st *SrcStat) error {
 		_ = RestoreTimes(tmp, st)
 	}
 	return os.Rename(tmp, dst)
-}
-
-// LinkSidecars hard-links external subtitle files to a new stem when
-// the media file's extension changed (e.g. .mp4 → .mkv), so players
-// keep finding them for BOTH filenames. Originals are untouched.
-func LinkSidecars(oldPath, newPath string) error {
-	oldExt := strings.ToLower(filepath.Ext(oldPath))
-	newExt := strings.ToLower(filepath.Ext(newPath))
-	if oldExt == newExt {
-		return nil
-	}
-	dir := filepath.Dir(oldPath)
-	stem := strings.TrimSuffix(filepath.Base(oldPath), filepath.Ext(oldPath))
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return err
-	}
-	for _, e := range entries {
-		if e.IsDir() {
-			continue
-		}
-		ext := strings.ToLower(filepath.Ext(e.Name()))
-		switch ext {
-		case ".srt", ".ass", ".ssa", ".sub", ".idx", ".vtt", ".sup", ".smi":
-		default:
-			continue
-		}
-		s := strings.TrimSuffix(e.Name(), filepath.Ext(e.Name()))
-		if s != stem && !strings.HasPrefix(s, stem+".") {
-			continue
-		}
-		newName := strings.TrimSuffix(e.Name(), filepath.Ext(e.Name())) + newExt
-		dst := filepath.Join(dir, newName)
-		if _, err := os.Stat(dst); err == nil {
-			continue
-		}
-		_ = os.Link(filepath.Join(dir, e.Name()), dst) // best effort
-	}
-	return nil
 }

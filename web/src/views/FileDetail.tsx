@@ -1,247 +1,212 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { api, type FileItem, type Stream, type Recommendation, type Settings, type Preview } from "../api";
-import { bytes, bitrate, codecLabel, hdrLabel, channelsLabel, dur, backendLabel } from "../format";
-import { Poster, SavingsGauge } from "../components";
+import { api, type FileItem, type HwReport, type Plan, type Settings, type Stream } from "../api";
+import { Art, Copyable, Empty, FileChips, SavingsGauge, toast } from "../components";
+import EncodeOptions from "../options";
+import { backendLabel, bitrate, bytes, channelsLabel, codecLabel, dur, se } from "../format";
 import type { LiveState } from "../App";
-import "../components.css";
 
 export default function FileDetail({ live }: { live: LiveState }) {
-  const { id } = useParams<{ id: string }>();
+  const id = Number(useParams<{ id: string }>().id);
   const nav = useNavigate();
   const [file, setFile] = useState<FileItem | null>(null);
   const [streams, setStreams] = useState<Stream[]>([]);
-  const [rec, setRec] = useState<Recommendation | null>(null);
-  const [quality, setQuality] = useState<number | null>(null);
+  const [err, setErr] = useState("");
+  const [hw, setHw] = useState<HwReport | null>(null);
+  const [auto, setAuto] = useState<Record<string, string>>({});
+  const [plan, setPlan] = useState<Plan | null>(null);
+  const [settings, setSettings] = useState<Settings | null>(null);
+  const [custom, setCustom] = useState(false);
   const [busy, setBusy] = useState("");
-  const [toast, setToast] = useState("");
+  const planReq = useRef(0);
 
-  const load = async () => {
-    if (!id) return;
-    try {
-      const r = await api.file(Number(id));
-      setFile(r.file);
-      setStreams(r.streams);
-      const rr = await api.fileRec(Number(id));
-      setRec(rr);
-    } catch {}
-  };
-  useEffect(() => { load(); /* eslint-disable-next-line */ }, [id, live.queueVersion]);
+  useEffect(() => {
+    setFile(null);
+    setSettings(null);
+    setCustom(false);
+    api.file(id).then((r) => { setFile(r.file); setStreams(r.streams); }).catch((e) => setErr(e.message));
+    api.hw().then((h) => { setHw(h.report); setAuto(h.auto); }).catch(() => {});
+  }, [id]);
 
-  if (!file) {
-    return <div className="empty"><div className="big">Loading…</div></div>;
-  }
+  useEffect(() => {
+    if (!file) return;
+    api.file(id).then((r) => setFile(r.file)).catch(() => {});
+  }, [live.queueVersion]);
 
-  const effectiveQuality = quality ?? rec?.settings?.quality ?? 60;
-  const codec = rec?.settings?.codec ?? "hevc";
+  // Fetch the plan: recommendation first, then live estimates as options change.
+  useEffect(() => {
+    if (!file) return;
+    const n = ++planReq.current;
+    const t = setTimeout(() => {
+      api.plan(id, custom && settings ? settings : undefined).then((p) => {
+        if (n !== planReq.current) return;
+        setPlan(p);
+        if (!custom) setSettings(p.rec.settings);
+      }).catch(() => {});
+    }, custom ? 350 : 0);
+    return () => clearTimeout(t);
+  }, [file?.id, custom, JSON.stringify(settings)]);
 
-  const queue = async (runNow: boolean) => {
-    setBusy(runNow ? "now" : "queue");
-    try {
-      const settings: Settings = {
-        ...(rec?.settings ?? {}),
-        quality: effectiveQuality,
-        codec,
-      };
-      await api.queueFile(file!.id, { settings, run_now: runNow });
-      setToast(runNow ? "Encoding now — watch the deck." : "Added to queue.");
-      load();
-    } catch (e: any) {
-      setToast(e.message);
-    } finally {
-      setBusy("");
-    }
-  };
+  if (err) return <Empty title="File not found">{err}</Empty>;
+  if (!file || !settings) return <div className="result-count mono dim">Loading…</div>;
 
-  const makePreview = async () => {
-    setBusy("preview");
-    try {
-      const settings: Settings = { ...(rec?.settings ?? {}), quality: effectiveQuality, codec };
-      const p: Preview = await api.previewFile(file!.id, { settings, segments: 3 });
-      nav(`/preview/${p.id}`);
-    } catch (e: any) {
-      setToast(e.message);
-    } finally {
-      setBusy("");
-    }
-  };
-
+  const rec = plan?.rec;
+  const autoRec = plan?.auto;
   const isTV = file.library === "tvshows";
-  const pcmAudio = file.audio.filter((a) => a.codec.startsWith("pcm_") || a.codec === "lpcm");
+  const title = isTV ? file.jf_name || file.ep_title || se(file.season, file.episode) : file.title;
+
+  const update = (s: Settings) => {
+    setSettings(s);
+    setCustom(true);
+  };
+  const reset = () => {
+    setCustom(false);
+    if (autoRec) setSettings(autoRec.settings);
+  };
+
+  const act = async (kind: "queue" | "now" | "preview") => {
+    setBusy(kind);
+    const body = { settings: custom ? settings : undefined };
+    try {
+      if (kind === "preview") {
+        const p = await api.previewFile(file.id, { ...body, segments: 3 });
+        nav(`/preview/${p.id}`);
+        return;
+      }
+      await api.queueFile(file.id, { ...body, run_now: kind === "now" });
+      toast(kind === "now" ? "Encoding started. Progress shows at the bottom." : "Added to the queue.");
+      setFile({ ...file, queued: true });
+    } catch (e: any) {
+      toast(e.message, "err");
+    } finally {
+      setBusy("");
+    }
+  };
+
+  const savedBytes = rec ? file.size - rec.est_out_bytes : 0;
 
   return (
-    <div>
+    <div className="detail">
       <div className="crumbs">
-        <Link to="/">library</Link> / {isTV ? <>shows / <Link to={`/show/${encodeURIComponent(file.title)}`}>{file.title}</Link> /</> : null}{" "}
-        <span className="dim">{file.title}</span>
+        {isTV ? (
+          <><Link to="/shows">Shows</Link> / <Link to={`/show/${encodeURIComponent(file.title)}`}>{file.title}</Link> / <span>{se(file.season, file.episode)}</span></>
+        ) : (
+          <><Link to="/">Movies</Link> / <span>{file.title}</span></>
+        )}
       </div>
 
-      <div className="detail-grid">
-        {/* left: poster + facts */}
-        <div>
-          <Poster item={file} ratio="2 / 3" />
-          <div className="mono dim file-path">{file.path}</div>
+      <section className="hero" style={file.backdrop ? { ["--bd" as any]: `url(${file.backdrop})` } : undefined}>
+        <div className={`hero-poster${isTV ? " wide" : ""}`}>
+          <Art src={file.image} title={isTV ? se(file.season, file.episode) : file.title} ratio={isTV ? "16 / 9" : "2 / 3"} />
         </div>
-
-        {/* right: header, rec card, streams */}
-        <div style={{ minWidth: 0 }}>
-          <h1 className="page-title" style={{ marginBottom: 4 }}>
-            {isTV ? file.ep_title || `${file.title} — S${file.season}E${file.episode}` : file.title}
-          </h1>
-          <div className="page-sub" style={{ marginBottom: 16 }}>
-            {codecLabel(file.video_codec)} · {file.width}×{file.height} · {file.bit_depth}-bit ·{" "}
-            {bitrate(file.video_bitrate)} · {bytes(file.size)} · {dur(file.duration)}
-            {file.hdr && ` · ${hdrLabel(file.hdr)}`}
+        <div className="hero-body">
+          {isTV && <div className="eyebrow">{file.title} · {se(file.season, file.episode)}</div>}
+          <h1 className="page-title">{title}{!isTV && file.year > 0 && <span className="title-year"> {file.year}</span>}</h1>
+          <FileChips f={file} />
+          <div className="hero-meta mono">
+            <span>{bytes(file.size)}</span>
+            <span>{bitrate(file.video_bitrate)}</span>
+            <span>{file.width}×{file.height}</span>
+            <span>{file.bit_depth}-bit</span>
+            <span>{dur(file.duration)}</span>
+            {file.interlaced && <span className="warm">interlaced</span>}
           </div>
+          {file.overview && <p className="hero-overview">{file.overview}</p>}
+        </div>
+      </section>
 
-          {/* recommendation card */}
-          <div className="card" style={{ marginBottom: 18, borderColor: "var(--line)" }}>
-            <div className="stat-label" style={{ marginBottom: 10 }}>
-              {rec?.action === "transcode" ? "Recommended encode" : rec?.action === "caution" ? "Caution" : "No change recommended"}
+      <div className="detail-cols">
+        <aside className="detail-side">
+          <section className={`panel verdict v-${rec?.action || "skip"}`}>
+            <div className="eyebrow">
+              {custom ? "Your settings" : autoRec?.action === "transcode" ? "Recommended" : autoRec?.action === "caution" ? "Caution" : "No change recommended"}
             </div>
-            {rec?.action === "transcode" ? (
+            {rec && (
               <>
-                <div style={{ display: "flex", gap: 18, flexWrap: "wrap", alignItems: "flex-end" }}>
-                  <div>
-                    <div className="stat-label">Target</div>
-                    <div style={{ marginTop: 4 }}>
-                      <span className="chip c-hevc" style={{ fontSize: 13, padding: "3px 10px" }}>
-                        {codecLabel(codec)} 10-bit
-                      </span>{" "}
-                      <span className="chip" style={{ fontSize: 13, padding: "3px 10px" }}>
-                        {backendLabel(rec.settings.backend || "auto")}
-                      </span>
-                    </div>
-                  </div>
-                  <div>
-                    <div className="stat-label">Quality</div>
-                    <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 6 }}>
-                      <input
-                        type="range"
-                        min={20}
-                        max={90}
-                        value={effectiveQuality}
-                        onChange={(e) => setQuality(Number(e.target.value))}
-                        style={{ width: 140 }}
-                        aria-label="quality"
-                      />
-                      <span className="mono">{effectiveQuality}</span>
-                    </div>
-                  </div>
-                  <div>
-                    <div className="stat-label">Estimated</div>
-                    <div className="mono" style={{ fontSize: 15, marginTop: 4 }}>
-                      {bytes(rec.est_low_bytes)} – {bytes(rec.est_high_bytes)}
-                    </div>
-                  </div>
-                  <div style={{ minWidth: 180, flex: 1 }}>
-                    <div className="stat-label">Savings</div>
-                    <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 8 }}>
-                      <SavingsGauge pctv={rec.savings_pct} height={7} />
-                      <span className="mono" style={{ color: "var(--teal)", fontSize: 15, fontWeight: 600 }}>
-                        −{rec.savings_pct.toFixed(0)}%
-                      </span>
-                    </div>
-                  </div>
+                <div className="verdict-sizes">
+                  <span className="mono">{bytes(file.size)}</span>
+                  <span className="arrow">→</span>
+                  <span className="mono teal">{bytes(rec.est_low_bytes)}–{bytes(rec.est_high_bytes)}</span>
                 </div>
-                {pcmAudio.length > 0 && (
-                  <div className="note" style={{ marginTop: 10 }}>
-                    {pcmAudio.length} PCM track{pcmAudio.length > 1 ? "s" : ""} → FLAC (lossless, ~50% smaller audio)
-                  </div>
-                )}
-                {rec.notes.map((n, i) => (
-                  <div key={i} className="note">· {n}</div>
-                ))}
-                <div className="dim" style={{ fontSize: 12.5, marginTop: 10 }}>{rec.reason}</div>
-
-                <div className="toolbar" style={{ marginTop: 16 }}>
-                  <button className="btn" disabled={!!busy || file.queued} onClick={makePreview}>
-                    {busy === "preview" ? "cutting samples…" : "Preview & compare"}
-                  </button>
-                  <button className="btn" disabled={!!busy || file.queued} onClick={() => queue(false)}>
-                    {busy === "queue" ? "…" : "Add to queue"}
-                  </button>
-                  <button className="btn btn-primary" disabled={!!busy || file.queued} onClick={() => queue(true)}>
-                    {busy === "now" ? "starting…" : "Encode now"}
-                  </button>
-                  {file.queued && <span className="chip c-hevc">already queued</span>}
+                <div className="verdict-gauge">
+                  <SavingsGauge pct={rec.savings_pct} height={8} />
+                  <span className="verdict-pct">−{rec.savings_pct.toFixed(0)}%</span>
+                </div>
+                <div className="dim small">
+                  {savedBytes > 0 ? `about ${bytes(savedBytes)} saved · ` : ""}
+                  {rec.calibration_samples > 0
+                    ? `estimate tuned by ${rec.calibration_samples} real encode${rec.calibration_samples === 1 ? "" : "s"}`
+                    : "estimate not yet checked against real encodes; a preview will measure it"}
                 </div>
               </>
-            ) : (
-              <div className="dim" style={{ lineHeight: 1.55 }}>
-                {rec?.reason}
-                {rec?.notes?.map((n, i) => (
-                  <div key={i} className="note">· {n}</div>
-                ))}
-                <div className="toolbar" style={{ marginTop: 14 }}>
-                  <button className="btn" onClick={makePreview} disabled={!!busy}>
-                    {busy === "preview" ? "cutting samples…" : "Preview anyway"}
-                  </button>
-                  <button className="btn" onClick={() => queue(false)} disabled={!!busy}>
-                    Queue anyway
-                  </button>
-                </div>
+            )}
+            {!custom && autoRec?.action !== "transcode" && <p className="verdict-reason">{autoRec?.reason}</p>}
+            {autoRec?.why && autoRec.why.length > 0 && (
+              <div className="why">
+                <div className="why-h">Why quality {autoRec.settings.quality}</div>
+                <ul>{autoRec.why.map((w) => <li key={w}>{w}</li>)}</ul>
               </div>
             )}
-          </div>
-
-          {/* streams */}
-          <div className="card">
-            <div className="stat-label" style={{ marginBottom: 10 }}>Streams</div>
-            <table className="table">
-              <thead>
-                <tr>
-                  <th style={{ width: 40 }}>#</th>
-                  <th>Type</th>
-                  <th>Codec</th>
-                  <th>Language</th>
-                  <th>Detail</th>
-                  <th>Flags</th>
-                </tr>
-              </thead>
-              <tbody>
-                {streams.map((s) => (
-                  <tr key={s.id}>
-                    <td className="mono dim">{s.stream_index}</td>
-                    <td>{s.kind}</td>
-                    <td className="mono">{s.codec}</td>
-                    <td className="dim">{s.lang || "—"}</td>
-                    <td className="dim">
-                      {s.kind === "audio"
-                        ? `${channelsLabel(s.channels)}${s.bit_rate ? ` · ${bitrate(s.bit_rate)}` : ""}`
-                        : s.kind === "video"
-                          ? `${s.codec === file.video_codec ? `${file.width}×${file.height}` : ""}`
-                          : s.is_text
-                            ? "text"
-                            : "bitmap"}
-                    </td>
-                    <td>
-                      {s.default && <span className="chip">default</span>}{" "}
-                      {s.forced && <span className="chip">forced</span>}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-
-            {file.sidecars.length > 0 && (
-              <div style={{ marginTop: 12 }}>
-                <div className="stat-label" style={{ marginBottom: 6 }}>External subtitles (untouched)</div>
-                <div className="chips">
-                  {file.sidecars.map((sc) => (
-                    <span key={sc.name} className="chip">
-                      {sc.lang ? `${sc.lang.toUpperCase()} ` : ""}{sc.kind}
-                    </span>
-                  ))}
-                </div>
-              </div>
+            {rec?.notes && rec.notes.length > 0 && (
+              <ul className="notes">{rec.notes.map((n) => <li key={n}>{n}</li>)}</ul>
             )}
+            <div className="actions">
+              <button className="btn" disabled={!!busy} onClick={() => act("preview")}>
+                {busy === "preview" ? "Starting…" : "Preview & compare"}
+              </button>
+              <button className="btn" disabled={!!busy || file.queued} onClick={() => act("queue")}>
+                {file.queued ? "In queue" : busy === "queue" ? "Adding…" : "Add to queue"}
+              </button>
+              <button className="btn btn-primary" disabled={!!busy || file.queued} onClick={() => act("now")}>
+                {busy === "now" ? "Starting…" : "Encode now"}
+              </button>
+            </div>
+            {custom && <button className="btn mini linkish" onClick={reset}>Reset to recommended</button>}
+          </section>
+
+          <details className="panel cmd-panel">
+            <summary>
+              ffmpeg command <span className="dim small">· {backendLabel(plan?.backend || "")}
+              {plan?.render_node ? ` on ${plan.render_node.split("/").pop()}` : ""} · {plan?.container?.toUpperCase()}</span>
+            </summary>
+            {plan?.command ? <Copyable text={plan.command} /> : <div className="dim">{plan?.command_error || "…"}</div>}
+            {plan?.fallback_command && (
+              <details className="sub-details">
+                <summary className="dim small">If hardware decoding fails, this runs instead</summary>
+                <Copyable text={plan.fallback_command} />
+              </details>
+            )}
+          </details>
+
+          <details className="panel">
+            <summary>Source streams</summary>
+            <ul className="stream-list">
+              {streams.map((s) => (
+                <li key={s.id}>
+                  <span className="mono dim">#{s.stream_index}</span>
+                  <span className="stream-kind">{s.kind}</span>
+                  <span className="mono">{s.codec}</span>
+                  <span className="dim">
+                    {s.lang && s.lang.toUpperCase()}
+                    {s.kind === "audio" && ` ${channelsLabel(s.channels)}${s.bit_rate ? ` · ${bitrate(s.bit_rate)}` : ""}`}
+                    {s.kind === "subtitle" && (s.is_text ? " · text" : " · image")}
+                    {s.forced && " · forced"}
+                  </span>
+                </li>
+              ))}
+            </ul>
+            <div className="mono faint small path">{file.path}</div>
+          </details>
+        </aside>
+
+        <section className="panel detail-main">
+          <div className="opts-head">
+            <h2 className="panel-title">Encode options</h2>
+            <span className="dim small">{custom ? "Edited" : `Recommended · ${codecLabel(settings.codec)}`}</span>
           </div>
-        </div>
+          <EncodeOptions value={settings} onChange={update} file={file} streams={streams} hw={hw} autoBackend={auto[settings.codec]} />
+        </section>
       </div>
-      {toast && (
-        <div className="toast" role="status">{toast}</div>
-      )}
     </div>
   );
 }

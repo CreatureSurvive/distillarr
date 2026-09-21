@@ -41,13 +41,16 @@ type Job struct {
 	FinishedAt  string `json:"finished_at,omitempty"`
 	CreatedAt   string `json:"created_at,omitempty"`
 
+	Cmd       string `json:"cmd,omitempty"`
+	DestPath  string `json:"dest_path,omitempty"`
+
 	// Joined for API convenience:
 	FileTitle string `json:"file_title,omitempty"`
 }
 
 const jobCols = `id, file_id, src_path, temp_path, status, priority, run_now, backend, codec,
 	quality, settings_json, attempts, max_attempts, error, error_tail, progress_json,
-	src_stat_json, src_size, output_size, started_at, finished_at, created_at`
+	src_stat_json, src_size, output_size, started_at, finished_at, created_at, cmd, dest_path`
 
 func scanJob(row interface{ Scan(...any) error }) (*Job, error) {
 	j := &Job{}
@@ -56,7 +59,7 @@ func scanJob(row interface{ Scan(...any) error }) (*Job, error) {
 	err := row.Scan(&j.ID, &fileID, &j.SrcPath, &j.TempPath, &j.Status, &j.Priority, &runNow,
 		&j.Backend, &j.Codec, &j.Quality, &j.SettingsJSON, &j.Attempts, &j.MaxAttempts,
 		&j.Error, &j.ErrorTail, &j.ProgressJSON, &j.SrcStatJSON, &j.SrcSize, &j.OutputSize,
-		&j.StartedAt, &j.FinishedAt, &j.CreatedAt)
+		&j.StartedAt, &j.FinishedAt, &j.CreatedAt, &j.Cmd, &j.DestPath)
 	if err != nil {
 		return nil, err
 	}
@@ -148,6 +151,60 @@ func (s *Store) Reprioritize(id int64, priority int) error {
 	return err
 }
 
+// SetJobCmd records the exact ffmpeg command line used.
+func (s *Store) SetJobCmd(id int64, cmd string) error {
+	_, err := s.dbW.Exec(`UPDATE jobs SET cmd=? WHERE id=?`, cmd, id)
+	return err
+}
+
+// SetJobDest records where the output landed.
+func (s *Store) SetJobDest(id int64, dest string) error {
+	_, err := s.dbW.Exec(`UPDATE jobs SET dest_path=? WHERE id=?`, dest, id)
+	return err
+}
+
+// MoveJob reorders the pending queue: job id is placed directly before
+// beforeID (0 = end). Pending priorities are renumbered in gaps of 10.
+func (s *Store) MoveJob(id, beforeID int64) error {
+	tx, err := s.dbW.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	rows, err := tx.Query(`SELECT id FROM jobs WHERE status='queued' AND id != ? ORDER BY priority, id`, id)
+	if err != nil {
+		return err
+	}
+	var order []int64
+	for rows.Next() {
+		var x int64
+		if err := rows.Scan(&x); err != nil {
+			rows.Close()
+			return err
+		}
+		order = append(order, x)
+	}
+	rows.Close()
+	placed := false
+	var out []int64
+	for _, x := range order {
+		if x == beforeID {
+			out = append(out, id)
+			placed = true
+		}
+		out = append(out, x)
+	}
+	if !placed {
+		out = append(out, id)
+	}
+	for i, x := range out {
+		if _, err := tx.Exec(`UPDATE jobs SET priority=? WHERE id=? AND status='queued'`, (i+1)*10, x); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
 // SetRunNow promotes a job to run-now (bypasses schedule windows).
 func (s *Store) SetRunNow(id int64) error {
 	_, err := s.dbW.Exec(`UPDATE jobs SET run_now=1, priority=0 WHERE id=? AND status='queued'`, id)
@@ -175,8 +232,14 @@ func (s *Store) ListJobs(statuses []string, beforeID int64, limit int) ([]*Job, 
 	if limit <= 0 || limit > 200 {
 		limit = 100
 	}
-	rows, err := s.dbR.Query(`SELECT `+jobCols+`, COALESCE((SELECT title FROM files WHERE id=jobs.file_id),'')
-		FROM jobs WHERE `+where+` ORDER BY id DESC LIMIT ?`, append(args, limit)...)
+	order := "id DESC"
+	if len(statuses) == 1 && statuses[0] == StatusQueued {
+		order = "run_now DESC, priority, id"
+	}
+	rows, err := s.dbR.Query(`SELECT `+jobCols+`, COALESCE((SELECT CASE WHEN library='tvshows'
+			THEN title || ' · S' || printf('%02d', season) || 'E' || printf('%02d', episode) ELSE title END
+			FROM files WHERE id=jobs.file_id),'')
+		FROM jobs WHERE `+where+` ORDER BY `+order+` LIMIT ?`, append(args, limit)...)
 	if err != nil {
 		return nil, err
 	}
@@ -189,7 +252,7 @@ func (s *Store) ListJobs(statuses []string, beforeID int64, limit int) ([]*Job, 
 		if err := rows.Scan(&j.ID, &fileID, &j.SrcPath, &j.TempPath, &j.Status, &j.Priority, &runNow,
 			&j.Backend, &j.Codec, &j.Quality, &j.SettingsJSON, &j.Attempts, &j.MaxAttempts,
 			&j.Error, &j.ErrorTail, &j.ProgressJSON, &j.SrcStatJSON, &j.SrcSize, &j.OutputSize,
-			&j.StartedAt, &j.FinishedAt, &j.CreatedAt, &j.FileTitle); err != nil {
+			&j.StartedAt, &j.FinishedAt, &j.CreatedAt, &j.Cmd, &j.DestPath, &j.FileTitle); err != nil {
 			return nil, err
 		}
 		if fileID.Valid {

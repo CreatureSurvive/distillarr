@@ -96,3 +96,32 @@ export function titleHue(s: string): number {
   }
   return h;
 }
+
+export function ago(iso?: string): string {
+  if (!iso) return "—";
+  const t = Date.parse(iso);
+  if (isNaN(t)) return "—";
+  const s = Math.max(0, (Date.now() - t) / 1000);
+  if (s < 60) return "just now";
+  if (s < 3600) return `${Math.floor(s / 60)}m ago`;
+  if (s < 86400) return `${Math.floor(s / 3600)}h ago`;
+  return `${Math.floor(s / 86400)}d ago`;
+}
+
+export function se(season: number, ep: number): string {
+  return `S${String(season).padStart(2, "0")}E${String(ep).padStart(2, "0")}`;
+}
+
+export function seasonName(n: number): string {
+  return n === 0 ? "Specials" : `Season ${n}`;
+}
+
+export const SPEEDS = ["faster", "fast", "medium", "slow", "slower"];
+
+export function resLabel(h: number): string {
+  if (h >= 2000) return "4K";
+  if (h >= 1000) return "1080p";
+  if (h >= 700) return "720p";
+  if (h > 0) return `${h}p`;
+  return "";
+}

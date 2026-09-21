@@ -170,9 +170,32 @@ func (s *Store) Close() error {
 	return err2
 }
 
+// v2 additions; ALTERs are idempotent (duplicate-column errors ignored).
+var alters = []string{
+	`ALTER TABLE files ADD COLUMN interlaced INTEGER NOT NULL DEFAULT 0`,
+	`ALTER TABLE jobs ADD COLUMN cmd TEXT NOT NULL DEFAULT ''`,
+	`ALTER TABLE jobs ADD COLUMN dest_path TEXT NOT NULL DEFAULT ''`,
+	`ALTER TABLE jellyfin ADD COLUMN genres TEXT NOT NULL DEFAULT ''`,
+	`ALTER TABLE jellyfin ADD COLUMN item_type TEXT NOT NULL DEFAULT ''`,
+	`CREATE TABLE IF NOT EXISTS trash(
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		orig_path TEXT NOT NULL,
+		trash_path TEXT NOT NULL UNIQUE,
+		current_path TEXT NOT NULL DEFAULT '',
+		size INTEGER NOT NULL DEFAULT 0,
+		job_id INTEGER NOT NULL DEFAULT 0,
+		created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')))`,
+	`CREATE INDEX IF NOT EXISTS jellyfin_item ON jellyfin(item_id)`,
+}
+
 func (s *Store) migrate() error {
 	if _, err := s.dbW.Exec(schema); err != nil {
 		return fmt.Errorf("apply schema: %w", err)
+	}
+	for _, a := range alters {
+		if _, err := s.dbW.Exec(a); err != nil && !strings.Contains(err.Error(), "duplicate column") {
+			return fmt.Errorf("migrate %q: %w", a[:40], err)
+		}
 	}
 	var v string
 	err := s.dbW.QueryRow(`SELECT value FROM meta WHERE key='schema_version'`).Scan(&v)

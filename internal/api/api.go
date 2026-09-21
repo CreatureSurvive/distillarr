@@ -2,19 +2,19 @@
 package api
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"io/fs"
+	"log"
 	"net/http"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"mediatrans/internal/config"
 	"mediatrans/internal/encode"
 	"mediatrans/internal/jobs"
-	"mediatrans/internal/jellyfin"
 	"mediatrans/internal/media"
 	"mediatrans/internal/preview"
 	"mediatrans/internal/recs"
@@ -24,13 +24,13 @@ import (
 
 // Server wires every subsystem into HTTP routes.
 type Server struct {
-	st    *store.Store
-	cfg   *config.Manager
-	scan  *scan.Scanner
-	eng   *jobs.Engine
-	prev  *preview.Manager
-	hub   *Hub
-	ui    fs.FS // embedded frontend (web/dist)
+	st   *store.Store
+	cfg  *config.Manager
+	scan *scan.Scanner
+	eng  *jobs.Engine
+	prev *preview.Manager
+	hub  *Hub
+	ui   fs.FS // embedded frontend (web/dist)
 }
 
 func NewServer(st *store.Store, cfg *config.Manager, sc *scan.Scanner,
@@ -49,6 +49,7 @@ func (s *Server) Handler() http.Handler {
 
 	mux.HandleFunc("GET /api/v1/health", s.health)
 	mux.HandleFunc("GET /api/v1/events", s.hub.ServeHTTP)
+	mux.HandleFunc("GET /api/v1/system", s.system)
 
 	mux.HandleFunc("GET /api/v1/config", s.getConfig)
 	mux.HandleFunc("PUT /api/v1/config", s.putConfig)
@@ -60,39 +61,51 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/v1/hw", s.reprobe)
 	mux.HandleFunc("POST /api/v1/hw/{backend}/reset", s.resetHW)
 
+	// library
 	mux.HandleFunc("GET /api/v1/libraries", s.listFiles)
 	mux.HandleFunc("GET /api/v1/libraries/stats", s.libraryStats)
 	mux.HandleFunc("GET /api/v1/series", s.listSeries)
-	mux.HandleFunc("GET /api/v1/series/rec", s.seriesRec)
-	mux.HandleFunc("GET /api/v1/series/episodes", s.listEpisodes)
-	mux.HandleFunc("POST /api/v1/series/queue", s.queueSeries)
+	mux.HandleFunc("GET /api/v1/show", s.showDetail)
+	mux.HandleFunc("GET /api/v1/show/episodes", s.showEpisodes)
+	mux.HandleFunc("POST /api/v1/show/plan", s.showPlan)
+	mux.HandleFunc("POST /api/v1/show/queue", s.queueShow)
 
 	mux.HandleFunc("GET /api/v1/files/{id}", s.fileDetail)
-	mux.HandleFunc("GET /api/v1/files/{id}/rec", s.fileRec)
+	mux.HandleFunc("POST /api/v1/files/{id}/plan", s.filePlan)
 	mux.HandleFunc("POST /api/v1/files/{id}/queue", s.queueFile)
 	mux.HandleFunc("POST /api/v1/files/{id}/preview", s.createPreview)
 
+	// jobs + queue
 	mux.HandleFunc("GET /api/v1/jobs", s.listJobs)
 	mux.HandleFunc("GET /api/v1/jobs/{id}", s.getJob)
 	mux.HandleFunc("POST /api/v1/jobs/{id}/cancel", s.jobCancel)
 	mux.HandleFunc("POST /api/v1/jobs/{id}/retry", s.jobRetry)
 	mux.HandleFunc("POST /api/v1/jobs/{id}/run-now", s.jobRunNow)
-	mux.HandleFunc("POST /api/v1/jobs/{id}/priority", s.jobPriority)
-
+	mux.HandleFunc("POST /api/v1/jobs/{id}/move", s.jobMove)
 	mux.HandleFunc("GET /api/v1/queue/summary", s.queueSummary)
 	mux.HandleFunc("POST /api/v1/queue/pause", s.queuePause)
 	mux.HandleFunc("POST /api/v1/queue/resume", s.queueResume)
+	mux.HandleFunc("POST /api/v1/queue/clear", s.queueClear)
 
+	// trash
+	mux.HandleFunc("GET /api/v1/trash", s.listTrash)
+	mux.HandleFunc("POST /api/v1/trash/{id}/restore", s.restoreTrash)
+	mux.HandleFunc("DELETE /api/v1/trash/{id}", s.deleteTrash)
+	mux.HandleFunc("POST /api/v1/trash/purge", s.purgeTrash)
+
+	// jellyfin
 	mux.HandleFunc("GET /api/v1/jellyfin/status", s.jfStatus)
+	mux.HandleFunc("POST /api/v1/jellyfin/test", s.jfTest)
 	mux.HandleFunc("POST /api/v1/jellyfin/sync", s.jfSync)
-	mux.HandleFunc("GET /api/v1/poster/{itemid}", s.poster)
-	mux.HandleFunc("GET /api/v1/probe", s.freshProbe)
+	mux.HandleFunc("GET /api/v1/image/{itemid}", s.image)
 
+	// previews
 	mux.HandleFunc("GET /api/v1/previews", s.listPreviews)
 	mux.HandleFunc("GET /api/v1/previews/{id}", s.getPreview)
 	mux.HandleFunc("GET /api/v1/previews/{id}/{clip}", s.previewClip)
 
-	// Static UI.
+	mux.HandleFunc("GET /api/v1/calibration", s.calibration)
+
 	if s.ui != nil {
 		mux.Handle("GET /", s.spaHandler())
 	}
@@ -119,10 +132,42 @@ func readJSON(r *http.Request, v any) error {
 	}
 	defer r.Body.Close()
 	dec := json.NewDecoder(r.Body)
-	if dec.More() {
-		return dec.Decode(v)
+	if err := dec.Decode(v); err != nil && err.Error() != "EOF" {
+		return err
 	}
 	return nil
+}
+
+func pathID(r *http.Request) int64 {
+	id, _ := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	return id
+}
+
+// ---- system ----
+
+func diskUsage(path string) map[string]int64 {
+	var st syscall.Statfs_t
+	if err := syscall.Statfs(path, &st); err != nil {
+		return nil
+	}
+	return map[string]int64{
+		"total": int64(st.Blocks) * st.Bsize,
+		"free":  int64(st.Bavail) * st.Bsize,
+	}
+}
+
+func (s *Server) system(w http.ResponseWriter, r *http.Request) {
+	items, _ := s.st.ListTrash()
+	var trashBytes int64
+	for _, t := range items {
+		trashBytes += t.Size
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"media":       diskUsage("/srv/media"),
+		"config":      diskUsage("/config"),
+		"trash_bytes": trashBytes,
+		"trash_count": len(items),
+	})
 }
 
 // ---- config ----
@@ -139,28 +184,51 @@ func (s *Server) getConfig(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, configOut{Config: c, JellyfinKeySet: keySet})
 }
 
+// putConfig merges a partial JSON object into the config: only the
+// fields present in the body change.
 func (s *Server) putConfig(w http.ResponseWriter, r *http.Request) {
-	var in config.Config
-	if err := readJSON(r, &in); err != nil {
+	var patch map[string]json.RawMessage
+	if err := readJSON(r, &patch); err != nil {
 		fail(w, 400, err)
 		return
 	}
+	if k, ok := patch["jellyfin_api_key"]; ok {
+		var key string
+		_ = json.Unmarshal(k, &key)
+		if strings.TrimSpace(key) == "" {
+			delete(patch, "jellyfin_api_key") // blank never erases a saved key
+		}
+	}
+	delete(patch, "jellyfin_key_set")
+	var perr error
 	err := s.cfg.Update(func(cur *config.Config) {
-		next := in
-		// Never blank an existing key from an omitted field.
-		if strings.TrimSpace(next.JellyfinAPIKey) == "" && cur.JellyfinAPIKey != "" {
-			next.JellyfinAPIKey = cur.JellyfinAPIKey
+		b, _ := json.Marshal(cur)
+		var merged map[string]json.RawMessage
+		_ = json.Unmarshal(b, &merged)
+		for k, v := range patch {
+			merged[k] = v
 		}
-		if next.Workers == 0 {
-			next.Workers = cur.Workers
+		b, _ = json.Marshal(merged)
+		next := *cur
+		if perr = json.Unmarshal(b, &next); perr == nil {
+			*cur = next
 		}
-		*cur = next
 	})
+	if err == nil {
+		err = perr
+	}
 	if err != nil {
-		fail(w, 500, err)
+		fail(w, 400, err)
 		return
 	}
 	s.eng.Kick()
+	for _, k := range []string{"default_codec", "default_quality", "preferred_backend", "min_savings_pct",
+		"audio_pcm_target", "recompress_hevc", "max_height", "tonemap_hdr", "default_speed"} {
+		if _, ok := patch[k]; ok {
+			s.scan.RefreshRecsSoon()
+			break
+		}
+	}
 	s.getConfig(w, r)
 }
 
@@ -181,23 +249,23 @@ func (s *Server) scanStats(w http.ResponseWriter, r *http.Request) {
 // ---- hardware ----
 
 func (s *Server) getHW(w http.ResponseWriter, r *http.Request) {
-	rep := s.eng.Report()
 	health := map[string]bool{}
 	for _, b := range encode.AllBackends {
 		health[string(b)] = s.eng.BackendDegraded(string(b))
 	}
-	if rep == nil {
-		writeJSON(w, http.StatusOK, map[string]any{"report": nil, "health": health})
-		return
+	resolved := map[string]string{}
+	for _, c := range []encode.Codec{encode.HEVC, encode.AV1} {
+		resolved[string(c)] = string(s.eng.ResolveFor("auto", c))
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"report": rep, "health": health})
+	writeJSON(w, http.StatusOK, map[string]any{"report": s.eng.Report(), "health": health, "auto": resolved})
 }
 
 func (s *Server) reprobe(w http.ResponseWriter, r *http.Request) {
 	go func() {
 		if _, err := s.eng.Reprobe(); err != nil {
-			fmt.Println("reprobe:", err)
+			log.Printf("reprobe: %v", err)
 		}
+		s.scan.RefreshRecsSoon()
 	}()
 	writeJSON(w, http.StatusOK, map[string]any{"started": true})
 }
@@ -207,296 +275,8 @@ func (s *Server) resetHW(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
-// ---- library browsing ----
-
-type fileOut struct {
-	*store.File
-	Poster   string `json:"poster,omitempty"` // /api/v1/poster/{itemId}
-	JFName   string `json:"jf_name,omitempty"`
-	Overview string `json:"overview,omitempty"`
-	Queued   bool   `json:"queued,omitempty"`
-}
-
-func (s *Server) listFiles(w http.ResponseWriter, r *http.Request) {
-	q := r.URL.Query()
-	f := store.FileFilter{
-		Library: q.Get("library"),
-		Title:   q.Get("title"),
-		Codec:   q.Get("codec"),
-		HDR:     q.Get("hdr"),
-	}
-	if q.Get("candidates") == "1" {
-		f.Candidates = true
-	}
-	if v := q.Get("min_height"); v != "" {
-		f.MinHeight, _ = strconv.Atoi(v)
-	}
-	if v := q.Get("min_size"); v != "" {
-		n, _ := strconv.ParseInt(v, 10, 64)
-		f.MinSize = n
-	}
-	cursorID64, _ := strconv.ParseInt(q.Get("cursor"), 10, 64)
-	cursorID := int(cursorID64)
-	limit, _ := strconv.Atoi(q.Get("limit"))
-	files, more, err := s.st.ListFiles(f, q.Get("cursor_title"), cursorID, limit)
-	if err != nil {
-		fail(w, 500, err)
-		return
-	}
-	out := make([]fileOut, 0, len(files))
-	paths := make([]string, 0, len(files))
-	for _, fl := range files {
-		paths = append(paths, fl.Path)
-	}
-	jf, _ := s.st.JellyfinMap(paths)
-	for _, fl := range files {
-		fo := fileOut{File: fl}
-		if row, ok := jf[fl.Path]; ok {
-			fo.Poster = "/api/v1/poster/" + row.ItemID
-			fo.JFName = row.Name
-			fo.Overview = row.Overview
-		}
-		fo.Queued, _ = s.st.HasQueuedForFile(fl.Path)
-		out = append(out, fo)
-	}
-	var next string
-	if more && len(out) > 0 {
-		last := out[len(out)-1]
-		next = fmt.Sprintf("%d:%s", last.ID, last.Title)
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"files": out, "next_cursor": next})
-}
-
-func (s *Server) libraryStats(w http.ResponseWriter, r *http.Request) {
-	lib := r.URL.Query().Get("library")
-	st, err := s.st.LibraryStats(lib)
-	if err != nil {
-		fail(w, 500, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, st)
-}
-
-func (s *Server) listSeries(w http.ResponseWriter, r *http.Request) {
-	series, err := s.st.ListSeries(r.URL.Query().Get("title"), 0)
-	if err != nil {
-		fail(w, 500, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"series": series})
-}
-
-func (s *Server) listEpisodes(w http.ResponseWriter, r *http.Request) {
-	q := r.URL.Query()
-	show := q.Get("show")
-	season, _ := strconv.Atoi(q.Get("season"))
-	if show == "" {
-		fail(w, 400, fmt.Errorf("show required"))
-		return
-	}
-	files, _, err := s.st.ListFiles(store.FileFilter{Library: "tvshows", Show: show, Season: season}, "", 0, 500)
-	if err != nil {
-		fail(w, 500, err)
-		return
-	}
-	out := make([]fileOut, 0, len(files))
-	for _, fl := range files {
-		fo := fileOut{File: fl}
-		fo.Queued, _ = s.st.HasQueuedForFile(fl.Path)
-		out = append(out, fo)
-	}
-	seasons, _ := s.st.ListSeasons(show)
-	writeJSON(w, http.StatusOK, map[string]any{"episodes": out, "seasons": seasons})
-}
-
-// seriesRec returns the aggregate recommendation for a show or one
-// season (?season=-1 for the whole show).
-func (s *Server) seriesRec(w http.ResponseWriter, r *http.Request) {
-	q := r.URL.Query()
-	show := q.Get("show")
-	season, _ := strconv.Atoi(q.Get("season")) // -1 or 0 means whole show
-	if show == "" {
-		fail(w, 400, fmt.Errorf("show required"))
-		return
-	}
-	filter := store.FileFilter{Library: "tvshows", Show: show}
-	if season > 0 {
-		filter.Season = season
-	}
-	files, _, err := s.st.ListFiles(filter, "", 0, 1000)
-	if err != nil {
-		fail(w, 500, err)
-		return
-	}
-	cfg := s.cfg.Get()
-	agg := recs.Aggregate(files, cfg)
-	writeJSON(w, http.StatusOK, agg)
-}
-
-func (s *Server) fileDetail(w http.ResponseWriter, r *http.Request) {
-	id, _ := strconv.ParseInt(r.PathValue("id"), 10, 64)
-	f, err := s.st.GetFile(id)
-	if err != nil || f == nil {
-		fail(w, 404, fmt.Errorf("file not found"))
-		return
-	}
-	streams, _ := s.st.Streams(f.ID)
-	jf, _ := s.st.JellyfinMap([]string{f.Path})
-	fo := fileOut{File: f}
-	if row, ok := jf[f.Path]; ok {
-		fo.Poster = "/api/v1/poster/" + row.ItemID
-		fo.JFName = row.Name
-		fo.Overview = row.Overview
-	}
-	fo.Queued, _ = s.st.HasQueuedForFile(f.Path)
-	writeJSON(w, http.StatusOK, map[string]any{"file": fo, "streams": streams})
-}
-
-func (s *Server) fileRec(w http.ResponseWriter, r *http.Request) {
-	id, _ := strconv.ParseInt(r.PathValue("id"), 10, 64)
-	f, err := s.st.GetFile(id)
-	if err != nil || f == nil {
-		fail(w, 404, fmt.Errorf("file not found"))
-		return
-	}
-	rec := recs.Recommend(f, s.cfg.Get())
-	writeJSON(w, http.StatusOK, rec)
-}
-
-// ---- queueing ----
-
-type queueReq struct {
-	Settings *encode.Settings `json:"settings,omitempty"`
-	RunNow   bool             `json:"run_now,omitempty"`
-	Priority int              `json:"priority,omitempty"`
-}
-
-func (s *Server) resolveSettings(f *store.File, in *encode.Settings) encode.Settings {
-	cfg := s.cfg.Get()
-	if in == nil {
-		rec := recs.Recommend(f, cfg)
-		return rec.Settings
-	}
-	st := *in
-	if st.Quality == 0 {
-		st.Quality = cfg.DefaultQuality
-	}
-	if st.Codec == "" {
-		st.Codec = encode.Codec(cfg.DefaultCodec)
-	}
-	if st.AudioPCMTarget == "" {
-		st.AudioPCMTarget = cfg.AudioPCMTarget
-	}
-	if st.Container == "" {
-		st.Container = "auto"
-	}
-	return st
-}
-
-func (s *Server) queueFile(w http.ResponseWriter, r *http.Request) {
-	id, _ := strconv.ParseInt(r.PathValue("id"), 10, 64)
-	f, err := s.st.GetFile(id)
-	if err != nil || f == nil {
-		fail(w, 404, fmt.Errorf("file not found"))
-		return
-	}
-	if ok, _ := s.st.HasQueuedForFile(f.Path); ok {
-		writeJSON(w, http.StatusConflict, map[string]any{"error": "already queued"})
-		return
-	}
-	var req queueReq
-	if err := readJSON(r, &req); err != nil {
-		fail(w, 400, err)
-		return
-	}
-	cfg := s.cfg.Get()
-	settings := s.resolveSettings(f, req.Settings)
-	priority := req.Priority
-	if req.RunNow {
-		priority = 0
-	}
-	if priority == 0 && !req.RunNow {
-		priority = 100000
-	}
-	maxAtt := cfg.MaxAttempts
-	if maxAtt <= 0 {
-		maxAtt = 3
-	}
-	sj, _ := json.Marshal(settings)
-	j := &store.Job{
-		FileID: f.ID, SrcPath: f.Path, Priority: priority, RunNow: req.RunNow,
-		Backend: string(settings.Backend), Codec: string(settings.Codec),
-		Quality: settings.Quality, SettingsJSON: string(sj),
-		MaxAttempts: maxAtt, SrcSize: f.Size,
-	}
-	if err := s.st.CreateJob(j); err != nil {
-		fail(w, 500, err)
-		return
-	}
-	s.hub.Broadcast("job", map[string]any{"id": j.ID, "status": store.StatusQueued})
-	s.eng.Kick()
-	writeJSON(w, http.StatusOK, j)
-}
-
-// queueSeries enqueues every candidate episode of a show (or season).
-type queueSeriesReq struct {
-	Show     string           `json:"show"`
-	Season   int              `json:"season"` // -1/0 = whole show
-	Settings *encode.Settings `json:"settings,omitempty"`
-	RunNow   bool             `json:"run_now,omitempty"`
-	OnlyWorth bool            `json:"only_worth,omitempty"` // skip non-candidates
-}
-
-func (s *Server) queueSeries(w http.ResponseWriter, r *http.Request) {
-	var req queueSeriesReq
-	if err := readJSON(r, &req); err != nil || req.Show == "" {
-		fail(w, 400, fmt.Errorf("show required"))
-		return
-	}
-	filter := store.FileFilter{Library: "tvshows", Show: req.Show}
-	if req.Season > 0 {
-		filter.Season = req.Season
-	}
-	files, _, err := s.st.ListFiles(filter, "", 0, 1000)
-	if err != nil {
-		fail(w, 500, err)
-		return
-	}
-	cfg := s.cfg.Get()
-	maxAtt := cfg.MaxAttempts
-	if maxAtt <= 0 {
-		maxAtt = 3
-	}
-	created := 0
-	for _, f := range files {
-		if ok, _ := s.st.HasQueuedForFile(f.Path); ok {
-			continue
-		}
-		settings := s.resolveSettings(f, req.Settings)
-		if req.OnlyWorth {
-			rec := recs.Recommend(f, cfg)
-			if !rec.Worth {
-				continue
-			}
-		}
-		sj, _ := json.Marshal(settings)
-		priority := 100000
-		if req.RunNow {
-			priority = 0
-		}
-		j := &store.Job{
-			FileID: f.ID, SrcPath: f.Path, Priority: priority, RunNow: req.RunNow,
-			Backend: string(settings.Backend), Codec: string(settings.Codec),
-			Quality: settings.Quality, SettingsJSON: string(sj),
-			MaxAttempts: maxAtt, SrcSize: f.Size,
-		}
-		if err := s.st.CreateJob(j); err != nil {
-			continue
-		}
-		created++
-	}
-	s.eng.Kick()
-	writeJSON(w, http.StatusOK, map[string]any{"created": created})
+func (s *Server) calibration(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, recs.CalibrationSummary())
 }
 
 // ---- jobs ----
@@ -509,17 +289,16 @@ func (s *Server) listJobs(w http.ResponseWriter, r *http.Request) {
 	}
 	before, _ := strconv.ParseInt(q.Get("before"), 10, 64)
 	limit, _ := strconv.Atoi(q.Get("limit"))
-	jobs, err := s.st.ListJobs(statuses, before, limit)
+	list, err := s.st.ListJobs(statuses, before, limit)
 	if err != nil {
 		fail(w, 500, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"jobs": jobs})
+	writeJSON(w, http.StatusOK, map[string]any{"jobs": list})
 }
 
 func (s *Server) getJob(w http.ResponseWriter, r *http.Request) {
-	id, _ := strconv.ParseInt(r.PathValue("id"), 10, 64)
-	j, err := s.st.GetJob(id)
+	j, err := s.st.GetJob(pathID(r))
 	if err != nil || j == nil {
 		fail(w, 404, fmt.Errorf("job not found"))
 		return
@@ -535,8 +314,7 @@ func (s *Server) getJob(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) jobCancel(w http.ResponseWriter, r *http.Request) {
-	id, _ := strconv.ParseInt(r.PathValue("id"), 10, 64)
-	if err := s.eng.Cancel(id); err != nil {
+	if err := s.eng.Cancel(pathID(r)); err != nil {
 		fail(w, 400, err)
 		return
 	}
@@ -544,8 +322,7 @@ func (s *Server) jobCancel(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) jobRetry(w http.ResponseWriter, r *http.Request) {
-	id, _ := strconv.ParseInt(r.PathValue("id"), 10, 64)
-	if err := s.eng.Retry(id); err != nil {
+	if err := s.eng.Retry(pathID(r)); err != nil {
 		fail(w, 400, err)
 		return
 	}
@@ -553,8 +330,7 @@ func (s *Server) jobRetry(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) jobRunNow(w http.ResponseWriter, r *http.Request) {
-	id, _ := strconv.ParseInt(r.PathValue("id"), 10, 64)
-	if err := s.st.SetRunNow(id); err != nil {
+	if err := s.st.SetRunNow(pathID(r)); err != nil {
 		fail(w, 500, err)
 		return
 	}
@@ -562,36 +338,31 @@ func (s *Server) jobRunNow(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
-type priorityReq struct {
-	Priority int `json:"priority"`
-}
-
-func (s *Server) jobPriority(w http.ResponseWriter, r *http.Request) {
-	id, _ := strconv.ParseInt(r.PathValue("id"), 10, 64)
-	var req priorityReq
+func (s *Server) jobMove(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Before int64 `json:"before"` // 0 = move to end
+	}
 	if err := readJSON(r, &req); err != nil {
 		fail(w, 400, err)
 		return
 	}
-	if err := s.st.Reprioritize(id, req.Priority); err != nil {
+	if err := s.st.MoveJob(pathID(r), req.Before); err != nil {
 		fail(w, 500, err)
 		return
 	}
-	s.eng.Kick()
+	s.hub.Broadcast("queue", map[string]any{"moved": pathID(r)})
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
-
-// ---- queue state ----
 
 func (s *Server) queueSummary(w http.ResponseWriter, r *http.Request) {
 	counts, _ := s.st.CountJobsByStatus()
 	realized, jobsDone, _ := s.st.RealizedSavings()
 	writeJSON(w, http.StatusOK, map[string]any{
-		"counts": counts,
+		"counts":         counts,
 		"realized_saved": realized,
-		"jobs_done": jobsDone,
-		"window_open": s.cfg.WindowOpen(time.Now()),
-		"paused": s.cfg.Get().Paused,
+		"jobs_done":      jobsDone,
+		"window_open":    s.cfg.WindowOpen(time.Now()),
+		"paused":         s.cfg.Get().Paused,
 	})
 }
 
@@ -607,55 +378,52 @@ func (s *Server) queueResume(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"paused": false})
 }
 
-// ---- preview ----
-
-type previewReq struct {
-	Settings *encode.Settings `json:"settings,omitempty"`
-	Segments int              `json:"segments,omitempty"`
-	Starts   []float64        `json:"starts,omitempty"`
-}
-
-func (s *Server) createPreview(w http.ResponseWriter, r *http.Request) {
-	id, _ := strconv.ParseInt(r.PathValue("id"), 10, 64)
-	f, err := s.st.GetFile(id)
-	if err != nil || f == nil {
-		fail(w, 404, fmt.Errorf("file not found"))
-		return
-	}
-	var req previewReq
-	if err := readJSON(r, &req); err != nil {
-		fail(w, 400, err)
-		return
-	}
-	settings := s.resolveSettings(f, req.Settings)
-	// Resolve a real backend so previews exercise the same hw path.
-	if settings.Backend == "" || settings.Backend == "auto" {
-		settings.Backend = "sw"
-		if rep := s.eng.Report(); rep != nil {
-			if bs := rep.BackendsFor(settings.Codec); len(bs) > 0 {
-				settings.Backend = bs[0]
-			}
-		}
-	}
-	manual := req.Starts
-	if manual == nil && req.Segments > 0 && req.Segments <= 5 {
-		manual = autoStartsFor(f.Duration, req.Segments)
-	}
-	p, err := s.prev.Create(f.ID, f.Path, f.Duration, settings, manual)
+// queueClear cancels every pending (not running) job.
+func (s *Server) queueClear(w http.ResponseWriter, r *http.Request) {
+	list, err := s.st.ListJobs([]string{store.StatusQueued}, 0, 200)
 	if err != nil {
 		fail(w, 500, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, p)
+	for _, j := range list {
+		_ = s.eng.Cancel(j.ID)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"canceled": len(list)})
 }
 
-func autoStartsFor(dur float64, n int) []float64 {
-	var out []float64
-	for i := 1; i <= n; i++ {
-		out = append(out, dur*float64(i)/float64(n+1)-10)
+// ---- trash ----
+
+func (s *Server) listTrash(w http.ResponseWriter, r *http.Request) {
+	items, err := s.st.ListTrash()
+	if err != nil {
+		fail(w, 500, err)
+		return
 	}
-	return out
+	writeJSON(w, http.StatusOK, map[string]any{"items": items, "retention_days": s.cfg.Get().TrashDays})
 }
+
+func (s *Server) restoreTrash(w http.ResponseWriter, r *http.Request) {
+	if err := s.eng.RestoreTrash(pathID(r)); err != nil {
+		fail(w, 400, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+func (s *Server) deleteTrash(w http.ResponseWriter, r *http.Request) {
+	if err := s.eng.DeleteTrashItem(pathID(r)); err != nil {
+		fail(w, 400, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+func (s *Server) purgeTrash(w http.ResponseWriter, r *http.Request) {
+	freed, n := s.eng.PurgeTrash(r.URL.Query().Get("all") == "1")
+	writeJSON(w, http.StatusOK, map[string]any{"freed": freed, "count": n})
+}
+
+// ---- previews ----
 
 func (s *Server) listPreviews(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"previews": s.prev.List()})
@@ -677,96 +445,7 @@ func (s *Server) previewClip(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Accept-Ranges", "bytes")
-	http.ServeFile(w, r, path) // handles Range + Content-Type
-}
-
-// ---- jellyfin ----
-
-func (s *Server) jfClient() *jellyfin.Client {
-	c := s.cfg.Get()
-	if c.JellyfinURL == "" || c.JellyfinAPIKey == "" {
-		return nil
-	}
-	return jellyfin.New(c.JellyfinURL, c.JellyfinAPIKey)
-}
-
-func (s *Server) jfStatus(w http.ResponseWriter, r *http.Request) {
-	c := s.cfg.Get()
-	out := map[string]any{
-		"configured": c.JellyfinURL != "" && c.JellyfinAPIKey != "",
-	}
-	if cl := s.jfClient(); cl != nil {
-		ctx, cancel := context.WithTimeout(r.Context(), 8*time.Second)
-		defer cancel()
-		if si, err := cl.Test(ctx); err == nil {
-			out["server_name"] = si.ServerName
-			out["version"] = si.Version
-			out["connected"] = true
-		} else {
-			out["connected"] = false
-			out["error"] = err.Error()
-		}
-	}
-	writeJSON(w, http.StatusOK, out)
-}
-
-func (s *Server) jfSync(w http.ResponseWriter, r *http.Request) {
-	cl := s.jfClient()
-	if cl == nil {
-		fail(w, 400, fmt.Errorf("jellyfin not configured"))
-		return
-	}
-	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
-		defer cancel()
-		n := 0
-		err := cl.WalkItems(ctx, func(items []jellyfin.Item) error {
-			rows := make([]store.JellyfinRow, 0, len(items))
-			for _, it := range items {
-				if it.Path == "" {
-					continue
-				}
-				rows = append(rows, store.JellyfinRow{
-					Path: it.Path, ItemID: it.ID, SeriesID: it.SeriesID, SeasonID: it.SeasonID,
-					Name: it.Name, ImageTag: it.ImageTags["Primary"], Overview: it.Overview,
-					UpdatedAt: time.Now().UTC().Format(time.RFC3339),
-				})
-			}
-			if err := s.st.UpsertJF(rows); err != nil {
-				return err
-			}
-			n += len(rows)
-			s.hub.Broadcast("jellyfin", map[string]any{"synced": n})
-			return nil
-		})
-		if err != nil {
-			s.hub.Broadcast("jellyfin", map[string]any{"error": err.Error()})
-			return
-		}
-		s.hub.Broadcast("jellyfin", map[string]any{"done": true, "synced": n})
-	}()
-	writeJSON(w, http.StatusOK, map[string]any{"started": true})
-}
-
-func (s *Server) poster(w http.ResponseWriter, r *http.Request) {
-	itemID := r.PathValue("itemid")
-	cl := s.jfClient()
-	if cl == nil || itemID == "" {
-		http.NotFound(w, r)
-		return
-	}
-	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
-	defer cancel()
-	b, ct, err := cl.FetchImage(ctx, itemID)
-	if err != nil {
-		http.NotFound(w, r)
-		return
-	}
-	w.Header().Set("Cache-Control", "private, max-age=86400")
-	if ct != "" {
-		w.Header().Set("Content-Type", ct)
-	}
-	w.Write(b)
+	http.ServeFile(w, r, path)
 }
 
 // ---- static UI ----
@@ -779,29 +458,20 @@ func (s *Server) spaHandler() http.Handler {
 			p = "index.html"
 		}
 		if _, err := fs.Stat(s.ui, p); err != nil {
-			// SPA fallback
 			r2 := new(http.Request)
 			*r2 = *r
 			r2.URL.Path = "/"
 			fileServer.ServeHTTP(w, r2)
 			return
 		}
+		if strings.HasPrefix(p, "assets/") {
+			w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+		}
 		fileServer.ServeHTTP(w, r)
 	})
 }
 
-// mediaInfo is a small helper endpoint used by the detail view to show
-// a fresh probe without a rescan.
-func (s *Server) freshProbe(w http.ResponseWriter, r *http.Request) {
-	p := r.URL.Query().Get("path")
-	if p == "" {
-		fail(w, 400, fmt.Errorf("path required"))
-		return
-	}
-	pr, err := media.ProbeFile(r.Context(), p)
-	if err != nil {
-		fail(w, 500, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, pr)
+// probeOf is a shared helper for handlers that need a fresh probe.
+func probeOf(r *http.Request, path string) (*media.Probe, error) {
+	return media.ProbeFile(r.Context(), path)
 }

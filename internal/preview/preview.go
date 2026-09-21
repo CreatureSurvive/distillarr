@@ -41,6 +41,10 @@ type Preview struct {
 	Settings  encode.Settings `json:"settings"`
 	Duration  float64         `json:"duration"`
 	Segments  []Segment       `json:"segments"`
+	Command   string          `json:"command,omitempty"`
+	// MeasuredRatio is encoded/source VIDEO bytes across all samples
+	// (0 when the source needed a proxy and can't be compared).
+	MeasuredRatio float64 `json:"measured_ratio,omitempty"`
 }
 
 // Manager tracks previews; clips live under rootDir.
@@ -49,6 +53,8 @@ type Manager struct {
 	mu       sync.RWMutex
 	items    map[string]*Preview
 	acquire  func(key string) func() // engine GPU slot
+	// OnMeasured feeds sample results into the size model.
+	OnMeasured func(fileID int64, s encode.Settings, ratio float64)
 	notify   func(event string, payload any)
 }
 
@@ -134,11 +140,28 @@ func (m *Manager) Create(fileID int64, path string, dur float64, s encode.Settin
 
 	m.mu.Lock()
 	m.items[id] = p
+	m.pruneLocked(12)
 	m.mu.Unlock()
 	m.notify(evPreview, p)
 
 	go m.run(p)
 	return p, nil
+}
+
+// pruneLocked keeps the newest keep previews and deletes the rest.
+func (m *Manager) pruneLocked(keep int) {
+	all := make([]*Preview, 0, len(m.items))
+	for _, p := range m.items {
+		all = append(all, p)
+	}
+	sort.Slice(all, func(i, j int) bool { return all[i].CreatedAt.After(all[j].CreatedAt) })
+	for _, p := range all[min(keep, len(all)):] {
+		if p.Status == "running" {
+			continue
+		}
+		_ = os.RemoveAll(filepath.Join(m.root, p.ID))
+		delete(m.items, p.ID)
+	}
 }
 
 // autoStarts picks evenly spaced segment midpoints.
@@ -165,14 +188,8 @@ func (m *Manager) run(p *Preview) {
 		return
 	}
 	proxy := encode.SourceNeedsProxy(src)
-
-	prim, fb, err := encode.BuildPreview(p.Settings, src, "", 0, segLen)
-	if err != nil {
-		p.Status = "failed"
-		p.Error = err.Error()
-		return
-	}
-	semKey := prim.SemKey
+	semKey := string(p.Settings.Backend)
+	var srcTotal, encTotal int64
 
 	for i := range p.Segments {
 		seg := &p.Segments[i]
@@ -181,54 +198,52 @@ func (m *Manager) run(p *Preview) {
 		seg.SrcPath = fmt.Sprintf("src-%d.mp4", i)
 		seg.EncPath = fmt.Sprintf("enc-%d.mp4", i)
 
-		// Left side: source cut (copy, or x264 proxy when needed).
+		// A side: source cut (stream copy, or x264 proxy when needed).
 		srcArgs := encode.BuildSourceCut(src, filepath.Join(dir, seg.SrcPath), seg.Start, seg.Len, proxy)
 		if err := runSimple(srcArgs); err != nil {
-			p.Status = "failed"
-			p.Error = fmt.Sprintf("source cut: %v", err)
+			p.Status, p.Error = "failed", fmt.Sprintf("source cut: %v", err)
 			return
 		}
 		if fi, err := os.Stat(filepath.Join(dir, seg.SrcPath)); err == nil {
 			seg.SrcSize = fi.Size()
 		}
 
-		// Right side: proposed encode on the same span.
+		// B side: the exact pipeline a real job would run, on this span.
+		prim, fb, err := encode.Build(p.Settings, src, filepath.Join(dir, seg.EncPath),
+			&encode.Clip{Start: seg.Start, Dur: seg.Len})
+		if err != nil {
+			p.Status, p.Error = "failed", err.Error()
+			return
+		}
+		if i == 0 {
+			p.Command = encode.CommandString(prim.Args)
+		}
 		release := m.acquire(semKey)
-		encArgs := withOutputAndSpan(prim.Args, filepath.Join(dir, seg.EncPath), seg.Start, seg.Len)
-		err := runSimple(encArgs)
+		err = runSimple(prim.Args)
 		if err != nil && fb != nil {
 			log.Printf("preview: hw decode failed (%v); software decode", err)
-			encArgs = withOutputAndSpan(fb.Args, filepath.Join(dir, seg.EncPath), seg.Start, seg.Len)
-			err = runSimple(encArgs)
+			err = runSimple(fb.Args)
 		}
 		release()
 		if err != nil {
-			p.Status = "failed"
-			p.Error = fmt.Sprintf("encode sample: %v", err)
+			p.Status, p.Error = "failed", fmt.Sprintf("encode sample: %v", err)
 			return
 		}
 		if fi, err := os.Stat(filepath.Join(dir, seg.EncPath)); err == nil {
 			seg.EncSize = fi.Size()
 		}
+		srcTotal += seg.SrcSize
+		encTotal += seg.EncSize
 	}
-	p.Status = "ready"
-}
-
-// withOutputAndSpan rewrites a BuildPreview argv for a concrete span
-// and output. BuildPreview baked placeholder values we now replace.
-func withOutputAndSpan(args []string, out string, start, dur float64) []string {
-	out2 := append([]string{}, args...)
-	for i := 0; i+1 < len(out2); i++ {
-		switch out2[i] {
-		case "-ss":
-			out2[i+1] = fmt.Sprintf("%.3f", start)
-		case "-t":
-			out2[i+1] = fmt.Sprintf("%.3f", dur)
+	// Both sides carry the same 192k AAC track, so subtract it to compare video.
+	audio := int64(192000 / 8 * segLen * float64(len(p.Segments)))
+	if !proxy && srcTotal > audio && encTotal > audio {
+		p.MeasuredRatio = float64(encTotal-audio) / float64(srcTotal-audio)
+		if m.OnMeasured != nil {
+			m.OnMeasured(p.FileID, p.Settings, p.MeasuredRatio)
 		}
 	}
-	// last element is the output path
-	out2[len(out2)-1] = out
-	return out2
+	p.Status = "ready"
 }
 
 func runSimple(args []string) error {
