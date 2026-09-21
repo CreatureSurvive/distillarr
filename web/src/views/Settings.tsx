@@ -53,7 +53,8 @@ export default function SettingsView({ live, onJellyfin }: { live: LiveState; on
         <div className="opts">
           <Field label="Codec">
             <Seg value={cfg.default_codec} onChange={(v) => save({ default_codec: v })}
-              options={[{ value: "hevc", label: "HEVC (plays everywhere)" }, { value: "av1", label: "AV1 (smaller, newer clients)" }]} />
+              options={[{ value: "hevc", label: "HEVC (plays everywhere)" }, { value: "av1", label: "AV1 (smaller, newer clients)" },
+                { value: "h264", label: "H.264 (maximum compatibility)" }]} />
           </Field>
           <Field label="Encoder">
             <Seg value={cfg.preferred_backend} onChange={(v) => save({ preferred_backend: v })}

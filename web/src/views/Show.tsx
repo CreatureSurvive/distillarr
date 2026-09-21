@@ -143,7 +143,7 @@ export default function ShowView({ live }: { live: LiveState }) {
                 <div className="opt-label">Codec</div>
                 <div className="opt-ctl">
                   <Seg value={codec} onChange={(c) => setOv({ ...ov, codec: c, backend: undefined })}
-                    options={[{ value: "hevc", label: "HEVC" }, { value: "av1", label: "AV1" }]} />
+                    options={[{ value: "hevc", label: "HEVC" }, { value: "av1", label: "AV1" }, { value: "h264", label: "H.264" }]} />
                 </div>
               </div>
               <div className="opt-row">

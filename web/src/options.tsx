@@ -96,6 +96,7 @@ export default function EncodeOptions({ value: s, onChange, file, streams, hw, a
             options={[
               { value: "hevc", label: "HEVC" },
               { value: "av1", label: av1ok ? "AV1" : "AV1 (no encoder)" },
+              { value: "h264", label: "H.264", hint: "Plays on anything, but files are ~60% bigger than HEVC at the same quality" },
             ]}
           />
         </Row>
@@ -142,13 +143,19 @@ export default function EncodeOptions({ value: s, onChange, file, streams, hw, a
             options={["faster", "fast", "medium", "slow", "slower"].map((v) => ({ value: v, label: v }))}
           />
         </Row>
-        <Row label="Bit depth" hint="10-bit compresses better and avoids banding">
-          <Seg
-            value={s.bit_depth === 8 ? 8 : 10}
-            onChange={(bit_depth) => set({ bit_depth })}
-            options={[{ value: 10, label: "10-bit" }, { value: 8, label: "8-bit" }]}
-          />
-        </Row>
+        {s.codec === "h264" ? (
+          <Row label="Bit depth" hint="H.264 is always 8-bit High profile: 10-bit H.264 barely plays anywhere">
+            <span className="mono dim">8-bit</span>
+          </Row>
+        ) : (
+          <Row label="Bit depth" hint="10-bit compresses better and avoids banding">
+            <Seg
+              value={s.bit_depth === 8 ? 8 : 10}
+              onChange={(bit_depth) => set({ bit_depth })}
+              options={[{ value: 10, label: "10-bit" }, { value: 8, label: "8-bit" }]}
+            />
+          </Row>
+        )}
         <Row label="Resolution">
           <Seg
             value={s.max_height || 0}
