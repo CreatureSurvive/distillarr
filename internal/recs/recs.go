@@ -113,8 +113,11 @@ func targetBPP(pixels float64, c encode.Codec, b encode.Backend, q int) float64 
 	case encode.NVENC:
 		base *= 1.25
 	}
-	if c == encode.AV1 {
+	switch c {
+	case encode.AV1:
 		base *= 0.75
+	case encode.H264:
+		base *= 1.6 // needs ~60% more bits than HEVC for the same quality
 	}
 	return base
 }
@@ -259,6 +262,14 @@ func Recommend(f *store.File, cfg config.Config) Recommendation {
 		r.Action = "caution"
 		r.Reason = "Dolby Vision source: re-encoding drops the Dolby Vision layer. Skipped unless you queue it by hand."
 		return r
+	}
+	if s.Codec == encode.H264 {
+		switch f.VideoCodec {
+		case "h264", "hevc", "av1", "vp9":
+			r.Reason = fmt.Sprintf("Already %s. Re-encoding to H.264 would only lose quality; H.264 is the target for legacy codecs.", label(f.VideoCodec))
+			r.Audio = audioPlan(f, s)
+			return r
+		}
 	}
 	if f.VideoCodec == "av1" || (f.VideoCodec == "hevc" && !cfg.RecompressHEVC) {
 		r.Reason = fmt.Sprintf("Already %s. Nothing to gain.", label(f.VideoCodec))

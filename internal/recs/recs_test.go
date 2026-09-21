@@ -87,3 +87,14 @@ func TestCurveIsContinuous(t *testing.T) {
 		t.Errorf("720p %.5f vs 768p %.5f should be close and decreasing", a, b)
 	}
 }
+
+func TestH264Target(t *testing.T) {
+	cfg := config.Default()
+	cfg.DefaultCodec = "h264"
+	if r := Recommend(file(1080, 8_000_000, "h264", 2015), cfg); r.Action != "skip" {
+		t.Errorf("H.264 → H.264 must not be recommended: %s", r.Reason)
+	}
+	if r := Recommend(file(576, 6_000_000, "mpeg2video", 2005), cfg); r.Settings.Codec != encode.H264 || r.Settings.BitDepth != 8 {
+		t.Errorf("legacy MPEG-2 → 8-bit H.264 expected: %+v", r.Settings)
+	}
+}

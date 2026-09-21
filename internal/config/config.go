@@ -125,7 +125,9 @@ func (m *Manager) normalize() {
 	if m.cfg.Workers > 8 {
 		m.cfg.Workers = 8
 	}
-	if m.cfg.DefaultCodec != "av1" {
+	switch m.cfg.DefaultCodec {
+	case "hevc", "av1", "h264":
+	default:
 		m.cfg.DefaultCodec = "hevc"
 	}
 	if m.cfg.DefaultQuality < 0 || m.cfg.DefaultQuality > 100 {
