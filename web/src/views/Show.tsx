@@ -119,7 +119,7 @@ export default function ShowView({ live }: { live: LiveState }) {
                   <span className="plan-pct">−{sum.savings_pct.toFixed(0)}%</span>
                 </div>
               ) : (
-                <div className="plan-total dim">{sum ? "Nothing here clears your savings threshold." : "Calculating…"}</div>
+                <div className="plan-total dim">{sum ? "Nothing here clears your savings threshold. Select episodes to encode them anyway." : "Calculating…"}</div>
               )}
               {sum && sum.worth_count > 0 && <SavingsGauge pct={sum.savings_pct} height={6} />}
               {sum && (
@@ -131,8 +131,8 @@ export default function ShowView({ live }: { live: LiveState }) {
               {sum?.notes?.map((n) => <div key={n} className="dim small">{n}</div>)}
             </div>
             <div className="plan-actions">
-              <button className="btn" disabled={busy} onClick={() => queue(false)}>{sel.size ? "Queue selected" : "Add season to queue"}</button>
-              <button className="btn btn-primary" disabled={busy} onClick={() => queue(true)}>Encode now</button>
+              <button className="btn" disabled={busy || (!sel.size && !sum?.worth_count)} onClick={() => queue(false)}>{sel.size ? "Queue selected" : "Add season to queue"}</button>
+              <button className="btn btn-primary" disabled={busy || (!sel.size && !sum?.worth_count)} onClick={() => queue(true)}>Encode now</button>
             </div>
           </div>
 
