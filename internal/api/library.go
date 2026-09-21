@@ -83,6 +83,12 @@ func (s *Server) listFiles(w http.ResponseWriter, r *http.Request) {
 		Codec:   q.Get("codec"),
 		HDR:     q.Get("hdr"),
 		Season:  -1,
+
+		Container:  q.Get("container"),
+		AudioCodec: q.Get("audio"),
+		Issue:      q.Get("issue"),
+		ResClass:   atoi(q.Get("res")),
+		Show:       q.Get("show"),
 	}
 	f.Candidates = q.Get("candidates") == "1"
 	f.MinHeight = atoi(q.Get("min_height"))

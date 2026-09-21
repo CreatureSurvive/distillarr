@@ -351,6 +351,31 @@ type FileFilter struct {
 	MinSize   int64
 	Path      string // exact path
 	SeriesKey string // title for grouping
+
+	Container  string // exact container (mkv, mp4, avi ...); "legacy" = old containers
+	AudioCodec string // any audio track: pcm, aac, ac3, eac3, dts, truehd, flac, opus ...
+	Issue      string // issue key (see internal/issues)
+	ResClass   int    // nominal class (res.Class): 480, 576, 720, 1080, 2160
+}
+
+// resClassSQL mirrors res.Class in SQL.
+const resClassSQL = `(CASE WHEN width<=0 AND height<=0 THEN 0
+	WHEN width>=3200 OR height>=1800 THEN 2160
+	WHEN width>=1700 OR height>=1000 THEN 1080
+	WHEN width>=1180 OR height>=700 THEN 720
+	WHEN height>500 OR width>860 THEN 576 ELSE 480 END)`
+
+// LegacyContainers / LegacyVideoCodecs are filter groups ("legacy").
+var LegacyContainers = []string{"avi", "wmv", "asf", "flv", "mpg", "mpeg", "ts", "m2ts", "vob", "divx", "ogm", "rm", "rmvb", "3gp"}
+var LegacyVideoCodecs = []string{"mpeg1video", "mpeg2video", "mpeg4", "msmpeg4v1", "msmpeg4v2", "msmpeg4v3",
+	"wmv1", "wmv2", "wmv3", "vc1", "h263", "rv30", "rv40", "vp6", "vp6f", "vp8", "theora", "flv1"}
+
+func inList(col string, vals []string) (string, []any) {
+	a := make([]any, len(vals))
+	for i, v := range vals {
+		a[i] = v
+	}
+	return col + " IN (" + strings.TrimSuffix(strings.Repeat("?,", len(vals)), ",") + ")", a
 }
 
 // Sort orders accepted by ListFiles.
@@ -497,9 +522,43 @@ func (f FileFilter) where() (string, []any) {
 			a = append(a, f.Season)
 		}
 	}
-	if f.Codec != "" {
+	switch f.Codec {
+	case "":
+	case "legacy":
+		q, qa := inList("video_codec", LegacyVideoCodecs)
+		w, a = append(w, q), append(a, qa...)
+	default:
 		w = append(w, "video_codec=?")
 		a = append(a, f.Codec)
+	}
+	switch f.Container {
+	case "":
+	case "legacy":
+		q, qa := inList("container", LegacyContainers)
+		w, a = append(w, q), append(a, qa...)
+	case "mp4":
+		w = append(w, "container IN ('mp4','m4v','mov')")
+	default:
+		w = append(w, "container=?")
+		a = append(a, f.Container)
+	}
+	if f.AudioCodec != "" {
+		// audio_json holds "codec":"x"; pcm/dts families match by prefix.
+		if f.AudioCodec == "pcm" || f.AudioCodec == "dts" {
+			w = append(w, "audio_json LIKE ?")
+			a = append(a, `%"codec":"`+f.AudioCodec+`%`)
+		} else {
+			w = append(w, "audio_json LIKE ?")
+			a = append(a, `%"codec":"`+f.AudioCodec+`"%`)
+		}
+	}
+	if f.Issue != "" {
+		w = append(w, "issues LIKE ?")
+		a = append(a, "%,"+f.Issue+",%")
+	}
+	if f.ResClass > 0 {
+		w = append(w, resClassSQL+"=?")
+		a = append(a, f.ResClass)
 	}
 	if f.HDR != "" {
 		w = append(w, "hdr=?")
