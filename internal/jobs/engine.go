@@ -69,7 +69,8 @@ type Engine struct {
 }
 
 // semCap is the per-backend concurrent-encode cap.
-var semCap = map[string]int{"qsv": 2, "vaapi": 2, "nvenc": 2, "sw": 8}
+// "vulkan" is the upscale key: one GPU-bound libplacebo job at a time.
+var semCap = map[string]int{"qsv": 2, "vaapi": 2, "nvenc": 2, "sw": 8, "vulkan": 1}
 
 func New(st *store.Store, cfg *config.Manager, sc *scan.Scanner) *Engine {
 	e := &Engine{

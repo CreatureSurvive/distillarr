@@ -169,6 +169,84 @@ func TestH264AndCopy(t *testing.T) {
 	}
 }
 
+func TestUpscaleChains(t *testing.T) {
+	src := probe("/m/a.mkv", "h264", "yuv420p", "", []string{"ac3"}, nil)
+	src.Streams[0].Width, src.Streams[0].Height = 854, 480
+	base := Settings{Codec: HEVC, UpscaleTo: 1080, UpscalePreset: "film-lanczos", VulkanDevice: 0, RenderNode: "/dev/dri/renderD129"}
+
+	v := base
+	v.Backend = VAAPI
+	a, prim, fb := joined(t, v, src, nil)
+	for _, want := range []string{"vaapi=va:/dev/dri/renderD129", "vulkan=vk:0", "-filter_hw_device vk",
+		"-hwaccel vaapi -hwaccel_device va", "-vf hwdownload,format=nv12,hwupload,libplacebo=w=1920:h=1080",
+		"hwdownload,format=p010le,hwupload_vaapi", "hevc_vaapi"} {
+		if !strings.Contains(a, want) {
+			t.Errorf("VA-API upscale missing %q in %s", want, a)
+		}
+	}
+	if prim.SemKey != "vulkan" || !prim.HWDecode || fb == nil || fb.HWDecode || strings.Contains(strings.Join(fb.Args, " "), "-hwaccel") {
+		t.Errorf("want a vulkan-keyed hw-decode primary with a software-decode fallback: %+v / %+v", prim, fb)
+	}
+
+	q := base
+	q.Backend = QSV
+	a, _, _ = joined(t, q, src, nil)
+	for _, want := range []string{"qsv=qsv@va", "-hwaccel qsv -hwaccel_device qsv", "hevc_qsv", "vulkan=vk:0"} {
+		if !strings.Contains(a, want) {
+			t.Errorf("QSV upscale missing %q in %s", want, a)
+		}
+	}
+	if strings.Contains(a, "hwupload_vaapi") || strings.Contains(a, "vpp_qsv") {
+		t.Errorf("QSV takes software frames from the upscaler; no VA-API upload or vpp: %s", a)
+	}
+
+	w := base
+	w.Backend, w.VulkanDevice = SW, 1
+	a, prim, fb = joined(t, w, src, nil)
+	if fb != nil || prim.HWDecode || prim.SemKey != "vulkan" || !strings.Contains(a, "vulkan=vk:1") || strings.Contains(a, "-hwaccel") {
+		t.Errorf("SW upscale is software decode only, on the requested Vulkan device: %s", a)
+	}
+
+	// CPU-side filters force the software path, as tone-mapping does elsewhere.
+	c := base
+	c.Backend, c.Crop = QSV, "854:356:0:62"
+	a, _, fb = joined(t, c, src, nil)
+	if fb != nil || strings.Contains(a, "-hwaccel") || !strings.Contains(a, "crop=854:356:0:62,format=nv12,hwupload,libplacebo=w=1920:h=800") {
+		t.Errorf("crop must run on the CPU before the upscaler, and size the target from the cropped frame: %s", a)
+	}
+
+	// 10-bit source keeps 10-bit surfaces through the round trip.
+	ten := probe("/m/t.mkv", "hevc", "yuv420p10le", "", []string{"ac3"}, nil)
+	ten.Streams[0].Width, ten.Streams[0].Height = 1280, 720
+	u := base
+	u.Backend, u.UpscaleTo = QSV, 2160
+	a, _, _ = joined(t, u, ten, nil)
+	if !strings.Contains(a, "hwdownload,format=p010le,hwupload,libplacebo=w=3840:h=2160") {
+		t.Errorf("10-bit source must stay p010le through the upscaler: %s", a)
+	}
+}
+
+func TestUpscaleNoOpsAndErrors(t *testing.T) {
+	fhd := probe("/m/a.mkv", "h264", "yuv420p", "", []string{"ac3"}, nil) // 1920x1080
+	a, prim, _ := joined(t, Settings{Codec: HEVC, Backend: QSV, UpscaleTo: 1080}, fhd, nil)
+	if strings.Contains(a, "libplacebo") || prim.SemKey != "qsv" {
+		t.Errorf("a source already at the target class is a plain encode: %s", a)
+	}
+	sd := probe("/m/b.mkv", "h264", "yuv420p", "", []string{"ac3"}, nil)
+	sd.Streams[0].Width, sd.Streams[0].Height = 854, 480
+	if _, _, err := Build(Settings{Codec: HEVC, Backend: QSV, UpscaleTo: 1080, UpscaleTier: "neural"}, sd, "/o.tmp", nil); err == nil {
+		t.Error("the neural tier must not be built by Build")
+	}
+	if _, _, err := Build(Settings{Codec: HEVC, Backend: QSV, UpscaleTo: 1080, UpscalePreset: "nope"}, sd, "/o.tmp", nil); err == nil {
+		t.Error("an unknown preset must error")
+	}
+	s := Settings{UpscaleTo: 1080, MaxHeight: 720}
+	s.Normalize()
+	if s.MaxHeight != 0 || s.UpscalePreset == "" {
+		t.Errorf("upscale clears the downscale cap and defaults a preset: %+v", s)
+	}
+}
+
 func TestUpscaleSettings(t *testing.T) {
 	s := Settings{UpscaleTo: 1080, VMAFTarget: 93}
 	s.Normalize()

@@ -148,7 +148,7 @@ func parseSpeed(s string) float64 {
 }
 
 var hwFailureRe = regexp.MustCompile(
-	`(?i)(vaapi|/dev/dri|drm|hwaccel|hwupload|hwdevice|device|qsv|mfx|vpl|onevpl|cuda|nvdec|no capable|failed (to|creating)|error initializing)`)
+	`(?i)(vaapi|/dev/dri|drm|hwaccel|hwupload|hwdevice|device|qsv|mfx|vpl|onevpl|cuda|nvdec|vulkan|libplacebo|shader|no capable|failed (to|creating)|error initializing)`)
 
 // LooksLikeHWFailure classifies an encode failure as hardware-ish
 // (zero frames encoded + hardware/device keywords) and therefore worth

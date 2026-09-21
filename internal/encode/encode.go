@@ -11,6 +11,7 @@ import (
 
 	"mediatrans/internal/media"
 	"mediatrans/internal/res"
+	"mediatrans/internal/upscale"
 )
 
 // Backend selects the encoder family.
@@ -89,6 +90,9 @@ type Settings struct {
 	UpscalePreset string             `json:"upscale_preset,omitempty"` // upscale registry id
 	UpscaleParams map[string]float64 `json:"upscale_params,omitempty"` // per-preset tunables
 	UpscaleOutput string             `json:"upscale_output,omitempty"` // replace | copy
+	// VulkanDevice is the Vulkan index the upscaler runs on, resolved from
+	// hwprobe (Vulkan picks by index, not render node). Index 0 is valid.
+	VulkanDevice int `json:"vulkan_device,omitempty"`
 }
 
 // DefaultRenderNode is a last-resort fallback; node choice comes from
@@ -167,8 +171,12 @@ func (s *Settings) Normalize() {
 	}
 	if s.UpscaleTo > 0 {
 		s.VMAFTarget = 0
+		s.MaxHeight = 0 // a downscale cap and an upscale target contradict
 		if s.UpscaleTier == "" {
-			s.UpscaleTier = "shader"
+			s.UpscaleTier = upscale.TierShader
+		}
+		if s.UpscalePreset == "" {
+			s.UpscalePreset = upscale.DefaultPreset
 		}
 		if s.UpscaleOutput == "" {
 			s.UpscaleOutput = "replace"
@@ -216,6 +224,7 @@ func Build(s Settings, src *media.Probe, outPath string, clip *Clip) (primary, f
 		fitW, fitH = cw, ch
 	}
 	scaleW, scaleH, scale := res.Fit(fitW, fitH, s.MaxHeight)
+	upW, upH, up := res.Up(fitW, fitH, s.UpscaleTo) // ok=false: already at/above target, plain encode
 	deint := s.Deinterlace == "on" || (s.Deinterlace == "auto" && v.Interlaced())
 	srcTen := v.BitDepth() >= 10
 	tonemap := s.TonemapHDR && v.HDRType() != "" && v.HDRType() != "dolby_vision"
@@ -255,13 +264,18 @@ func Build(s Settings, src *media.Probe, outPath string, clip *Clip) (primary, f
 	if crop {
 		swPre = append(swPre, fmt.Sprintf("crop=%d:%d:%d:%d", cw, ch, cx, cy))
 	}
-	if deint && s.Backend == SW {
-		swPre = append(swPre, "bwdif=mode=send_frame")
+	if deint && (s.Backend == SW || up) {
+		swPre = append(swPre, "bwdif=mode=send_frame") // upscaling always filters on the CPU side
 	}
 	if tonemap {
 		swPre = append(swPre,
 			"zscale=t=linear:npl=100", "format=gbrpf32le", "zscale=p=bt709",
 			"tonemap=tonemap=hable:desat=0", "zscale=t=bt709:m=bt709:r=tv")
+	}
+
+	if up {
+		return buildUpscale(s, upscale.Spec{W: upW, H: upH, Preset: s.UpscalePreset, Params: s.UpscaleParams},
+			assemble, swPre, srcTen || tonemap, crop || tonemap || deint)
 	}
 
 	switch s.Backend {
@@ -348,6 +362,60 @@ func Build(s Settings, src *media.Probe, outPath string, clip *Clip) (primary, f
 		return assemble(nil, []string{"-hwaccel", "cuda", "-hwaccel_output_format", "cuda"}, hwf, true), fb, nil
 	}
 	return nil, nil, fmt.Errorf("unknown backend %q", s.Backend)
+}
+
+// buildUpscale is the fifth chain shape: the picture goes through libplacebo
+// on a Vulkan device, so unlike the other backends the scaler isn't part of
+// the encoder's own filter. Vulkan frames can't be handed back to VA-API/QSV
+// surfaces on current Mesa, so frames cross system memory around the Vulkan
+// stage (see upscale.Spec.Chain).
+//
+// The primary decodes on the GPU; the fallback decodes in software. When any
+// CPU filter is needed (crop, tone-map, deinterlace) the software path is the
+// only one, as with tone-mapping on the other backends. srcTen says the frames
+// entering the upscaler are 10-bit; cpuFilters says a CPU-side filter is needed.
+func buildUpscale(s Settings, spec upscale.Spec,
+	assemble func(devices, decode, filters []string, hw bool) *CmdSpec,
+	swPre []string, srcTen, cpuFilters bool) (primary, fallback *CmdSpec, err error) {
+
+	if s.UpscaleTier != upscale.TierShader {
+		return nil, nil, fmt.Errorf("%s upscaling is not built by encode.Build", s.UpscaleTier)
+	}
+	inFmt, outFmt := "nv12", "nv12"
+	if srcTen {
+		inFmt = "p010le"
+	}
+	if s.tenBit() {
+		outFmt = "p010le"
+	}
+	chain, err := spec.Chain(inFmt, outFmt, s.Backend == VAAPI)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	// Encoder device(s) first, then the Vulkan device the filters run on.
+	var devices, decode []string
+	switch s.Backend {
+	case QSV:
+		devices = []string{"-init_hw_device", "vaapi=va:" + s.node(), "-init_hw_device", "qsv=qsv@va"}
+		decode = []string{"-hwaccel", "qsv", "-hwaccel_device", "qsv", "-hwaccel_output_format", "qsv"}
+	case VAAPI:
+		devices = []string{"-init_hw_device", "vaapi=va:" + s.node()}
+		decode = []string{"-hwaccel", "vaapi", "-hwaccel_device", "va", "-hwaccel_output_format", "vaapi"}
+	case NVENC:
+		devices = []string{"-init_hw_device", "cuda=cu"}
+		decode = []string{"-hwaccel", "cuda", "-hwaccel_device", "cu", "-hwaccel_output_format", "cuda"}
+	}
+	devices = append(devices, "-init_hw_device", "vulkan=vk:"+itoa(s.VulkanDevice), "-filter_hw_device", "vk")
+
+	fb := assemble(devices, nil, append(append([]string{}, swPre...), chain...), false)
+	fb.SemKey = "vulkan"
+	if cpuFilters || decode == nil {
+		return fb, nil, nil
+	}
+	prim := assemble(devices, decode, append([]string{"hwdownload"}, chain...), true)
+	prim.SemKey = "vulkan"
+	return prim, fb, nil
 }
 
 // buildCopy is a quick fix: video copied bit-exact, audio/subtitles per
