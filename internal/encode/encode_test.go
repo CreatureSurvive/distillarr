@@ -179,10 +179,15 @@ func TestUpscaleChains(t *testing.T) {
 	a, prim, fb := joined(t, v, src, nil)
 	for _, want := range []string{"vaapi=va:/dev/dri/renderD129", "vulkan=vk:0", "-filter_hw_device vk",
 		"-hwaccel vaapi -hwaccel_device va", "-vf hwdownload,format=nv12,hwupload,libplacebo=w=1920:h=1080",
-		"hwdownload,format=p010le,hwupload_vaapi", "hevc_vaapi"} {
+		":format=x2bgr10le,hwdownload,format=x2bgr10le,scale=out_color_matrix=bt709:out_range=tv,format=p010le,hwupload_vaapi",
+		"-color_primaries bt709 -color_trc bt709 -colorspace bt709", "hevc_vaapi"} {
 		if !strings.Contains(a, want) {
 			t.Errorf("VA-API upscale missing %q in %s", want, a)
 		}
+	}
+	// The probe helper tags sources bt2020: upscaled RGB is BT.709 whatever the source said.
+	if strings.Contains(a, "bt2020") {
+		t.Errorf("an upscale must not inherit the source's colour tags: %s", a)
 	}
 	if prim.SemKey != "vulkan" || !prim.HWDecode || fb == nil || fb.HWDecode || strings.Contains(strings.Join(fb.Args, " "), "-hwaccel") {
 		t.Errorf("want a vulkan-keyed hw-decode primary with a software-decode fallback: %+v / %+v", prim, fb)
@@ -223,6 +228,49 @@ func TestUpscaleChains(t *testing.T) {
 	a, _, _ = joined(t, u, ten, nil)
 	if !strings.Contains(a, "hwdownload,format=p010le,hwupload,libplacebo=w=3840:h=2160") {
 		t.Errorf("10-bit source must stay p010le through the upscaler: %s", a)
+	}
+}
+
+func TestUpscaleStillFilters(t *testing.T) {
+	sd := probe("/m/a.mkv", "h264", "yuv420p", "", nil, nil)
+	sd.Streams[0].Width, sd.Streams[0].Height = 720, 400
+	sd.Streams[0].ColorSpace, sd.Streams[0].ColorPrimaries = "", ""
+	a, b, w, h, err := StillFilters(Settings{UpscaleTo: 1080, UpscalePreset: "film-lanczos"}, &sd.Streams[0])
+	if err != nil || w != 1920 || h != 1066 {
+		t.Fatalf("want 1920x1066, got %dx%d %v", w, h, err)
+	}
+	if got := strings.Join(a, ","); got != "scale=1920:1066:flags=lanczos:in_color_matrix=bt601,format=rgb24" {
+		t.Errorf("baseline must decode SD with BT.601 and land in RGB: %s", got)
+	}
+	if got := strings.Join(b, ","); !strings.HasPrefix(got, "format=nv12,hwupload,libplacebo=w=1920:h=1066") ||
+		!strings.HasSuffix(got, ":format=rgba,hwdownload,format=rgba,format=rgb24") || strings.Contains(got, "scale=out_color") {
+		t.Errorf("upscaled still stays RGB end to end: %s", got)
+	}
+	hd := probe("/m/b.mkv", "h264", "yuv420p", "", nil, nil)
+	hd.Streams[0].ColorSpace = ""
+	a, _, _, _, _ = StillFilters(Settings{UpscaleTo: 2160}, &hd.Streams[0])
+	if !strings.Contains(strings.Join(a, ","), "in_color_matrix=bt709") {
+		t.Errorf("an untagged HD source is BT.709: %v", a)
+	}
+	tagged := probe("/m/c.mkv", "h264", "yuv420p", "", nil, nil) // helper tags it bt2020nc
+	a, _, _, _, _ = StillFilters(Settings{UpscaleTo: 2160}, &tagged.Streams[0])
+	if !strings.Contains(strings.Join(a, ","), "in_color_matrix=auto") {
+		t.Errorf("a tagged source keeps its own matrix: %v", a)
+	}
+	if _, _, _, _, err := StillFilters(Settings{UpscaleTo: 1080}, &hd.Streams[0]); err == nil {
+		t.Error("a 1080p source has nothing to upscale to 1080p")
+	}
+}
+
+func TestUpscaleRejectsHDR(t *testing.T) {
+	hdr := probe("/m/h.mkv", "hevc", "yuv420p10le", "smpte2084", []string{"eac3"}, nil)
+	hdr.Streams[0].Width, hdr.Streams[0].Height = 1280, 720
+	if _, _, err := Build(Settings{Codec: HEVC, Backend: QSV, UpscaleTo: 2160}, hdr, "/o.tmp", nil); err == nil {
+		t.Error("HDR can't be upscaled without tone-mapping: RGB output would be tagged SDR")
+	}
+	a, _, _ := joined(t, Settings{Codec: HEVC, Backend: QSV, UpscaleTo: 2160, TonemapHDR: true}, hdr, nil)
+	if !strings.Contains(a, "tonemap=") || !strings.Contains(a, "libplacebo=") || !strings.Contains(a, "-colorspace bt709") {
+		t.Errorf("tone-mapped HDR may be upscaled, tagged bt709: %s", a)
 	}
 }
 

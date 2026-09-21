@@ -96,21 +96,45 @@ func (sp Spec) Filter(format string) (string, error) {
 	return strings.Join(parts, ":"), nil
 }
 
-// Chain is the filter list that takes software frames in `inFmt`, upscales
-// them on the Vulkan device named by -filter_hw_device, and returns software
-// frames in outFmt. toVAAPI appends the upload a VA-API encoder needs;
-// every other encoder accepts software frames directly.
-//
-// Vulkan frames can't be mapped back to VA-API or QSV surfaces on current
-// Mesa (hwmap fails with ENOSYS), so this pays one system-memory round trip
-// around the upscaler. It measured 4x realtime for 480p to 1080p on an Arc
-// A380 with that round trip included.
-func (sp Spec) Chain(inFmt, outFmt string, toVAAPI bool) ([]string, error) {
-	f, err := sp.Filter(outFmt)
+// rgbFor is the RGB surface libplacebo renders into. YUV output from
+// libplacebo is corrupt through Vulkan here (both chroma planes read back as
+// zero, luma is wrong too, even for 4:4:4), while RGB is exact. 10-bit
+// targets use packed 10-bit RGB so precision survives the trip.
+func rgbFor(outFmt string) string {
+	if outFmt == "p010le" {
+		return "x2bgr10le"
+	}
+	return "rgba"
+}
+
+// RGBChain takes software frames in inFmt, upscales them on the Vulkan device
+// named by -filter_hw_device, and returns software RGB frames. libplacebo
+// infers the source matrix (BT.601 for SD, BT.709 for HD) unless the frame is
+// tagged, so the picture is decoded correctly on the way in.
+func (sp Spec) RGBChain(inFmt, rgb string) ([]string, error) {
+	f, err := sp.Filter(rgb)
 	if err != nil {
 		return nil, err
 	}
-	c := []string{"format=" + inFmt, "hwupload", f, "hwdownload", "format=" + outFmt}
+	return []string{"format=" + inFmt, "hwupload", f, "hwdownload", "format=" + rgb}, nil
+}
+
+// Chain is RGBChain plus the conversion back to YUV: software frames in
+// inFmt in, outFmt out. Every upscale target is 720p or above, so the RGB is
+// encoded as BT.709 (scale tags the frames bt709) whatever the source used.
+// toVAAPI appends the upload a VA-API encoder needs; every other encoder
+// accepts software frames directly.
+//
+// Vulkan frames can't be mapped back to VA-API or QSV surfaces on current
+// Mesa (hwmap fails with ENOSYS), and YUV can't be read back from Vulkan at
+// all (see rgbFor), so the frame crosses system memory as RGB and is
+// converted on the CPU.
+func (sp Spec) Chain(inFmt, outFmt string, toVAAPI bool) ([]string, error) {
+	c, err := sp.RGBChain(inFmt, rgbFor(outFmt))
+	if err != nil {
+		return nil, err
+	}
+	c = append(c, "scale=out_color_matrix=bt709:out_range=tv", "format="+outFmt)
 	if toVAAPI {
 		c = append(c, "hwupload_vaapi")
 	}

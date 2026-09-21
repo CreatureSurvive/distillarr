@@ -2,6 +2,7 @@ package hwprobe
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -88,15 +89,72 @@ func matchNodes(devs []VulkanDevice, nodes []string, ids map[string]string) {
 	}
 }
 
-// vulkanSmokeArgs is a real 2x libplacebo upscale through Vulkan device idx:
-// software frames up to Vulkan, scaled, and back down. It tests the whole
-// upscaler path (device, shader compiler, filter), not just enumeration.
-func vulkanSmokeArgs(idx int) []string {
-	return []string{"-hide_banner", "-loglevel", "error", "-nostdin",
-		"-init_hw_device", "vulkan=vk:" + strconv.Itoa(idx), "-filter_hw_device", "vk",
-		"-f", "lavfi", "-i", "testsrc2=duration=1:size=320x240:rate=10",
-		"-vf", "format=nv12,hwupload,libplacebo=w=640:h=480:upscaler=ewa_lanczos:format=nv12,hwdownload,format=nv12",
-		"-frames:v", "5", "-f", "null", "-"}
+// Both probe commands print per-frame signalstats for a colour-bar pattern
+// 2x upscaled: the reference in plain software, the candidate through the real
+// libplacebo chain on Vulkan device idx. Exiting cleanly is not proof of a
+// working upscaler: through Vulkan on Mesa, libplacebo can return YUV frames
+// whose chroma reads back as zero (a solid green picture) with no error at
+// all, so the candidate's average chroma has to match the reference.
+const statsTail = ",signalstats,metadata=mode=print:file=-"
+
+func upscaleProbeArgs(vf string, vk ...string) []string {
+	return cat([]string{"-hide_banner", "-loglevel", "error", "-nostdin"}, vk,
+		[]string{"-f", "lavfi", "-i", "smptehdbars=size=320x240:rate=10:duration=1",
+			"-vf", vf + statsTail, "-frames:v", "5", "-f", "null", "-"})
+}
+
+func referenceProbeArgs() []string {
+	return upscaleProbeArgs("scale=640:480:flags=lanczos,format=yuv420p")
+}
+
+// vulkanProbeArgs runs the same chain the encoder uses (RGB out of libplacebo,
+// BT.709 YUV from swscale); see upscale.Spec.Chain.
+func vulkanProbeArgs(idx int) []string {
+	return upscaleProbeArgs("format=nv12,hwupload,libplacebo=w=640:h=480:upscaler=ewa_lanczos:format=rgba,"+
+		"hwdownload,format=rgba,scale=out_color_matrix=bt709:out_range=tv,format=yuv420p",
+		"-init_hw_device", "vulkan=vk:"+strconv.Itoa(idx), "-filter_hw_device", "vk")
+}
+
+var chromaRe = regexp.MustCompile(`lavfi\.signalstats\.([UV])AVG=([0-9.]+)`)
+
+// chromaAvg averages the U and V means over every frame in signalstats output.
+func chromaAvg(out string) (u, v float64, ok bool) {
+	var su, sv float64
+	var nu, nv int
+	for _, m := range chromaRe.FindAllStringSubmatch(out, -1) {
+		f, err := strconv.ParseFloat(m[2], 64)
+		if err != nil {
+			continue
+		}
+		if m[1] == "U" {
+			su += f
+			nu++
+		} else {
+			sv += f
+			nv++
+		}
+	}
+	if nu == 0 || nv == 0 {
+		return 0, 0, false
+	}
+	return su / float64(nu), sv / float64(nv), true
+}
+
+// chromaTolerance is how far (of 255) the candidate's mean chroma may sit from
+// the reference's. The two decode the pattern with slightly different
+// matrices, worth a few levels; the broken readback is off by ~128.
+const chromaTolerance = 12.0
+
+// chromaMatches reports whether a candidate's chroma agrees with the reference.
+func chromaMatches(ru, rv, cu, cv float64) bool {
+	return abs(ru-cu) <= chromaTolerance && abs(rv-cv) <= chromaTolerance
+}
+
+func abs(f float64) float64 {
+	if f < 0 {
+		return -f
+	}
+	return f
 }
 
 // probeVulkan enumerates Vulkan GPUs, pairs them with render nodes and runs
@@ -111,19 +169,37 @@ func probeVulkan(nodes []string) []VulkanDevice {
 	devs := parseVulkanListing(string(out))
 	matchNodes(devs, nodes, nodeDeviceIDs(nodes))
 
+	// One software reference serves every device.
+	rctx, rcancel := context.WithTimeout(context.Background(), 30*time.Second)
+	rout, rerr := execCommandCombined(rctx, "ffmpeg", referenceProbeArgs()...)
+	rcancel()
+	ru, rv, refOK := chromaAvg(string(rout))
+	if rerr != nil || !refOK {
+		for i := range devs {
+			devs[i].Error = "no software reference to compare against: " + trimErr(string(rout))
+		}
+		return devs
+	}
+
 	for i := range devs {
 		start := time.Now()
 		sctx, scancel := context.WithTimeout(context.Background(), 30*time.Second)
-		o, err := execCommandCombined(sctx, "ffmpeg", vulkanSmokeArgs(devs[i].Index)...)
+		o, err := execCommandCombined(sctx, "ffmpeg", vulkanProbeArgs(devs[i].Index)...)
 		scancel()
 		devs[i].MS = time.Since(start).Milliseconds()
-		if err != nil {
+		switch cu, cv, ok := chromaAvg(string(o)); {
+		case err != nil:
 			if devs[i].Error = trimErr(string(o)); devs[i].Error == "" {
 				devs[i].Error = err.Error()
 			}
-			continue
+		case !ok:
+			devs[i].Error = "upscale produced no frames to measure"
+		case !chromaMatches(ru, rv, cu, cv):
+			devs[i].Error = fmt.Sprintf("upscaled colour is wrong (mean U/V %.0f/%.0f, expected %.0f/%.0f): driver returns corrupt frames",
+				cu, cv, ru, rv)
+		default:
+			devs[i].OK = true
 		}
-		devs[i].OK = true
 	}
 	return devs
 }

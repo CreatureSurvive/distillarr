@@ -71,3 +71,33 @@ func TestBestVulkan(t *testing.T) {
 		t.Error("no working device (or no report) must yield nil")
 	}
 }
+
+func TestChromaAvg(t *testing.T) {
+	out := "frame:0 pts:0\nlavfi.signalstats.YAVG=90.1\nlavfi.signalstats.UAVG=120\nlavfi.signalstats.VAVG=130\n" +
+		"frame:1 pts:1\nlavfi.signalstats.YAVG=90\nlavfi.signalstats.UAVG=124\nlavfi.signalstats.VAVG=134\n"
+	u, v, ok := chromaAvg(out)
+	if !ok || u != 122 || v != 132 {
+		t.Errorf("want mean U/V 122/132, got %v/%v %v", u, v, ok)
+	}
+	if _, _, ok := chromaAvg("Device creation failed: -19.\n"); ok {
+		t.Error("output without stats must not parse")
+	}
+	if _, _, ok := chromaAvg("lavfi.signalstats.UAVG=120\n"); ok {
+		t.Error("stats missing V must not parse")
+	}
+}
+
+// The Vulkan readback bug this guards against: a clean exit and a plain
+// green picture. Chroma that far off the reference must be rejected, while
+// the few-level matrix differences of a healthy device must pass.
+func TestChromaMatches(t *testing.T) {
+	if !chromaMatches(123.7, 126.4, 122, 129) {
+		t.Error("a healthy device differs from the reference by a few levels")
+	}
+	if chromaMatches(123.7, 126.4, 0, 0) {
+		t.Error("U=V=0 (green output) must be rejected")
+	}
+	if chromaMatches(123.7, 126.4, 123.7, 100) {
+		t.Error("one bad channel is enough to reject")
+	}
+}

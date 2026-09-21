@@ -63,12 +63,34 @@ func TestChain(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := strings.Join(c, ",")
-	if !strings.HasPrefix(got, "format=nv12,hwupload,libplacebo=") || !strings.HasSuffix(got, ",hwdownload,format=nv12,hwupload_vaapi") {
+	// libplacebo must render RGB (its YUV readback is corrupt through Vulkan)
+	// and the CPU converts to BT.709 YUV, which also tags the frames bt709.
+	if !strings.HasPrefix(got, "format=nv12,hwupload,libplacebo=") ||
+		!strings.Contains(got, ":format=rgba,hwdownload,format=rgba,scale=out_color_matrix=bt709:out_range=tv,format=nv12") ||
+		!strings.HasSuffix(got, ",hwupload_vaapi") {
 		t.Errorf("chain shape wrong: %s", got)
 	}
-	c, _ = Spec{W: 1920, H: 1080, Preset: "film-lanczos"}.Chain("p010le", "p010le", false)
-	if strings.Contains(strings.Join(c, ","), "hwupload_vaapi") {
+	if strings.Contains(got, "libplacebo=") && strings.Contains(strings.SplitN(got, "hwdownload", 2)[0], "format=nv12:") {
+		t.Errorf("libplacebo must not output a YUV format: %s", got)
+	}
+
+	c, _ = Spec{W: 3840, H: 2160, Preset: "film-lanczos"}.Chain("p010le", "p010le", false)
+	got = strings.Join(c, ",")
+	if strings.Contains(got, "hwupload_vaapi") {
 		t.Error("hwupload_vaapi belongs only on the VA-API path")
+	}
+	if !strings.Contains(got, ":format=x2bgr10le,hwdownload,format=x2bgr10le,scale=out_color_matrix=bt709:out_range=tv,format=p010le") {
+		t.Errorf("10-bit must keep 10-bit RGB through the round trip: %s", got)
+	}
+}
+
+func TestRGBChainEndsInRGB(t *testing.T) {
+	c, err := Spec{W: 1920, H: 1080, Preset: "film-lanczos"}.RGBChain("nv12", "rgba")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if last := c[len(c)-1]; last != "format=rgba" || c[len(c)-2] != "hwdownload" {
+		t.Errorf("RGBChain must end hwdownload,format=rgba: %v", c)
 	}
 }
 

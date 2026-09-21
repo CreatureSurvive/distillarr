@@ -214,7 +214,6 @@ func Build(s Settings, src *media.Probe, outPath string, clip *Clip) (primary, f
 	if err != nil {
 		return nil, nil, err
 	}
-	video = append(video, colorArgs(s, v)...)
 
 	// MaxHeight is a resolution class cap (1080 = fit inside 1920×1080),
 	// so letterboxed 1920×802 is never "above" a 1080p cap.
@@ -224,10 +223,20 @@ func Build(s Settings, src *media.Probe, outPath string, clip *Clip) (primary, f
 		fitW, fitH = cw, ch
 	}
 	scaleW, scaleH, scale := res.Fit(fitW, fitH, s.MaxHeight)
-	upW, upH, up := res.Up(fitW, fitH, s.UpscaleTo) // ok=false: already at/above target, plain encode
+	upW, upH, up := UpscaleSize(s, v) // ok=false: already at/above target, plain encode
 	deint := s.Deinterlace == "on" || (s.Deinterlace == "auto" && v.Interlaced())
 	srcTen := v.BitDepth() >= 10
 	tonemap := s.TonemapHDR && v.HDRType() != "" && v.HDRType() != "dolby_vision"
+	if up && v.HDRType() != "" && !tonemap {
+		return nil, nil, fmt.Errorf("HDR sources can't be upscaled unless tone-mapped to SDR")
+	}
+	if up {
+		// The upscaler's RGB is encoded as BT.709 whatever the source used, so
+		// the source's own colour tags (e.g. BT.601 SD) would be wrong.
+		video = append(video, "-color_primaries", "bt709", "-color_trc", "bt709", "-colorspace", "bt709")
+	} else {
+		video = append(video, colorArgs(s, v)...)
+	}
 
 	var pre []string
 	if clip != nil {
@@ -362,6 +371,65 @@ func Build(s Settings, src *media.Probe, outPath string, clip *Clip) (primary, f
 		return assemble(nil, []string{"-hwaccel", "cuda", "-hwaccel_output_format", "cuda"}, hwf, true), fb, nil
 	}
 	return nil, nil, fmt.Errorf("unknown backend %q", s.Backend)
+}
+
+// UpscaleSize is the output size of an upscale job: the source (or its
+// black-bar crop) fitted to class s.UpscaleTo. ok is false when there is
+// nothing to upscale, i.e. the source already meets the target.
+func UpscaleSize(s Settings, v *media.Stream) (w, h int, ok bool) {
+	fw, fh := v.Width, v.Height
+	if cw, ch, _, _, crop := parseCrop(s.Crop, v.Width, v.Height); crop {
+		fw, fh = cw, ch
+	}
+	return res.Up(fw, fh, s.UpscaleTo)
+}
+
+// StillFilters returns the -vf filter lists for a single-frame A/B: a is the
+// standard software Lanczos resize (the baseline any upscaler must beat), b
+// runs the real upscale chain and needs `-init_hw_device vulkan=vk:N
+// -filter_hw_device vk`. Both apply the same crop and deinterlace as Build,
+// and both produce w×h. Stills are 8-bit SDR; they judge detail, not colour.
+func StillFilters(s Settings, v *media.Stream) (a, b []string, w, h int, err error) {
+	s.Normalize()
+	w, h, ok := UpscaleSize(s, v)
+	if !ok {
+		return nil, nil, 0, 0, fmt.Errorf("nothing to upscale: the source already meets the %dp target", s.UpscaleTo)
+	}
+	if s.UpscaleTier != upscale.TierShader {
+		return nil, nil, 0, 0, fmt.Errorf("%s upscaling has no still preview yet", s.UpscaleTier)
+	}
+	var pre []string
+	if cw, ch, cx, cy, crop := parseCrop(s.Crop, v.Width, v.Height); crop {
+		pre = append(pre, fmt.Sprintf("crop=%d:%d:%d:%d", cw, ch, cx, cy))
+	}
+	if s.Deinterlace == "on" || (s.Deinterlace == "auto" && v.Interlaced()) {
+		pre = append(pre, "bwdif=mode=send_frame")
+	}
+	// Both sides stay RGB into the PNG, skipping a lossy YUV round trip.
+	chain, err := upscale.Spec{W: w, H: h, Preset: s.UpscalePreset, Params: s.UpscaleParams}.RGBChain("nv12", "rgba")
+	if err != nil {
+		return nil, nil, 0, 0, err
+	}
+	// The baseline decodes the source with the matrix libplacebo would infer
+	// for it, so A and B differ only by the scaler, never by colour.
+	a = append(append([]string{}, pre...),
+		fmt.Sprintf("scale=%d:%d:flags=lanczos:in_color_matrix=%s", w, h, srcMatrix(v)), "format=rgb24")
+	b = append(append(append([]string{}, pre...), chain...), "format=rgb24")
+	return a, b, w, h, nil
+}
+
+// srcMatrix is the YCbCr matrix a source is decoded with: its own tag when it
+// has one, otherwise the same guess libplacebo and players make (BT.709 from
+// 1280 wide or above 576 lines, BT.601 below).
+func srcMatrix(v *media.Stream) string {
+	switch v.ColorSpace {
+	case "", "unknown", "reserved":
+		if v.Width >= 1280 || v.Height > 576 {
+			return "bt709"
+		}
+		return "bt601"
+	}
+	return "auto"
 }
 
 // buildUpscale is the fifth chain shape: the picture goes through libplacebo
