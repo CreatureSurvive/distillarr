@@ -87,7 +87,7 @@ func BuildPreview(s Settings, src *media.Probe, outPath string, start, dur float
 		}
 		return &CmdSpec{Args: build(filters, videoFor()), SemKey: "sw"}, nil, nil
 	case QSV, VAAPI:
-		hw := fmt.Sprintf("va:%s", node(s))
+		hw := fmt.Sprintf("vaapi=va:%s", node(s))
 		var initHW, decodeHW, filterHW, filterFB []string
 		if s.Backend == QSV {
 			initHW = []string{"-init_hw_device", hw, "-init_hw_device", "qsv=qsv@va", "-filter_hw_device", "qsv"}

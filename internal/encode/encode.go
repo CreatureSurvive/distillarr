@@ -182,7 +182,7 @@ func buildIntel(s Settings, src *media.Probe, out, container string, scale bool,
 		return nil, nil, fmt.Errorf("HDR tone-mapping requires the software backend")
 	}
 
-	hw := fmt.Sprintf("va:%s", node(s))
+	hw := fmt.Sprintf("vaapi=va:%s", node(s))
 	scalePart := ""
 	if scale {
 		scalePart = fmt.Sprintf(":w=-2:h=%d", s.MaxHeight)

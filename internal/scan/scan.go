@@ -86,7 +86,20 @@ func (s *Scanner) report(mut func(*Stats)) {
 }
 
 func (s *Scanner) run() {
-	defer s.report(func(st *Stats) { st.Running = false; st.EndedAt = time.Now(); st.Phase = "done" })
+	defer func() {
+		// Reset BOTH the mutex-guarded gate and the reported stats —
+		// a scan pass must always be restartable afterwards.
+		s.mu.Lock()
+		s.running = false
+		s.stats.Running = false
+		s.stats.EndedAt = time.Now()
+		s.stats.Phase = "done"
+		st := s.stats
+		s.mu.Unlock()
+		if s.Progress != nil {
+			s.Progress(st)
+		}
+	}()
 
 	seen := map[string]bool{}          // every existing media path this pass
 	var probeMu sync.Mutex

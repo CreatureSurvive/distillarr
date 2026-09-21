@@ -34,6 +34,7 @@ type SrcStat struct {
 	BtimeNsec int64  `json:"btime_nsec"`
 	Size      int64  `json:"size"`
 	Ino       uint64 `json:"ino"`
+	Mode      uint32 `json:"mode"` // permission bits, restored on the output
 }
 
 // Snapshot captures statx info including birth time when available.
@@ -53,7 +54,7 @@ func Snapshot(path string) (*SrcStat, error) {
 			Size: fi.Size(),
 		}, nil
 	}
-	s := &SrcStat{Size: int64(st.Size), Ino: st.Ino}
+	s := &SrcStat{Size: int64(st.Size), Ino: st.Ino, Mode: st.Mode}
 	s.MtimeSec, s.MtimeNsec = int64(st.Mtime.Sec), int64(st.Mtime.Nsec)
 	s.AtimeSec, s.AtimeNsec = int64(st.Atime.Sec), int64(st.Atime.Nsec)
 	s.BtimeSec, s.BtimeNsec = int64(st.Btime.Sec), int64(st.Btime.Nsec)
@@ -185,6 +186,12 @@ func Replace(tempPath, srcPath, destPath string, st *SrcStat, trashDir string) e
 	// data-safe because step 2 already duplicated the original.)
 	if err := os.Rename(tempPath, destPath); err != nil {
 		return fmt.Errorf("rename: %w", err)
+	}
+
+	// 3b. Restore the original permission bits (Samba-writable group
+	// bits etc.); ffmpeg creates the temp with default umask.
+	if st != nil && st.Mode != 0 {
+		_ = os.Chmod(destPath, os.FileMode(st.Mode&0o7777))
 	}
 
 	// 4. When the container changed, drop the old name (trash has it).

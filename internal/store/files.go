@@ -103,11 +103,12 @@ func (s *Store) UpsertFile(f *File, streams []Stream) error {
 	err = tx.QueryRow(`SELECT id FROM files WHERE path=?`, f.Path).Scan(&id)
 	switch {
 	case err == sql.ErrNoRows:
+		// 25 ?s (path…rec_json), literal 0 for missing, 2 ?s for timestamps.
 		res, err := tx.Exec(`INSERT INTO files(path, library, title, year, season, episode,
 			ep_title, quality_tag, size, mtime_ns, container, duration, video_codec, width, height,
 			bit_depth, fps, hdr, video_bitrate, total_bitrate, audio_json, sub_count, sidecars_json,
 			transcode_score, rec_json, missing, scanned_at, updated_at)
-			VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0,?,?,?)`,
+			VALUES(`+strings.Repeat("?,", 25)+"0,?,?)",
 			f.Path, f.Library, f.Title, f.Year, f.Season, f.Episode, f.EpTitle, f.QualityTag,
 			f.Size, f.MtimeNS, f.Container, f.Duration, f.VideoCodec, f.Width, f.Height,
 			f.BitDepth, f.FPS, f.HDR, f.VideoBitrate, f.TotalBitrate, string(audio), f.SubCount,

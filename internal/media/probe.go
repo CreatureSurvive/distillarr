@@ -172,23 +172,45 @@ func (s *Stream) FPS() float64 {
 	return num / den
 }
 
-// BitDepth extracts bits-per-component from pix_fmt (yuv420p10le → 10).
+// BitDepth extracts bits-per-component from pix_fmt (yuv420p10le → 10,
+// yuv420p → 8, p010le → 10). Digits that are part of the chroma
+// subsampling (the 420 in yuv420p) are NOT the depth.
 func (s *Stream) BitDepth() int {
-	if s.PixFmt == "" {
+	pf := s.PixFmt
+	if pf == "" {
 		return 0
 	}
-	// find digits in the pix_fmt
-	for _, part := range strings.FieldsFunc(s.PixFmt, func(r rune) bool {
-		return r < '0' || r > '9'
-	}) {
-		if n, err := strconv.Atoi(part); err == nil && n > 0 {
+	// p010/p016 style planar 10-bit
+	if strings.HasPrefix(pf, "p01") {
+		return 10
+	}
+	// depth digits follow the planar 'p': yuv420p10le, gbrp12le...
+	if i := strings.LastIndexByte(pf, 'p'); i >= 0 && i+3 <= len(pf) {
+		two := pf[i+1 : i+3]
+		if isDigits(two) {
+			n, _ := strconv.Atoi(two)
+			if n >= 8 && n <= 16 {
+				return n
+			}
+		}
+	}
+	// gray10le, gray16be
+	if strings.HasPrefix(pf, "gray") && len(pf) > 4 {
+		d := strings.TrimRight(strings.TrimPrefix(pf, "gray"), "lebe")
+		if n, err := strconv.Atoi(d); err == nil {
 			return n
 		}
 	}
-	if strings.Contains(s.PixFmt, "p010") || strings.Contains(s.PixFmt, "p016") {
-		return 10
-	}
 	return 8
+}
+
+func isDigits(s string) bool {
+	for _, r := range s {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return len(s) == 2
 }
 
 // IsTextSubtitle reports text-based (movable/editable) subtitle codecs.

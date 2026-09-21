@@ -275,12 +275,20 @@ func ResolveBackend(rep *Report, pref string, c encode.Codec) encode.Backend {
 	return encode.SW
 }
 
-// NodeFor returns the render node a probe result used.
+// NodeFor returns the render node to use for a backend+codec: the
+// FASTEST passing test wins (prefers the discrete GPU when both pass).
 func NodeFor(rep *Report, b encode.Backend, c encode.Codec) string {
-	if r := rep.Available(b, c); r != nil {
-		if r.Node != "" {
-			return r.Node
+	var best *EncoderResult
+	for i := range rep.Results {
+		r := &rep.Results[i]
+		if r.Backend == b && r.Codec == c && r.OK && r.Node != "" {
+			if best == nil || r.MS < best.MS {
+				best = r
+			}
 		}
+	}
+	if best != nil {
+		return best.Node
 	}
 	return encode.DefaultRenderNode
 }
