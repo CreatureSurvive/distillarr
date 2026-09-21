@@ -71,6 +71,7 @@ type Settings struct {
 	Subs           []SubTrack   `json:"subs,omitempty"`  // nil = keep all
 	ExtraArgs      string       `json:"extra_args,omitempty"` // appended output options
 	PreferMP4      bool         `json:"prefer_mp4,omitempty"` // auto container: MP4 whenever tracks fit
+	Crop           string       `json:"crop,omitempty"`       // "w:h:x:y" black-bar crop ("" = none)
 }
 
 // DefaultRenderNode is a last-resort fallback; node choice comes from
@@ -170,7 +171,12 @@ func Build(s Settings, src *media.Probe, outPath string, clip *Clip) (primary, f
 
 	// MaxHeight is a resolution class cap (1080 = fit inside 1920×1080),
 	// so letterboxed 1920×802 is never "above" a 1080p cap.
-	scaleW, scaleH, scale := res.Fit(v.Width, v.Height, s.MaxHeight)
+	cw, ch, cx, cy, crop := parseCrop(s.Crop, v.Width, v.Height)
+	fitW, fitH := v.Width, v.Height
+	if crop {
+		fitW, fitH = cw, ch
+	}
+	scaleW, scaleH, scale := res.Fit(fitW, fitH, s.MaxHeight)
 	deint := s.Deinterlace == "on" || (s.Deinterlace == "auto" && v.Interlaced())
 	srcTen := v.BitDepth() >= 10
 	tonemap := s.TonemapHDR && v.HDRType() != "" && v.HDRType() != "dolby_vision"
@@ -207,6 +213,9 @@ func Build(s Settings, src *media.Probe, outPath string, clip *Clip) (primary, f
 
 	// Software pre-filters shared by every sw-decode path.
 	swPre := []string{}
+	if crop {
+		swPre = append(swPre, fmt.Sprintf("crop=%d:%d:%d:%d", cw, ch, cx, cy))
+	}
 	if deint && s.Backend == SW {
 		swPre = append(swPre, "bwdif=mode=send_frame")
 	}
@@ -227,7 +236,7 @@ func Build(s Settings, src *media.Probe, outPath string, clip *Clip) (primary, f
 
 	case QSV, VAAPI:
 		devices := []string{"-init_hw_device", "vaapi=va:" + s.node()}
-		var decode, hwFilter []string
+		var decode, hwFilter, fbFilter []string
 		fmtOut := "nv12"
 		if s.tenBit() {
 			fmtOut = "p010le"
@@ -246,6 +255,12 @@ func Build(s Settings, src *media.Probe, outPath string, clip *Clip) (primary, f
 			if deint {
 				vpp += ":deinterlace=2"
 			}
+			// Hardware path crops on the GPU; the fallback already cropped
+			// on the CPU before upload.
+			fbFilter = []string{vpp}
+			if crop {
+				vpp += fmt.Sprintf(":cw=%d:ch=%d:cx=%d:cy=%d", cw, ch, cx, cy)
+			}
 			hwFilter = []string{vpp}
 		} else {
 			devices = append(devices, "-filter_hw_device", "va")
@@ -258,11 +273,13 @@ func Build(s Settings, src *media.Probe, outPath string, clip *Clip) (primary, f
 				sc += fmt.Sprintf(":w=%d:h=%d", scaleW, scaleH)
 			}
 			hwFilter = append(hwFilter, sc)
+			fbFilter = hwFilter
 		}
 		upload := append(append([]string{}, swPre...), "format="+upFmt, "hwupload=extra_hw_frames=64")
-		fb := assemble(devices, nil, append(upload, hwFilter...), false)
-		if tonemap {
-			// Tone-mapping is a CPU filter: the sw-decode path IS the primary.
+		fb := assemble(devices, nil, append(upload, fbFilter...), false)
+		if tonemap || (crop && s.Backend == VAAPI) {
+			// Tone-mapping (and cropping for VA-API) are CPU filters:
+			// the sw-decode path IS the primary.
 			return fb, nil, nil
 		}
 		return assemble(devices, decode, hwFilter, true), fb, nil
@@ -286,12 +303,26 @@ func Build(s Settings, src *media.Probe, outPath string, clip *Clip) (primary, f
 			upload = append(upload, fmt.Sprintf("scale_cuda=%d:%d", scaleW, scaleH))
 		}
 		fb := assemble([]string{"-init_hw_device", "cuda=cu", "-filter_hw_device", "cu"}, nil, upload, false)
-		if tonemap {
+		if tonemap || crop {
 			return fb, nil, nil
 		}
 		return assemble(nil, []string{"-hwaccel", "cuda", "-hwaccel_output_format", "cuda"}, hwf, true), fb, nil
 	}
 	return nil, nil, fmt.Errorf("unknown backend %q", s.Backend)
+}
+
+// parseCrop validates a "w:h:x:y" crop against the frame.
+func parseCrop(spec string, fw, fh int) (w, h, x, y int, ok bool) {
+	if spec == "" {
+		return 0, 0, 0, 0, false
+	}
+	if n, err := fmt.Sscanf(spec, "%d:%d:%d:%d", &w, &h, &x, &y); err != nil || n != 4 {
+		return 0, 0, 0, 0, false
+	}
+	if w <= 0 || h <= 0 || x < 0 || y < 0 || x+w > fw || y+h > fh || (w == fw && h == fh) {
+		return 0, 0, 0, 0, false
+	}
+	return w &^ 1, h &^ 1, x, y, true
 }
 
 // videoArgs returns the encoder + rate-control args.

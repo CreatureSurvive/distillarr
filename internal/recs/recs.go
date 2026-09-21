@@ -88,13 +88,19 @@ func resBucket(h int) string {
 }
 
 // targetBPP is the "reference" bits/pixel of the target encoder at
-// quality q. Output is modelled as the geometric mean of this and the
-// source's H.264-equivalent bits (content complexity carries through).
-// Constants fitted to measured Arc A380 QSV HEVC encodes (1080p
-// H.264 at ~0.05 bpp → video 60% smaller at quality 66) and refined
-// per bucket by calibration.
-func targetBPP(h int, c encode.Codec, b encode.Backend, q int) float64 {
-	base := map[string]float64{"sd": 0.018, "720": 0.011, "1080": 0.0075, "2160": 0.0045}[resBucket(h)]
+// quality q for a picture of `pixels` pixels. Larger pictures need fewer
+// bits per pixel; this is a smooth power law (bpp ∝ pixels^-0.46) fitted
+// through 480p 0.018 / 720p 0.011 / 1080p 0.0075 / 4K 0.0045, so every
+// frame size gets its own value (no steps at class boundaries).
+// Output is modelled as the geometric mean of this and the source's
+// H.264-equivalent bits (content complexity carries through). Anchored
+// to measured Arc A380 QSV HEVC encodes (1080p H.264 at ~0.05 bpp →
+// video 60% smaller at quality 66) and refined by calibration.
+func targetBPP(pixels float64, c encode.Codec, b encode.Backend, q int) float64 {
+	if pixels <= 0 {
+		pixels = 1920 * 1080
+	}
+	base := 0.0075 * math.Pow(pixels/(1920*1080), -0.46)
 	switch b {
 	case encode.QSV:
 		base *= 1.2
@@ -140,13 +146,15 @@ func ModelRatio(f *store.File, s encode.Settings) float64 {
 	if f.VideoBitrate <= 0 || f.Width <= 0 || f.Height <= 0 {
 		return 0.6
 	}
-	outCls, scale := res.Class(f.Width, f.Height), 1.0
-	if ow, _, ok := res.Fit(f.Width, f.Height, s.MaxHeight); ok {
-		outCls, scale = s.MaxHeight, float64(ow)/float64(f.Width)
+	// Work on the real picture: black bars (encoded or cropped) cost
+	// almost nothing, so they are left out of every per-pixel figure.
+	aw, ah := f.Active()
+	scale := 1.0
+	if ow, _, ok := res.Fit(aw, ah, s.MaxHeight); ok {
+		scale = float64(ow) / float64(aw)
 	}
-	pixIn := float64(f.Width*f.Height) * fpsOr(f.FPS)
-	pixOut := pixIn * scale * scale
-	target := targetBPP(outCls, s.Codec, s.Backend, s.Quality) * pixOut
+	outPix := float64(aw*ah) * scale * scale
+	target := targetBPP(outPix, s.Codec, s.Backend, s.Quality) * outPix * fpsOr(f.FPS)
 	srcEq := float64(f.VideoBitrate) * codecEff(f.VideoCodec)
 	r := 0.88 * math.Sqrt(target/srcEq)
 	return math.Max(0.1, math.Min(0.97, r))
@@ -250,10 +258,13 @@ func Recommend(f *store.File, cfg config.Config) Recommendation {
 		return r
 	}
 
-	pixRate := float64(f.Width*f.Height) * fpsOr(f.FPS)
+	// Density over the real picture: encoded black bars cost almost no
+	// bits, so counting them would make a file look starved.
+	aw, ah := f.Active()
+	pixRate := float64(aw*ah) * fpsOr(f.FPS)
 	r.SrcBPP = float64(f.VideoBitrate) / pixRate
 	cls := res.Class(f.Width, f.Height)
-	r.Headroom = r.SrcBPP * codecEff(f.VideoCodec) / targetBPP(cls, s.Codec, s.Backend, 60)
+	r.Headroom = r.SrcBPP * codecEff(f.VideoCodec) / targetBPP(float64(aw*ah), s.Codec, s.Backend, 60)
 	if f.VideoCodec == "hevc" && r.Headroom < 30 {
 		r.Reason = fmt.Sprintf("Already HEVC at %.1f Mb/s, which is reasonable for %s.", float64(f.VideoBitrate)/1e6, res.Label(cls))
 		return r
@@ -317,7 +328,15 @@ func Recommend(f *store.File, cfg config.Config) Recommendation {
 	if f.BitDepth <= 8 && s.BitDepth == 10 {
 		notes = append(notes, "8-bit to 10-bit: better compression and less banding at the same size.")
 	}
-	if ow, oh, ok := res.Fit(f.Width, f.Height, s.MaxHeight); ok {
+	if f.HasBars() {
+		if cfg.CropBars {
+			s.Crop = f.CropRect()
+			notes = append(notes, fmt.Sprintf("Black bars detected: picture is %d×%d inside a %d×%d frame. They will be cropped out.", aw, ah, f.Width, f.Height))
+		} else {
+			notes = append(notes, fmt.Sprintf("Black bars detected: picture is %d×%d inside a %d×%d frame. The estimate uses the picture area.", aw, ah, f.Width, f.Height))
+		}
+	}
+	if ow, oh, ok := res.Fit(aw, ah, s.MaxHeight); ok {
 		notes = append(notes, fmt.Sprintf("Downscaled %s to %s, %d×%d (Settings cap).", res.Label(cls), res.Label(s.MaxHeight), ow, oh))
 	}
 	r.Audio = audioPlan(f, s)
@@ -353,7 +372,8 @@ func Estimate(f *store.File, s encode.Settings, cfg config.Config) Recommendatio
 		s.Backend = ResolveBackend("auto", s.Codec)
 	}
 	r := Recommendation{Action: "custom", Settings: s}
-	pixRate := float64(f.Width*f.Height) * fpsOr(f.FPS)
+	aw, ah := f.Active()
+	pixRate := float64(aw*ah) * fpsOr(f.FPS)
 	if pixRate > 0 {
 		r.SrcBPP = float64(f.VideoBitrate) / pixRate
 	}

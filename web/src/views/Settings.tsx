@@ -95,6 +95,9 @@ export default function SettingsView({ live, onJellyfin }: { live: LiveState; on
           <Toggle on={cfg.recompress_hevc} onChange={(v) => save({ recompress_hevc: v })} label="Re-encode existing HEVC" hint="Only when its bitrate is unusually high" />
           <Toggle on={cfg.prefer_mp4} onChange={(v) => save({ prefer_mp4: v })} label="Prefer MP4 for Apple devices"
             hint="HEVC tagged hvc1 with the index at the start. MKV is kept only for image subtitles, styled ASS, or TrueHD/DTS/FLAC audio. Changing an extension makes Sonarr/Radarr rescan the file." />
+          <Toggle on={cfg.crop_bars} onChange={(v) => save({ crop_bars: v })} label="Crop black bars by default"
+            hint="Bars are always left out of size estimates. Cropping them from the output is off by default: a film that switches aspect ratio could lose picture in scenes the detector didn't sample." />
+          <CropProgress />
           <Toggle on={cfg.tonemap_hdr} onChange={(v) => save({ tonemap_hdr: v })} label="Tone-map HDR to SDR by default" hint="Off keeps HDR10/HLG intact" />
         </div>
         <Calibration />
@@ -313,6 +316,24 @@ function TrashSection({ cfg, save }: { cfg: Config; save: (p: Partial<Config>, m
         </>
       )}
     </section>
+  );
+}
+
+function CropProgress() {
+  const [c, setC] = useState<{ checked: number; total: number; with_bars: number } | null>(null);
+  useEffect(() => {
+    const load = () => api.system().then((s) => setC(s.crop ?? null)).catch(() => {});
+    load();
+    const t = setInterval(load, 15000);
+    return () => clearInterval(t);
+  }, []);
+  if (!c || !c.total) return null;
+  return (
+    <div className="dim small" style={{ marginLeft: 44 }}>
+      Black-bar check: {c.checked.toLocaleString()} of {c.total.toLocaleString()} files done
+      {c.with_bars > 0 && `, ${c.with_bars.toLocaleString()} have bars`}
+      {c.checked < c.total && " (re-encode candidates first)"}.
+    </div>
   );
 }
 

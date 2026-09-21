@@ -3,6 +3,7 @@ package store
 import (
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"strings"
 
 	"mediatrans/internal/res"
@@ -59,27 +60,58 @@ type File struct {
 	ScannedAt   string `json:"scanned_at"`
 	UpdatedAt   string `json:"updated_at"`
 	Interlaced  bool   `json:"interlaced"`
+
+	// Active picture inside the frame when black bars are encoded in it
+	// (0 = no bars found or not checked yet).
+	CropW       int  `json:"crop_w"`
+	CropH       int  `json:"crop_h"`
+	CropX       int  `json:"crop_x"`
+	CropY       int  `json:"crop_y"`
+	CropChecked bool `json:"crop_checked"`
+}
+
+// HasBars reports detected black bars inside the encoded frame.
+func (f *File) HasBars() bool {
+	return f.CropW > 0 && f.CropH > 0 && (f.CropW < f.Width || f.CropH < f.Height)
+}
+
+// Active returns the real picture size (frame minus encoded black bars).
+func (f *File) Active() (int, int) {
+	if f.HasBars() {
+		return f.CropW, f.CropH
+	}
+	return f.Width, f.Height
+}
+
+// CropRect is the ffmpeg crop "w:h:x:y" for the bars ("" = none).
+func (f *File) CropRect() string {
+	if !f.HasBars() {
+		return ""
+	}
+	return fmt.Sprintf("%d:%d:%d:%d", f.CropW, f.CropH, f.CropX, f.CropY)
 }
 
 const fileCols = `id, path, library, title, year, season, episode, ep_title, quality_tag,
 	size, mtime_ns, container, duration, video_codec, width, height, bit_depth, fps, hdr,
 	video_bitrate, total_bitrate, audio_json, sub_count, sidecars_json, transcode_score,
-	rec_json, missing, scanned_at, updated_at, interlaced`
+	rec_json, missing, scanned_at, updated_at, interlaced, crop_w, crop_h, crop_x, crop_y, crop_checked`
 
 func scanFile(row interface{ Scan(...any) error }) (*File, error) {
 	f := &File{}
 	var audio, sidecars string
-	var missing, interlaced int
+	var missing, interlaced, cropChecked int
 	err := row.Scan(&f.ID, &f.Path, &f.Library, &f.Title, &f.Year, &f.Season, &f.Episode,
 		&f.EpTitle, &f.QualityTag, &f.Size, &f.MtimeNS, &f.Container, &f.Duration,
 		&f.VideoCodec, &f.Width, &f.Height, &f.BitDepth, &f.FPS, &f.HDR,
 		&f.VideoBitrate, &f.TotalBitrate, &audio, &f.SubCount, &sidecars,
-		&f.TranscodeScore, &f.RecJSON, &missing, &f.ScannedAt, &f.UpdatedAt, &interlaced)
+		&f.TranscodeScore, &f.RecJSON, &missing, &f.ScannedAt, &f.UpdatedAt, &interlaced,
+		&f.CropW, &f.CropH, &f.CropX, &f.CropY, &cropChecked)
 	if err != nil {
 		return nil, err
 	}
 	f.Missing = missing != 0
 	f.Interlaced = interlaced != 0
+	f.CropChecked = cropChecked != 0
 	_ = json.Unmarshal([]byte(audio), &f.Audio)
 	if f.Audio == nil {
 		f.Audio = []AudioStream{}
@@ -144,7 +176,9 @@ func (s *Store) UpsertFile(f *File, streams []Stream) error {
 		}
 	}
 	f.ID = id
-	if _, err := tx.Exec(`UPDATE files SET interlaced=? WHERE id=?`, b2i(f.Interlaced), id); err != nil {
+	// A (re)probed file is a new picture: bars must be detected again.
+	if _, err := tx.Exec(`UPDATE files SET interlaced=?, crop_w=0, crop_h=0, crop_x=0, crop_y=0,
+		crop_checked=0 WHERE id=?`, b2i(f.Interlaced), id); err != nil {
 		return err
 	}
 	for i := range streams {
@@ -182,6 +216,49 @@ func (s *Store) SweepMissing() (int64, error) {
 		return 0, err
 	}
 	return res.RowsAffected()
+}
+
+// CropTodo is a file awaiting black-bar detection.
+type CropTodo struct {
+	ID              int64
+	Path            string
+	Width, Height   int
+	Duration        float64
+}
+
+// FilesNeedingCrop lists unchecked files, re-encode candidates first
+// (their estimates and quality depend on it most).
+func (s *Store) FilesNeedingCrop(limit int) ([]CropTodo, error) {
+	rows, err := s.dbR.Query(`SELECT id, path, width, height, duration FROM files
+		WHERE missing=0 AND crop_checked=0 AND width>0 AND duration>60
+		ORDER BY (video_codec IN ('hevc','av1')), transcode_score DESC, id LIMIT ?`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []CropTodo
+	for rows.Next() {
+		var t CropTodo
+		if err := rows.Scan(&t.ID, &t.Path, &t.Width, &t.Height, &t.Duration); err != nil {
+			return nil, err
+		}
+		out = append(out, t)
+	}
+	return out, rows.Err()
+}
+
+// SetCrop stores detection results (zeros = no bars).
+func (s *Store) SetCrop(id int64, w, h, x, y int) error {
+	_, err := s.dbW.Exec(`UPDATE files SET crop_w=?, crop_h=?, crop_x=?, crop_y=?, crop_checked=1 WHERE id=?`,
+		w, h, x, y, id)
+	return err
+}
+
+// CropProgress reports checked / total present files.
+func (s *Store) CropProgress() (checked, total, withBars int) {
+	_ = s.dbR.QueryRow(`SELECT COALESCE(SUM(crop_checked),0), COUNT(*),
+		COALESCE(SUM(crop_w>0),0) FROM files WHERE missing=0`).Scan(&checked, &total, &withBars)
+	return
 }
 
 // FileStat is the minimal row used for incremental scan detection.

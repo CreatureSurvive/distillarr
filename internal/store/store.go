@@ -186,6 +186,12 @@ var alters = []string{
 		job_id INTEGER NOT NULL DEFAULT 0,
 		created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')))`,
 	`CREATE INDEX IF NOT EXISTS jellyfin_item ON jellyfin(item_id)`,
+	// Black-bar detection: active picture rectangle (0 = none/unknown).
+	`ALTER TABLE files ADD COLUMN crop_w INTEGER NOT NULL DEFAULT 0`,
+	`ALTER TABLE files ADD COLUMN crop_h INTEGER NOT NULL DEFAULT 0`,
+	`ALTER TABLE files ADD COLUMN crop_x INTEGER NOT NULL DEFAULT 0`,
+	`ALTER TABLE files ADD COLUMN crop_y INTEGER NOT NULL DEFAULT 0`,
+	`ALTER TABLE files ADD COLUMN crop_checked INTEGER NOT NULL DEFAULT 0`,
 }
 
 func (s *Store) migrate() error {

@@ -13,6 +13,19 @@ export function workingBackends(rep: HwReport | null | undefined, codec: string)
   return out.length ? out : ["sw"];
 }
 
+export function hasBars(f: FileItem): boolean {
+  return f.crop_w > 0 && f.crop_h > 0 && (f.crop_w < f.width || f.crop_h < f.height);
+}
+
+export function cropRect(f: FileItem): string {
+  return `${f.crop_w}:${f.crop_h}:${f.crop_x}:${f.crop_y}`;
+}
+
+function barsHint(f: FileItem): string {
+  if (!hasBars(f)) return f.crop_checked ? "The picture fills the frame" : "Detection runs in the background after a scan";
+  return `Picture is ${f.crop_w}×${f.crop_h} inside the ${f.width}×${f.height} frame. Cropping saves a little and changes the frame shape; check films that switch aspect ratio (IMAX scenes)`;
+}
+
 export function qualityWord(q: number): string {
   if (q >= 78) return "near-lossless";
   if (q >= 68) return "high";
@@ -130,6 +143,20 @@ export default function EncodeOptions({ value: s, onChange, file, streams, hw, a
               ...(resClass(file.width, file.height) > 720 ? [{ value: 720, label: "720p" }] : []),
             ]}
           />
+        </Row>
+        <Row label="Black bars" hint={barsHint(file)}>
+          {hasBars(file) ? (
+            <Seg
+              value={s.crop ? "crop" : "keep"}
+              onChange={(v) => set({ crop: v === "crop" ? cropRect(file) : "" })}
+              options={[
+                { value: "keep", label: "Keep full frame" },
+                { value: "crop", label: `Crop to ${file.crop_w}×${file.crop_h}` },
+              ]}
+            />
+          ) : (
+            <span className="dim small">{file.crop_checked ? "None found" : "Not checked yet"}</span>
+          )}
         </Row>
         <Row label="Deinterlace" hint={file.interlaced ? "Source is interlaced" : "Source looks progressive"}>
           <Seg

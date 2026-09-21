@@ -53,6 +53,10 @@ type Config struct {
 	// PreferMP4 makes "auto" output MP4 (HEVC tagged hvc1, moov first)
 	// whenever every kept track fits, for Apple/direct-play clients.
 	PreferMP4 *bool `json:"prefer_mp4"`
+	// CropBars crops detected black bars out of the output. Off by
+	// default: films that switch aspect ratio (IMAX scenes) could lose
+	// picture if the sampled frames missed the wider scenes.
+	CropBars bool `json:"crop_bars"`
 
 	JellyfinURL    string `json:"jellyfin_url"`
 	JellyfinAPIKey string `json:"jellyfin_api_key"`

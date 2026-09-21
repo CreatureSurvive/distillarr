@@ -126,3 +126,27 @@ func TestResolutionCapUsesClass(t *testing.T) {
 		t.Errorf("1920×802 is 1080p: a 1080p cap must not scale it: %s", a)
 	}
 }
+
+func TestCropPaths(t *testing.T) {
+	p := probe("/m/lb.mkv", "h264", "yuv420p", "", []string{"ac3"}, nil)
+	s := Settings{Codec: HEVC, Backend: QSV, Crop: "1920:800:0:140"}
+	a, _, fb := joined(t, s, p, nil)
+	if !strings.Contains(a, "-hwaccel qsv") || !strings.Contains(a, ":cw=1920:ch=800:cx=0:cy=140") {
+		t.Errorf("QSV should crop on the GPU: %s", a)
+	}
+	fa := strings.Join(fb.Args, " ")
+	if !strings.Contains(fa, "crop=1920:800:0:140") || strings.Contains(fa, "cw=") {
+		t.Errorf("QSV fallback crops once, on the CPU: %s", fa)
+	}
+	a, _, fb = joined(t, Settings{Codec: HEVC, Backend: VAAPI, Crop: "1920:800:0:140"}, p, nil)
+	if fb != nil || strings.Contains(a, "-hwaccel vaapi") || !strings.Contains(a, "crop=1920:800:0:140,format=nv12,hwupload") {
+		t.Errorf("VA-API crops before upload: %s", a)
+	}
+	a, _, _ = joined(t, Settings{Codec: HEVC, Backend: SW, Crop: "1920:800:0:140", MaxHeight: 720}, p, nil)
+	if !strings.Contains(a, "crop=1920:800:0:140,scale=1280:532") {
+		t.Errorf("crop then scale the picture: %s", a)
+	}
+	if a, _, _ = joined(t, Settings{Codec: HEVC, Backend: SW, Crop: "1920:1200:0:0"}, p, nil); strings.Contains(a, "crop=") {
+		t.Error("an out-of-frame crop must be ignored")
+	}
+}

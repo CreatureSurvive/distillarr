@@ -107,6 +107,9 @@ func main() {
 
 	eng.Start()
 	defer eng.Stop()
+	cropStop := make(chan struct{})
+	defer close(cropStop)
+	go sc.CropLoop(cropStop)
 	// Recommendations depend on settings + hardware + calibration;
 	// recompute once at boot so cached ones never go stale.
 	go func() {

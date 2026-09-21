@@ -402,3 +402,62 @@ func (s *Scanner) ProbeSingle(path string) error {
 	s.probeOne(path, cfg)
 	return nil
 }
+
+// CropLoop detects black bars in the background, re-encode candidates
+// first, two files at a time. New or changed files are picked up after
+// each scan pass; recommendations refresh as results land.
+func (s *Scanner) CropLoop(stop <-chan struct{}) {
+	for {
+		if s.Running() {
+			if sleepOr(stop, 30*time.Second) {
+				return
+			}
+			continue
+		}
+		todo, err := s.st.FilesNeedingCrop(40)
+		if err != nil || len(todo) == 0 {
+			if sleepOr(stop, 10*time.Minute) {
+				return
+			}
+			continue
+		}
+		var wg sync.WaitGroup
+		sem := make(chan struct{}, 2)
+		for _, t := range todo {
+			wg.Add(1)
+			sem <- struct{}{}
+			go func(t store.CropTodo) {
+				defer wg.Done()
+				defer func() { <-sem }()
+				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+				defer cancel()
+				c, ok, err := media.DetectCrop(ctx, t.Path, t.Width, t.Height, t.Duration)
+				if err != nil {
+					log.Printf("crop: %s: %v", t.Path, err)
+				}
+				if !ok {
+					c = media.Crop{}
+				}
+				if err := s.st.SetCrop(t.ID, c.W, c.H, c.X, c.Y); err != nil {
+					log.Printf("crop: save %s: %v", t.Path, err)
+				}
+			}(t)
+		}
+		wg.Wait()
+		s.RefreshRecsSoon()
+		select {
+		case <-stop:
+			return
+		default:
+		}
+	}
+}
+
+func sleepOr(stop <-chan struct{}, d time.Duration) bool {
+	select {
+	case <-stop:
+		return true
+	case <-time.After(d):
+		return false
+	}
+}

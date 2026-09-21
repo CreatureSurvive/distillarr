@@ -162,7 +162,9 @@ func (s *Server) system(w http.ResponseWriter, r *http.Request) {
 	for _, t := range items {
 		trashBytes += t.Size
 	}
+	checked, total, bars := s.st.CropProgress()
 	writeJSON(w, http.StatusOK, map[string]any{
+		"crop":        map[string]int{"checked": checked, "total": total, "with_bars": bars},
 		"media":       diskUsage("/srv/media"),
 		"config":      diskUsage("/config"),
 		"trash_bytes": trashBytes,
@@ -223,7 +225,7 @@ func (s *Server) putConfig(w http.ResponseWriter, r *http.Request) {
 	}
 	s.eng.Kick()
 	for _, k := range []string{"default_codec", "default_quality", "preferred_backend", "min_savings_pct",
-		"audio_pcm_target", "recompress_hevc", "max_height", "tonemap_hdr", "default_speed"} {
+		"audio_pcm_target", "recompress_hevc", "max_height", "tonemap_hdr", "default_speed", "prefer_mp4", "crop_bars"} {
 		if _, ok := patch[k]; ok {
 			s.scan.RefreshRecsSoon()
 			break

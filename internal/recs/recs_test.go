@@ -60,3 +60,30 @@ func TestCalibrationMovesEstimate(t *testing.T) {
 		t.Errorf("estimate should rise after observations: %d → %d (%d samples)", before, after.EstOut, after.Samples)
 	}
 }
+
+func TestBarsUseActivePicture(t *testing.T) {
+	cfg := config.Default()
+	full := file(1080, 3_000_000, "h264", 2015)
+	bars := *full
+	bars.CropW, bars.CropH, bars.CropY, bars.CropChecked = 1920, 800, 140, true
+	a, b := Recommend(full, cfg), Recommend(&bars, cfg)
+	if b.SrcBPP <= a.SrcBPP {
+		t.Errorf("bits are spread over the real picture only: %.4f vs %.4f", b.SrcBPP, a.SrcBPP)
+	}
+	if b.Settings.Crop != "" {
+		t.Error("cropping is off by default")
+	}
+	cfg.CropBars = true
+	if c := Recommend(&bars, cfg); c.Settings.Crop != "1920:800:0:140" {
+		t.Errorf("crop rect not set: %q", c.Settings.Crop)
+	}
+}
+
+func TestCurveIsContinuous(t *testing.T) {
+	// No jumps at old class boundaries: nearby sizes get nearby values.
+	a := targetBPP(1280*720, encode.HEVC, encode.QSV, 60)
+	b := targetBPP(1366*768, encode.HEVC, encode.QSV, 60)
+	if b >= a || a/b > 1.1 {
+		t.Errorf("720p %.5f vs 768p %.5f should be close and decreasing", a, b)
+	}
+}

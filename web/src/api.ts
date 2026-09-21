@@ -40,6 +40,11 @@ export type FileItem = {
   fps: number;
   hdr: string;
   interlaced: boolean;
+  crop_w: number;
+  crop_h: number;
+  crop_x: number;
+  crop_y: number;
+  crop_checked: boolean;
   video_bitrate: number;
   total_bitrate: number;
   audio: AudioStream[];
@@ -97,6 +102,7 @@ export type Settings = {
   audio?: AudioTrack[];
   subs?: SubTrack[];
   extra_args?: string;
+  crop?: string;
 };
 
 export type AudioPlan = {
@@ -305,6 +311,7 @@ export type Config = {
   max_height: number;
   tonemap_hdr: boolean;
   prefer_mp4: boolean;
+  crop_bars: boolean;
   jellyfin_url: string;
   jellyfin_api_key?: string;
   jellyfin_key_set?: boolean;
@@ -398,6 +405,7 @@ export const api = {
       config?: { total: number; free: number };
       trash_bytes: number;
       trash_count: number;
+      crop?: { checked: number; total: number; with_bars: number };
     }>("/api/v1/system"),
 
   config: () => req<Config>("/api/v1/config"),

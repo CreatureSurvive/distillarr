@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { api, type FileItem, type HwReport, type Plan, type Settings, type Stream } from "../api";
 import { Art, Copyable, Empty, FileChips, SavingsGauge, toast } from "../components";
-import EncodeOptions from "../options";
+import EncodeOptions, { hasBars } from "../options";
 import { backendLabel, bitrate, bytes, channelsLabel, codecLabel, dur, se } from "../format";
 import type { LiveState } from "../App";
 
@@ -107,6 +107,7 @@ export default function FileDetail({ live }: { live: LiveState }) {
             <span>{bytes(file.size)}</span>
             <span>{bitrate(file.video_bitrate)}</span>
             <span>{file.width}×{file.height}</span>
+            {hasBars(file) && <span className="warm" title="Black bars are encoded into the frame">picture {file.crop_w}×{file.crop_h}</span>}
             <span>{file.bit_depth}-bit</span>
             <span>{dur(file.duration)}</span>
             {file.interlaced && <span className="warm">interlaced</span>}
