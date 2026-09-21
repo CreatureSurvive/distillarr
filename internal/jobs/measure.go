@@ -44,7 +44,8 @@ type measurer struct {
 const measureSlack = 15
 
 func (e *Engine) measureMin() float64 {
-	return float64(e.cfg.Get().MinSavingsPct - measureSlack)
+	th := float64(e.cfg.Get().MinSavingsPct)
+	return max(th-measureSlack, th/2, 5)
 }
 
 // MeasureStatus returns a snapshot for the API.
