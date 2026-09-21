@@ -23,6 +23,18 @@ RUN npm install --no-audit --no-fund
 COPY web/ ./
 RUN npm run build
 
+# ---- Stage 1b: quality metrics ----
+# jellyfin-ffmpeg has no libvmaf; a static build (with VMAF models built
+# in) is used only for measuring quality, as /usr/local/bin/ffmpeg-vmaf.
+FROM debian:bookworm-slim AS vmaf
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl xz-utils \
+    && rm -rf /var/lib/apt/lists/*
+RUN curl -fsSL -o /tmp/ff.tar.xz \
+      https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-n8.1-latest-linux64-gpl-8.1.tar.xz \
+    && tar -xf /tmp/ff.tar.xz -C /tmp --wildcards '*/bin/ffmpeg' \
+    && mv /tmp/ffmpeg-*/bin/ffmpeg /ffmpeg-vmaf \
+    && /ffmpeg-vmaf -hide_banner -filters | grep -q libvmaf
+
 # ---- Stage 2: backend ----
 FROM golang:1.23-bookworm AS build
 WORKDIR /src
@@ -89,6 +101,7 @@ ENV LIBVA_DRIVERS_PATH="/usr/lib/x86_64-linux-gnu/dri" \
     MEDIIATRANS_DB="/config/mediatrans.db"
 
 COPY --from=build /out/mediatrans /usr/local/bin/mediatrans
+COPY --from=vmaf /ffmpeg-vmaf /usr/local/bin/ffmpeg-vmaf
 
 EXPOSE 8080
 

@@ -68,6 +68,9 @@ type File struct {
 	CropX       int  `json:"crop_x"`
 	CropY       int  `json:"crop_y"`
 	CropChecked bool `json:"crop_checked"`
+
+	// TuneJSON is the last VMAF quality search for this file.
+	TuneJSON string `json:"-"`
 }
 
 // HasBars reports detected black bars inside the encoded frame.
@@ -94,7 +97,7 @@ func (f *File) CropRect() string {
 const fileCols = `id, path, library, title, year, season, episode, ep_title, quality_tag,
 	size, mtime_ns, container, duration, video_codec, width, height, bit_depth, fps, hdr,
 	video_bitrate, total_bitrate, audio_json, sub_count, sidecars_json, transcode_score,
-	rec_json, missing, scanned_at, updated_at, interlaced, crop_w, crop_h, crop_x, crop_y, crop_checked`
+	rec_json, missing, scanned_at, updated_at, interlaced, crop_w, crop_h, crop_x, crop_y, crop_checked, tune_json`
 
 func scanFile(row interface{ Scan(...any) error }) (*File, error) {
 	f := &File{}
@@ -105,7 +108,7 @@ func scanFile(row interface{ Scan(...any) error }) (*File, error) {
 		&f.VideoCodec, &f.Width, &f.Height, &f.BitDepth, &f.FPS, &f.HDR,
 		&f.VideoBitrate, &f.TotalBitrate, &audio, &f.SubCount, &sidecars,
 		&f.TranscodeScore, &f.RecJSON, &missing, &f.ScannedAt, &f.UpdatedAt, &interlaced,
-		&f.CropW, &f.CropH, &f.CropX, &f.CropY, &cropChecked)
+		&f.CropW, &f.CropH, &f.CropX, &f.CropY, &cropChecked, &f.TuneJSON)
 	if err != nil {
 		return nil, err
 	}
@@ -178,7 +181,7 @@ func (s *Store) UpsertFile(f *File, streams []Stream) error {
 	f.ID = id
 	// A (re)probed file is a new picture: bars must be detected again.
 	if _, err := tx.Exec(`UPDATE files SET interlaced=?, crop_w=0, crop_h=0, crop_x=0, crop_y=0,
-		crop_checked=0 WHERE id=?`, b2i(f.Interlaced), id); err != nil {
+		crop_checked=0, tune_json='' WHERE id=?`, b2i(f.Interlaced), id); err != nil {
 		return err
 	}
 	for i := range streams {
@@ -251,6 +254,12 @@ func (s *Store) FilesNeedingCrop(limit int) ([]CropTodo, error) {
 func (s *Store) SetCrop(id int64, w, h, x, y int) error {
 	_, err := s.dbW.Exec(`UPDATE files SET crop_w=?, crop_h=?, crop_x=?, crop_y=?, crop_checked=1 WHERE id=?`,
 		w, h, x, y, id)
+	return err
+}
+
+// SetTune stores a file's VMAF quality search result.
+func (s *Store) SetTune(id int64, tuneJSON string) error {
+	_, err := s.dbW.Exec(`UPDATE files SET tune_json=? WHERE id=?`, tuneJSON, id)
 	return err
 }
 

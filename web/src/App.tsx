@@ -19,6 +19,7 @@ export type LiveState = {
   hwVersion: number;
   previewVersion: number;
   jfVersion: number;
+  notes: Record<number, string>;
 };
 
 const NAV = [
@@ -30,7 +31,7 @@ const NAV = [
 
 export default function App() {
   const [live, setLive] = useState<LiveState>({
-    progress: {}, activeJobs: [], scan: null, queueVersion: 0, hwVersion: 0, previewVersion: 0, jfVersion: 0,
+    progress: {}, activeJobs: [], scan: null, queueVersion: 0, hwVersion: 0, previewVersion: 0, jfVersion: 0, notes: {},
   });
   const [jf, setJf] = useState<JfStatus | null>(null);
 
@@ -41,6 +42,8 @@ export default function App() {
     const unsub = subscribe((event, data) => {
       if (event === "progress" && data?.job_id !== undefined) {
         setLive((l) => ({ ...l, progress: { ...l.progress, [data.job_id]: data } }));
+      } else if (event === "job" && data?.note) {
+        setLive((l) => ({ ...l, notes: { ...l.notes, [data.id]: data.note } }));
       } else if (event === "job" || event === "queue") {
         if (event === "job" && ["done", "failed", "canceled"].includes(data?.status)) {
           setLive((l) => {
@@ -149,7 +152,7 @@ function EncodeDeck({ live }: { live: LiveState }) {
                   <span className="hide-sm">{p.size > 0 && <> · {bytes(p.size)}</>}</span>
                 </>
               ) : (
-                <span className="dim">starting…</span>
+                <span className="dim">{live.notes[j.id] || "starting…"}</span>
               )}
             </div>
           </a>

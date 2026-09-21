@@ -103,6 +103,18 @@ export type Settings = {
   subs?: SubTrack[];
   extra_args?: string;
   crop?: string;
+  vmaf_target?: number;
+};
+
+export type VMAF = { mean: number; p5: number; min: number };
+
+export type TuneResult = {
+  target: number;
+  quality: number;
+  vmaf: VMAF;
+  ratio: number;
+  met: boolean;
+  steps: { quality: number; crf: number; vmaf: VMAF; ratio: number; pass: boolean }[];
 };
 
 export type AudioPlan = {
@@ -130,6 +142,7 @@ export type Recommendation = {
   score: number;
   src_bpp: number;
   calibration_samples: number;
+  measured?: boolean;
 };
 
 export type Plan = {
@@ -312,6 +325,7 @@ export type Config = {
   tonemap_hdr: boolean;
   prefer_mp4: boolean;
   crop_bars: boolean;
+  vmaf_target: number;
   jellyfin_url: string;
   jellyfin_api_key?: string;
   jellyfin_key_set?: boolean;
@@ -359,6 +373,8 @@ export type Preview = {
   duration: number;
   command?: string;
   measured_ratio?: number;
+  tune?: TuneResult;
+  stage?: string;
   segments: {
     index: number;
     start: number;
@@ -368,6 +384,7 @@ export type Preview = {
     src_size: number;
     enc_size: number;
     proxy: boolean;
+    vmaf?: VMAF;
   }[];
 };
 

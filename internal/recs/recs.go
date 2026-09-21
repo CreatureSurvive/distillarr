@@ -45,6 +45,7 @@ type Recommendation struct {
 	SrcBPP   float64         `json:"src_bpp"`
 	Headroom float64         `json:"headroom"`   // source bits vs what the target needs
 	Samples  int             `json:"calibration_samples"` // real results behind the estimate
+	Measured bool            `json:"measured"`            // quality + size come from a VMAF search on this file
 }
 
 // JSON serializes for files.rec_json caching.
@@ -100,7 +101,10 @@ func targetBPP(pixels float64, c encode.Codec, b encode.Backend, q int) float64 
 	if pixels <= 0 {
 		pixels = 1920 * 1080
 	}
-	base := 0.0075 * math.Pow(pixels/(1920*1080), -0.46)
+	// Anchor re-fitted to VMAF measurements (Sept 2026): at quality 60
+	// (≈ VMAF 93, visually transparent) Arc QSV kept 58–83% of typical
+	// 2–3.3 Mb/s 1080p H.264 sources, i.e. ~0.044 bpp for QSV.
+	base := 0.037 * math.Pow(pixels/(1920*1080), -0.46)
 	switch b {
 	case encode.QSV:
 		base *= 1.2
@@ -112,8 +116,12 @@ func targetBPP(pixels float64, c encode.Codec, b encode.Backend, q int) float64 
 	if c == encode.AV1 {
 		base *= 0.75
 	}
-	return base * math.Pow(1.3, float64(q-60)/10)
+	return base
 }
+
+// qualityFactor scales output size with the quality knob: measured
+// ~18% more bytes per CRF-equivalent step (5 knob units).
+func qualityFactor(q int) float64 { return math.Pow(1.18, float64(q-60)/5) }
 
 // codecEff converts source bits to "H.264-equivalent" bits.
 func codecEff(c string) float64 {
@@ -156,8 +164,8 @@ func ModelRatio(f *store.File, s encode.Settings) float64 {
 	outPix := float64(aw*ah) * scale * scale
 	target := targetBPP(outPix, s.Codec, s.Backend, s.Quality) * outPix * fpsOr(f.FPS)
 	srcEq := float64(f.VideoBitrate) * codecEff(f.VideoCodec)
-	r := 0.88 * math.Sqrt(target/srcEq)
-	return math.Max(0.1, math.Min(0.97, r))
+	r := 0.88 * math.Sqrt(target/srcEq) * qualityFactor(s.Quality)
+	return math.Max(0.1, math.Min(1.3, r))
 }
 
 // ---- calibration ----
@@ -265,24 +273,28 @@ func Recommend(f *store.File, cfg config.Config) Recommendation {
 	r.SrcBPP = float64(f.VideoBitrate) / pixRate
 	cls := res.Class(f.Width, f.Height)
 	r.Headroom = r.SrcBPP * codecEff(f.VideoCodec) / targetBPP(float64(aw*ah), s.Codec, s.Backend, 60)
-	if f.VideoCodec == "hevc" && r.Headroom < 30 {
+	if f.VideoCodec == "hevc" && r.Headroom < 6 {
 		r.Reason = fmt.Sprintf("Already HEVC at %.1f Mb/s, which is reasonable for %s.", float64(f.VideoBitrate)/1e6, res.Label(cls))
 		return r
+	}
+
+	if cfg.CropBars && f.HasBars() {
+		s.Crop = f.CropRect()
 	}
 
 	// ---- choose quality from the source ----
 	q := cfg.DefaultQuality
 	why := []string{}
 	switch h := r.Headroom; {
-	case h < 4.5:
-		q += 6
-		why = append(why, fmt.Sprintf("Source is already bit-starved (%.3f bits/pixel), so quality is raised +6 to avoid stacking compression artifacts.", r.SrcBPP))
-	case h < 8:
-		q += 3
-		why = append(why, fmt.Sprintf("Modest source bitrate (%.3f bits/pixel), so quality is raised +3.", r.SrcBPP))
-	case h > 25:
-		q -= 4
-		why = append(why, fmt.Sprintf("High-bitrate source (%.3f bits/pixel) has plenty of detail headroom, so quality is lowered −4 and stays transparent.", r.SrcBPP))
+	case h < 1.0:
+		q += 5
+		why = append(why, fmt.Sprintf("Source is already heavily compressed (%.3f bits/pixel): quality raised +5 so artifacts don't stack.", r.SrcBPP))
+	case h < 1.6:
+		q += 2
+		why = append(why, fmt.Sprintf("Low source bitrate (%.3f bits/pixel): quality raised +2.", r.SrcBPP))
+	case h > 5:
+		q -= 3
+		why = append(why, fmt.Sprintf("High-bitrate source (%.3f bits/pixel) has plenty of detail headroom, so quality is lowered −3 and stays transparent.", r.SrcBPP))
 	default:
 		why = append(why, fmt.Sprintf("Healthy source bitrate (%.3f bits/pixel), so the default quality fits.", r.SrcBPP))
 	}
@@ -313,6 +325,21 @@ func Recommend(f *store.File, cfg config.Config) Recommendation {
 		why = append(why, "Interlaced source: deinterlacing (bwdif / vpp) is enabled.")
 	}
 	s.Quality = clampInt(q, 35, 85)
+	if s.VMAFTarget > 0 {
+		if t := TunedFor(f, s); t != nil {
+			s.Quality = t.Quality
+			r.Measured = true
+			msg := fmt.Sprintf("Measured on 3 samples: quality %d scores VMAF %.1f against the original (worst moments %.1f), for your target of %.0f.",
+				t.Quality, t.VMAF.Mean, t.VMAF.P5, t.Target)
+			if !t.Met {
+				msg = fmt.Sprintf("Measured on 3 samples: even quality %d only reaches VMAF %.1f (target %.0f); the source's own artifacts limit it.",
+					t.Quality, t.VMAF.Mean, t.Target)
+			}
+			why = []string{msg}
+		} else {
+			why = append(why, fmt.Sprintf("Starting point only: right before encoding, samples are measured and quality is adjusted to hit VMAF %.0f.", s.VMAFTarget))
+		}
+	}
 
 	notes := []string{}
 	switch f.HDR {
@@ -329,8 +356,7 @@ func Recommend(f *store.File, cfg config.Config) Recommendation {
 		notes = append(notes, "8-bit to 10-bit: better compression and less banding at the same size.")
 	}
 	if f.HasBars() {
-		if cfg.CropBars {
-			s.Crop = f.CropRect()
+		if s.Crop != "" {
 			notes = append(notes, fmt.Sprintf("Black bars detected: picture is %d×%d inside a %d×%d frame. They will be cropped out.", aw, ah, f.Width, f.Height))
 		} else {
 			notes = append(notes, fmt.Sprintf("Black bars detected: picture is %d×%d inside a %d×%d frame. The estimate uses the picture area.", aw, ah, f.Width, f.Height))
@@ -385,7 +411,12 @@ func Estimate(f *store.File, s encode.Settings, cfg config.Config) Recommendatio
 
 func fillEstimate(r *Recommendation, f *store.File, s encode.Settings, cfg config.Config) {
 	factor, n := calFactor(CalibKey(s.Backend, s.Codec, f.VideoCodec, res.Class(f.Width, f.Height)))
-	ratio := math.Max(0.06, math.Min(1.1, ModelRatio(f, s)*factor))
+	ratio := math.Max(0.06, math.Min(1.3, ModelRatio(f, s)*factor))
+	if t := TunedFor(f, s); t != nil && t.Quality == s.Quality && t.Ratio > 0 {
+		// Measured on this file's own samples: far better than any model.
+		ratio, n = t.Ratio, 20
+		r.Measured = true
+	}
 	other := f.TotalBitrate - f.VideoBitrate
 	if other < 0 {
 		other = 0
@@ -492,6 +523,7 @@ func baseSettings(cfg config.Config) encode.Settings {
 		AudioPCMTarget: cfg.AudioPCMTarget,
 		Container:      "auto",
 		PreferMP4:      cfg.MP4(),
+		VMAFTarget:     cfg.VMAF(),
 	}
 	s.Normalize()
 	return s

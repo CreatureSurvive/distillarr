@@ -4,6 +4,7 @@ package main
 import (
 	"context"
 	"embed"
+	"encoding/json"
 	"errors"
 	"io/fs"
 	"log"
@@ -24,6 +25,7 @@ import (
 	"mediatrans/internal/replace"
 	"mediatrans/internal/scan"
 	"mediatrans/internal/store"
+	"mediatrans/internal/tune"
 )
 
 //go:embed all:web/dist
@@ -72,6 +74,20 @@ func main() {
 		})
 	srv := api.NewServer(st, cfg, sc, eng, pv, webFS())
 	hubNotify = srv.Hub().Broadcast
+	pv.OnTuned = func(fileID int64, s encode.Settings, r tune.Result) {
+		f, err := st.GetFile(fileID)
+		if err != nil || f == nil {
+			return
+		}
+		b, _ := json.Marshal(recs.TuneRecord{Target: s.VMAFTarget, Codec: string(s.Codec), Backend: string(s.Backend),
+			Crop: s.Crop, MaxHeight: s.MaxHeight, Quality: r.Quality, Ratio: r.Ratio, VMAF: r.VMAF,
+			Met: r.Met, At: time.Now().UTC().Format(time.RFC3339)})
+		_ = st.SetTune(fileID, string(b))
+		if r.Ratio > 0 {
+			recs.RecordObservation(f, s, r.Ratio)
+		}
+		sc.RefreshRecsSoon()
+	}
 	pv.OnMeasured = func(fileID int64, s encode.Settings, ratio float64) {
 		if f, err := st.GetFile(fileID); err == nil && f != nil {
 			recs.RecordObservation(f, s, ratio)

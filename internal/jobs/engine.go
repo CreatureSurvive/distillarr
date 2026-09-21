@@ -24,6 +24,7 @@ import (
 	"mediatrans/internal/replace"
 	"mediatrans/internal/scan"
 	"mediatrans/internal/store"
+	"mediatrans/internal/tune"
 )
 
 // Event names broadcast over SSE.
@@ -273,6 +274,14 @@ func (e *Engine) runJob(j *store.Job, resume bool) {
 	if rep != nil && settings.Backend != encode.SW {
 		settings.RenderNode = hwprobe.NodeFor(rep, settings.Backend, settings.Codec)
 	}
+	if !resume {
+		settings = e.tuneQuality(ctx, j, settings, src)
+		if ctx.Err() != nil {
+			e.st.FinishJob(j.ID, store.StatusCanceled, 0, "canceled", "")
+			e.notify(EvJob, map[string]any{"id": j.ID, "status": store.StatusCanceled})
+			return
+		}
+	}
 	tempPath := j.TempPath
 	if !resume || tempPath == "" {
 		c, err := encode.ChooseContainer(settings, src)
@@ -381,6 +390,60 @@ func (e *Engine) runJob(j *store.Job, resume bool) {
 	if e.OnReplaced != nil {
 		go e.OnReplaced(destPath, st)
 	}
+}
+
+// tuneQuality runs the per-file VMAF search when the settings ask for a
+// quality target (or reuses a matching stored measurement), and returns
+// the settings with Quality set to what the search found. On any failure
+// it keeps the given quality: tuning never blocks an encode.
+func (e *Engine) tuneQuality(ctx context.Context, j *store.Job, s encode.Settings, src *media.Probe) encode.Settings {
+	if s.VMAFTarget <= 0 || !media.VMAFAvailable() {
+		return s
+	}
+	f, _ := e.st.GetFileByPath(j.SrcPath)
+	if t := recs.TunedFor(f, s); t != nil {
+		s.Quality = t.Quality
+		e.saveJobSettings(j, s)
+		return s
+	}
+	e.notify(EvJob, map[string]any{"id": j.ID, "status": "running",
+		"note": fmt.Sprintf("measuring quality (target VMAF %.0f)", s.VMAFTarget)})
+	res, _, err := tune.Search(ctx, tune.Options{
+		Settings: s, Probe: src, Target: s.VMAFTarget,
+		WorkDir: filepath.Join("/config/tune", fmt.Sprintf("job-%d", j.ID)),
+		Acquire: e.AcquireSem,
+		Progress: func(msg string) {
+			e.notify(EvJob, map[string]any{"id": j.ID, "status": "running", "note": msg})
+		},
+	})
+	_ = os.RemoveAll(filepath.Join("/config/tune", fmt.Sprintf("job-%d", j.ID)))
+	if err != nil {
+		if ctx.Err() == nil {
+			log.Printf("jobs: %d: quality search skipped: %v", j.ID, err)
+		}
+		return s
+	}
+	s.Quality = res.Quality
+	e.saveJobSettings(j, s)
+	if f != nil {
+		rec := recs.TuneRecord{Target: s.VMAFTarget, Codec: string(s.Codec), Backend: string(s.Backend),
+			Crop: s.Crop, MaxHeight: s.MaxHeight, Quality: res.Quality, Ratio: res.Ratio, VMAF: res.VMAF,
+			Met: res.Met, At: time.Now().UTC().Format(time.RFC3339)}
+		b, _ := json.Marshal(rec)
+		_ = e.st.SetTune(f.ID, string(b))
+		if res.Ratio > 0 {
+			recs.RecordObservation(f, s, res.Ratio)
+		}
+	}
+	log.Printf("jobs: %d: quality %d scores VMAF %.1f (p5 %.1f), %.0f%% of source video", j.ID,
+		res.Quality, res.VMAF.Mean, res.VMAF.P5, res.Ratio*100)
+	return s
+}
+
+func (e *Engine) saveJobSettings(j *store.Job, s encode.Settings) {
+	b, _ := json.Marshal(s)
+	j.SettingsJSON, j.Quality = string(b), s.Quality
+	_ = e.st.UpdateJobSettings(j.ID, s.Quality, string(b))
 }
 
 // noAudioChanges reports whether audio was passed through untouched (so

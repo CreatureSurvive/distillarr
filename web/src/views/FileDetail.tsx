@@ -135,16 +135,20 @@ export default function FileDetail({ live }: { live: LiveState }) {
                 </div>
                 <div className="dim small">
                   {savedBytes > 0 ? `about ${bytes(savedBytes)} saved · ` : ""}
-                  {rec.calibration_samples > 0
-                    ? `estimate tuned by ${rec.calibration_samples} real encode${rec.calibration_samples === 1 ? "" : "s"}`
-                    : "estimate not yet checked against real encodes; a preview will measure it"}
+                  {rec.measured
+                    ? "measured on this file's own samples"
+                    : settings.vmaf_target
+                      ? `estimate; the real quality is measured before encoding (target VMAF ${settings.vmaf_target})`
+                      : rec.calibration_samples > 0
+                        ? `estimate tuned by ${rec.calibration_samples} real measurement${rec.calibration_samples === 1 ? "" : "s"}`
+                        : "estimate; a preview measures it"}
                 </div>
               </>
             )}
             {!custom && autoRec?.action !== "transcode" && <p className="verdict-reason">{autoRec?.reason}</p>}
             {autoRec?.why && autoRec.why.length > 0 && (
               <div className="why">
-                <div className="why-h">Why quality {autoRec.settings.quality}</div>
+                <div className="why-h">{autoRec.measured ? `Quality ${autoRec.settings.quality}, measured` : `Why quality ${autoRec.settings.quality}`}</div>
                 <ul>{autoRec.why.map((w) => <li key={w}>{w}</li>)}</ul>
               </div>
             )}
@@ -153,7 +157,7 @@ export default function FileDetail({ live }: { live: LiveState }) {
             )}
             <div className="actions">
               <button className="btn" disabled={!!busy} onClick={() => act("preview")}>
-                {busy === "preview" ? "Starting…" : "Preview & compare"}
+                {busy === "preview" ? "Starting…" : settings.vmaf_target ? "Measure & compare" : "Preview & compare"}
               </button>
               <button className="btn" disabled={!!busy || file.queued} onClick={() => act("queue")}>
                 {file.queued ? "In queue" : busy === "queue" ? "Adding…" : "Add to queue"}

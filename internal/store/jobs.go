@@ -157,6 +157,13 @@ func (s *Store) SetJobCmd(id int64, cmd string) error {
 	return err
 }
 
+// UpdateJobSettings stores the settings a job actually runs with (after
+// the quality search picked its quality).
+func (s *Store) UpdateJobSettings(id int64, quality int, settingsJSON string) error {
+	_, err := s.dbW.Exec(`UPDATE jobs SET quality=?, settings_json=? WHERE id=?`, quality, settingsJSON, id)
+	return err
+}
+
 // SetJobDest records where the output landed.
 func (s *Store) SetJobDest(id int64, dest string) error {
 	_, err := s.dbW.Exec(`UPDATE jobs SET dest_path=? WHERE id=?`, dest, id)

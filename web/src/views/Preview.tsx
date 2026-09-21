@@ -85,8 +85,37 @@ export default function PreviewView({ live }: { live: LiveState }) {
 
       {p.status === "running" && (
         <div className="empty" style={{ padding: 30 }}>
-          <div className="big">Encoding samples…</div>
+          <div className="big">{p.settings.vmaf_target ? "Measuring quality…" : "Encoding samples…"}</div>
+          {p.stage && <div className="dim mono">{p.stage}</div>}
+          {p.settings.vmaf_target ? (
+            <div className="dim small" style={{ marginTop: 8 }}>
+              Encoding three 15-second samples at a few quality levels and scoring each against the original.
+              About a minute on the Arc.
+            </div>
+          ) : null}
         </div>
+      )}
+
+      {p.tune && (
+        <section className="panel tune-panel">
+          <div className="eyebrow">Quality search · target VMAF {p.tune.target}</div>
+          <p className="verdict-reason" style={{ marginTop: 0 }}>
+            {p.tune.met
+              ? <>Quality <b>{p.tune.quality}</b> is the smallest setting that reaches the target: VMAF <b>{p.tune.vmaf.mean.toFixed(1)}</b> (worst moments {p.tune.vmaf.p5.toFixed(1)}), video at <b>{Math.round(p.tune.ratio * 100)}%</b> of the source's size.</>
+              : <>No tested setting reached VMAF {p.tune.target}; the best was {p.tune.vmaf.mean.toFixed(1)} at quality {p.tune.quality}. The source's own compression limits how close a re-encode can get. This file may not be worth re-encoding.</>}
+          </p>
+          <ul className="tune-steps">
+            {p.tune.steps.map((st) => (
+              <li key={st.quality} className={st.quality === p.tune!.quality ? "chosen" : ""}>
+                <span className="mono">q{st.quality}</span>
+                <span className={`mono ${st.pass ? "teal" : "warm"}`}>VMAF {st.vmaf.mean.toFixed(1)}</span>
+                <span className="mono dim">low {st.vmaf.p5.toFixed(1)}</span>
+                <span className="mono dim">{Math.round(st.ratio * 100)}% size</span>
+                {st.quality === p.tune!.quality && <span className="tag tag-save">chosen</span>}
+              </li>
+            ))}
+          </ul>
+        </section>
       )}
 
       {p.status === "ready" && (
@@ -119,7 +148,8 @@ export default function PreviewView({ live }: { live: LiveState }) {
                 onPause={() => sync && srcRef.current?.pause()}
               />
               <figcaption>
-                <span className="ab-tag teal">B · {codecLabel(p.settings.codec)}</span>
+                <span className="ab-tag teal">B · {codecLabel(p.settings.codec)} q{p.settings.quality}</span>
+                {seg.vmaf && <span className={`mono ${seg.vmaf.mean >= 93 ? "teal" : seg.vmaf.mean >= 90 ? "" : "warm"}`}>VMAF {seg.vmaf.mean.toFixed(1)}</span>}
                 <span className="mono dim">
                   {bytes(seg.enc_size)}
                   {seg.src_size > 0 && (

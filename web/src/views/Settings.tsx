@@ -59,7 +59,16 @@ export default function SettingsView({ live, onJellyfin }: { live: LiveState; on
             <Seg value={cfg.preferred_backend} onChange={(v) => save({ preferred_backend: v })}
               options={["auto", "qsv", "vaapi", "nvenc", "sw"].map((b) => ({ value: b, label: b === "auto" ? "Auto" : backendLabel(b) }))} />
           </Field>
-          <Field label="Base quality" hint="Files with little bitrate headroom are raised automatically">
+          <Field label="Quality target" hint="Every encode first scores short samples against the original (VMAF) and uses the smallest setting that meets this. Adds 1–2 minutes per job.">
+            <Seg value={cfg.vmaf_target || 0} onChange={(v) => save({ vmaf_target: v })}
+              options={[
+                { value: 91, label: "91 smaller" },
+                { value: 93, label: "93 transparent" },
+                { value: 95, label: "95 archival" },
+                { value: 0, label: "Off (fixed quality)" },
+              ]} />
+          </Field>
+          <Field label={cfg.vmaf_target ? "Starting quality" : "Base quality"} hint={cfg.vmaf_target ? "Where the quality search starts, and what size estimates assume before a file is measured" : "Files with little bitrate headroom are raised automatically"}>
             <div className="quality">
               <input type="range" min={35} max={85} value={cfg.default_quality}
                 onChange={(e) => setCfg({ ...cfg, default_quality: Number(e.target.value) })}

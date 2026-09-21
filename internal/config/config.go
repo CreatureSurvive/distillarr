@@ -57,6 +57,9 @@ type Config struct {
 	// default: films that switch aspect ratio (IMAX scenes) could lose
 	// picture if the sampled frames missed the wider scenes.
 	CropBars bool `json:"crop_bars"`
+	// VMAFTarget is the quality every encode is tuned to (0 = use the
+	// quality number as-is). 93 ≈ indistinguishable at normal viewing.
+	VMAFTarget *float64 `json:"vmaf_target"`
 
 	JellyfinURL    string `json:"jellyfin_url"`
 	JellyfinAPIKey string `json:"jellyfin_api_key"`
@@ -148,6 +151,10 @@ func (m *Manager) normalize() {
 	if m.cfg.TrashDir == "" {
 		m.cfg.TrashDir = d.TrashDir
 	}
+	if m.cfg.VMAFTarget == nil {
+		t := 93.0
+		m.cfg.VMAFTarget = &t
+	}
 	if m.cfg.JellyfinPathMap == "" {
 		m.cfg.JellyfinPathMap = d.JellyfinPathMap
 	}
@@ -202,6 +209,14 @@ func (m *Manager) Subscribe() chan struct{} {
 	ch := make(chan struct{}, 1)
 	m.subs = append(m.subs, ch)
 	return ch
+}
+
+// VMAF returns the effective quality target (0 = off).
+func (c Config) VMAF() float64 {
+	if c.VMAFTarget == nil {
+		return 93
+	}
+	return *c.VMAFTarget
 }
 
 // MP4 reports the effective prefer-MP4 setting (default on).

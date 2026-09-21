@@ -192,6 +192,8 @@ var alters = []string{
 	`ALTER TABLE files ADD COLUMN crop_x INTEGER NOT NULL DEFAULT 0`,
 	`ALTER TABLE files ADD COLUMN crop_y INTEGER NOT NULL DEFAULT 0`,
 	`ALTER TABLE files ADD COLUMN crop_checked INTEGER NOT NULL DEFAULT 0`,
+	// Per-file VMAF quality search result (JSON, "" = not tuned).
+	`ALTER TABLE files ADD COLUMN tune_json TEXT NOT NULL DEFAULT ''`,
 }
 
 func (s *Store) migrate() error {

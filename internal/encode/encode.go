@@ -72,6 +72,9 @@ type Settings struct {
 	ExtraArgs      string       `json:"extra_args,omitempty"` // appended output options
 	PreferMP4      bool         `json:"prefer_mp4,omitempty"` // auto container: MP4 whenever tracks fit
 	Crop           string       `json:"crop,omitempty"`       // "w:h:x:y" black-bar crop ("" = none)
+	// VMAFTarget > 0: before encoding, search samples for the smallest
+	// quality that scores at least this VMAF (Quality is the start point).
+	VMAFTarget float64 `json:"vmaf_target,omitempty"`
 }
 
 // DefaultRenderNode is a last-resort fallback; node choice comes from
@@ -91,6 +94,7 @@ type CmdSpec struct {
 // Clip restricts a build to a span (previews). Zero value = whole file.
 type Clip struct {
 	Start, Dur float64
+	NoAudio    bool // video only (quality-search samples)
 }
 
 // FFmpeg is the binary name.
@@ -163,6 +167,9 @@ func Build(s Settings, src *media.Probe, outPath string, clip *Clip) (primary, f
 	}
 
 	streams := planStreams(s, src, container, clip != nil)
+	if clip != nil && clip.NoAudio {
+		streams = streamPlan{maps: []string{"-map", fmt.Sprintf("0:%d", v.Index)}, codecs: []string{"-an", "-sn", "-dn"}}
+	}
 	video, err := videoArgs(s)
 	if err != nil {
 		return nil, nil, err
@@ -355,23 +362,31 @@ func videoArgs(s Settings) ([]string, error) {
 		if !s.tenBit() {
 			prof = "main"
 		}
-		return []string{"-c:v", "hevc_qsv", "-rc_mode", "LA_ICQ", "-global_quality", itoa(crf + 3),
-			"-look_ahead", "1", "-preset", sp, "-profile:v", prof}, nil
+		// Constant quality with a 40-frame lookahead: bits follow scene
+		// complexity (action gets more, static scenes less). No bitrate
+		// cap. global_quality == CRF-equivalent: measured on the Arc,
+		// q60 (21) averages VMAF ~93 on grainy 1080p H.264 sources.
+		// (adaptive_i/adaptive_b are ignored in LA_ICQ, so not passed.)
+		return []string{"-c:v", "hevc_qsv", "-rc_mode", "LA_ICQ", "-global_quality", itoa(crf),
+			"-look_ahead", "1", "-look_ahead_depth", "40", "-bf", "7",
+			"-preset", sp, "-profile:v", prof}, nil
 	case s.Backend == QSV && s.Codec == AV1:
-		return []string{"-c:v", "av1_qsv", "-rc_mode", "ICQ", "-global_quality", itoa(crf + 3),
+		return []string{"-c:v", "av1_qsv", "-rc_mode", "ICQ", "-global_quality", itoa(crf),
 			"-async_depth", "4", "-preset", sp}, nil
 	case s.Backend == VAAPI && s.Codec == HEVC:
 		prof := "main10"
 		if !s.tenBit() {
 			prof = "main"
 		}
-		return []string{"-c:v", "hevc_vaapi", "-rc_mode", "CQP", "-qp", itoa(crf + 2),
+		// ICQ (constant quality, bitrate follows content), not CQP.
+		return []string{"-c:v", "hevc_vaapi", "-rc_mode", "ICQ", "-global_quality", itoa(crf),
 			"-bf", "2", "-profile:v", prof}, nil
 	case s.Backend == VAAPI && s.Codec == AV1:
-		return []string{"-c:v", "av1_vaapi", "-rc_mode", "CQP", "-qp", itoa(crf + 2)}, nil
+		return []string{"-c:v", "av1_vaapi", "-rc_mode", "ICQ", "-global_quality", itoa(crf)}, nil
 	case s.Backend == NVENC:
 		return []string{"-c:v", string(s.Codec) + "_nvenc", "-preset", sp, "-tune", "hq",
-			"-rc", "vbr", "-cq", itoa(crf + 4), "-b:v", "0", "-spatial-aq", "1", "-temporal-aq", "1"}, nil
+			"-rc", "vbr", "-cq", itoa(crf + 1), "-b:v", "0", "-spatial-aq", "1", "-temporal-aq", "1",
+			"-rc-lookahead", "32"}, nil
 	}
 	return nil, fmt.Errorf("unsupported backend/codec %s/%s", s.Backend, s.Codec)
 }

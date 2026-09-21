@@ -16,6 +16,7 @@ import (
 
 	"mediatrans/internal/encode"
 	"mediatrans/internal/media"
+	"mediatrans/internal/tune"
 )
 
 // Segment is one A/B pair.
@@ -28,6 +29,7 @@ type Segment struct {
 	SrcSize int64   `json:"src_size"`
 	EncSize int64   `json:"enc_size"`
 	Proxy   bool    `json:"proxy"` // left side re-encoded for browser compat
+	VMAF    *media.VMAFResult `json:"vmaf,omitempty"` // B vs the original span
 }
 
 // Preview is one preview job (several segments).
@@ -45,6 +47,9 @@ type Preview struct {
 	// MeasuredRatio is encoded/source VIDEO bytes across all samples
 	// (0 when the source needed a proxy and can't be compared).
 	MeasuredRatio float64 `json:"measured_ratio,omitempty"`
+	// Tune is the quality search, when the settings had a VMAF target.
+	Tune  *tune.Result `json:"tune,omitempty"`
+	Stage string       `json:"stage,omitempty"` // what it is doing right now
 }
 
 // Manager tracks previews; clips live under rootDir.
@@ -55,6 +60,8 @@ type Manager struct {
 	acquire  func(key string) func() // engine GPU slot
 	// OnMeasured feeds sample results into the size model.
 	OnMeasured func(fileID int64, s encode.Settings, ratio float64)
+	// OnTuned stores a quality search result on the file.
+	OnTuned func(fileID int64, s encode.Settings, r tune.Result)
 	notify   func(event string, payload any)
 }
 
@@ -118,8 +125,13 @@ func (m *Manager) Create(fileID int64, path string, dur float64, s encode.Settin
 	}
 
 	starts := manual
+	length := segLen
 	if len(starts) == 0 {
 		starts = autoStarts(dur, 3)
+		if s.VMAFTarget > 0 && media.VMAFAvailable() {
+			// Same spans the quality search samples, so B is its output.
+			starts, length = tune.Spans(dur), tune.SampleLen
+		}
 	}
 	if len(starts) > maxSegs {
 		starts = starts[:maxSegs]
@@ -129,13 +141,13 @@ func (m *Manager) Create(fileID int64, path string, dur float64, s encode.Settin
 		if st < 0 {
 			st = 0
 		}
-		if st > dur-segLen/2 {
-			st = dur - segLen
+		if st > dur-length/2 {
+			st = dur - length
 		}
 		if st < 0 {
 			st = 0
 		}
-		p.Segments = append(p.Segments, Segment{Index: i, Start: st, Len: segLen})
+		p.Segments = append(p.Segments, Segment{Index: i, Start: st, Len: length})
 	}
 
 	m.mu.Lock()
@@ -173,77 +185,166 @@ func autoStarts(dur float64, n int) []float64 {
 	return out
 }
 
+func (m *Manager) setStage(p *Preview, stage string) {
+	m.mu.Lock()
+	p.Stage = stage
+	m.mu.Unlock()
+	m.notify(evPreview, p)
+}
+
 func (m *Manager) run(p *Preview) {
 	defer func() {
 		m.mu.Lock()
+		p.Stage = ""
 		m.persist(p)
 		m.mu.Unlock()
 		m.notify(evPreview, p)
 	}()
-
-	src, err := media.ProbeFile(context.Background(), p.Path)
+	ctx := context.Background()
+	src, err := media.ProbeFile(ctx, p.Path)
 	if err != nil {
-		p.Status = "failed"
-		p.Error = err.Error()
+		p.Status, p.Error = "failed", err.Error()
 		return
 	}
-	proxy := encode.SourceNeedsProxy(src)
-	semKey := string(p.Settings.Backend)
-	var srcTotal, encTotal int64
+	v := src.Video()
+	dir := filepath.Join(m.root, p.ID)
+	proxy := true // the A side is always rendered from the lossless cut
+	canScore := media.VMAFAvailable() && !(p.Settings.TonemapHDR && v.HDRType() != "")
+	refW, refH, crop := v.Width, v.Height, ""
+	if w, h, ok := cropSize(p.Settings.Crop, v.Width, v.Height); ok {
+		refW, refH, crop = w, h, p.Settings.Crop
+	}
+	deint := p.Settings.Deinterlace == "on" || (p.Settings.Deinterlace == "auto" && v.Interlaced())
 
+	// Cut each span once; A, B and the VMAF reference all come from the
+	// same cut, so they start on exactly the same frame.
+	m.setStage(p, "cutting samples")
+	starts := make([]float64, len(p.Segments))
+	for i, sg := range p.Segments {
+		starts[i] = sg.Start
+	}
+	cuts, err := tune.CutSamples(ctx, src, starts, p.Segments[0].Len, dir, true)
+	if err != nil {
+		p.Status, p.Error = "failed", err.Error()
+		return
+	}
+	defer func() {
+		for _, c := range cuts {
+			_ = os.Remove(c)
+		}
+	}()
+
+	// With a quality target, the search picks the quality and its final
+	// samples become the B side.
+	tuned := false
+	if p.Settings.VMAFTarget > 0 && canScore && p.Segments[0].Len == tune.SampleLen {
+		m.setStage(p, "measuring quality")
+		res, keep, err := tune.Search(ctx, tune.Options{
+			Settings: p.Settings, Probe: src, Target: p.Settings.VMAFTarget, WorkDir: dir,
+			Acquire: m.acquire, KeepFinal: true, Cuts: cuts, Starts: starts,
+			Progress: func(msg string) { m.setStage(p, msg) },
+		})
+		if err != nil {
+			log.Printf("preview: quality search failed, using fixed quality: %v", err)
+		} else if len(keep) == len(p.Segments) {
+			tuned = true
+			p.Tune = &res
+			p.Settings.Quality = res.Quality
+			p.MeasuredRatio = res.Ratio
+			for i := range p.Segments {
+				p.Segments[i].EncPath = fmt.Sprintf("enc-%d.mp4", i)
+				_ = os.Rename(keep[i], filepath.Join(dir, p.Segments[i].EncPath))
+			}
+			if m.OnTuned != nil {
+				m.OnTuned(p.FileID, p.Settings, res)
+			}
+		}
+	}
+
+	var srcVideo, encVideo int64
 	for i := range p.Segments {
 		seg := &p.Segments[i]
-		dir := filepath.Join(m.root, p.ID)
 		seg.Proxy = proxy
 		seg.SrcPath = fmt.Sprintf("src-%d.mp4", i)
-		seg.EncPath = fmt.Sprintf("enc-%d.mp4", i)
-
-		// A side: source cut (stream copy, or x264 proxy when needed).
-		srcArgs := encode.BuildSourceCut(src, filepath.Join(dir, seg.SrcPath), seg.Start, seg.Len, proxy)
-		if err := runSimple(srcArgs); err != nil {
-			p.Status, p.Error = "failed", fmt.Sprintf("source cut: %v", err)
-			return
-		}
-		if fi, err := os.Stat(filepath.Join(dir, seg.SrcPath)); err == nil {
-			seg.SrcSize = fi.Size()
-		}
-
-		// B side: the exact pipeline a real job would run, on this span.
-		prim, fb, err := encode.Build(p.Settings, src, filepath.Join(dir, seg.EncPath),
-			&encode.Clip{Start: seg.Start, Dur: seg.Len})
+		m.setStage(p, fmt.Sprintf("sample %d of %d", i+1, len(p.Segments)))
+		cp, err := media.ProbeFile(ctx, cuts[i])
 		if err != nil {
 			p.Status, p.Error = "failed", err.Error()
 			return
 		}
-		if i == 0 {
-			p.Command = encode.CommandString(prim.Args)
-		}
-		release := m.acquire(semKey)
-		err = runSimple(prim.Args)
-		if err != nil && fb != nil {
-			log.Printf("preview: hw decode failed (%v); software decode", err)
-			err = runSimple(fb.Args)
-		}
-		release()
-		if err != nil {
-			p.Status, p.Error = "failed", fmt.Sprintf("encode sample: %v", err)
+
+		// A side: the lossless cut as a visually lossless browser proxy,
+		// frame-aligned with B. Its size shown is the original's own.
+		if err := runSimple(encode.BuildSourceCut(cp, filepath.Join(dir, seg.SrcPath), 0, seg.Len+1, true)); err != nil {
+			p.Status, p.Error = "failed", fmt.Sprintf("source sample: %v", err)
 			return
 		}
-		if fi, err := os.Stat(filepath.Join(dir, seg.EncPath)); err == nil {
-			seg.EncSize = fi.Size()
+		if n, err := media.SpanVideoBytes(ctx, p.Path, seg.Start, seg.Len); err == nil {
+			seg.SrcSize = n
+			srcVideo += n
 		}
-		srcTotal += seg.SrcSize
-		encTotal += seg.EncSize
+
+		// B side: the exact pipeline a real job would run, on this cut.
+		if !tuned {
+			seg.EncPath = fmt.Sprintf("enc-%d.mp4", i)
+			prim, fb, err := encode.Build(p.Settings, cp, filepath.Join(dir, seg.EncPath),
+				&encode.Clip{Start: 0, Dur: seg.Len + 1})
+			if err != nil {
+				p.Status, p.Error = "failed", err.Error()
+				return
+			}
+			if i == 0 {
+				p.Command = encode.CommandString(prim.Args)
+			}
+			spec := prim
+			if fb != nil {
+				spec = fb // lossless intermediate: decode on the CPU
+			}
+			release := m.acquire(prim.SemKey)
+			err = runSimple(spec.Args)
+			release()
+			if err != nil {
+				p.Status, p.Error = "failed", fmt.Sprintf("encode sample: %v", err)
+				return
+			}
+		}
+		encPath := filepath.Join(dir, seg.EncPath)
+		if n, err := media.SpanVideoBytes(ctx, encPath, 0, seg.Len+1); err == nil {
+			seg.EncSize = n
+			encVideo += n
+		}
+		if canScore {
+			if vr, err := media.VMAF(ctx, encPath, media.VMAFRef{Path: cuts[i], Start: 0, Dur: seg.Len + 1,
+				Crop: crop, W: refW, H: refH, Deinterlace: deint}); err == nil {
+				seg.VMAF = &vr
+			} else {
+				log.Printf("preview: vmaf: %v", err)
+			}
+		}
 	}
-	// Both sides carry the same 192k AAC track, so subtract it to compare video.
-	audio := int64(192000 / 8 * segLen * float64(len(p.Segments)))
-	if !proxy && srcTotal > audio && encTotal > audio {
-		p.MeasuredRatio = float64(encTotal-audio) / float64(srcTotal-audio)
+	if tuned && p.Command == "" {
+		if prim, _, err := encode.Build(p.Settings, src, "/path/to/output", nil); err == nil {
+			p.Command = encode.CommandString(prim.Args)
+		}
+	}
+	if !tuned && srcVideo > 0 && encVideo > 0 {
+		p.MeasuredRatio = float64(encVideo) / float64(srcVideo)
 		if m.OnMeasured != nil {
 			m.OnMeasured(p.FileID, p.Settings, p.MeasuredRatio)
 		}
 	}
 	p.Status = "ready"
+}
+
+func cropSize(spec string, fw, fh int) (w, h int, ok bool) {
+	var x, y int
+	if spec == "" {
+		return 0, 0, false
+	}
+	if n, err := fmt.Sscanf(spec, "%d:%d:%d:%d", &w, &h, &x, &y); err != nil || n != 4 || x+w > fw || y+h > fh {
+		return 0, 0, false
+	}
+	return w, h, true
 }
 
 func runSimple(args []string) error {

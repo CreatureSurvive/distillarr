@@ -26,12 +26,14 @@ function barsHint(f: FileItem): string {
   return `Picture is ${f.crop_w}×${f.crop_h} inside the ${f.width}×${f.height} frame. Cropping saves a little and changes the frame shape; check films that switch aspect ratio (IMAX scenes)`;
 }
 
+// Rough VMAF each fixed quality reached on this library's typical
+// sources (Arc QSV, 1080p H.264 at 2–3 Mb/s): 70≈95, 60≈93, 50≈91.
 export function qualityWord(q: number): string {
-  if (q >= 78) return "near-lossless";
-  if (q >= 68) return "high";
-  if (q >= 55) return "balanced";
-  if (q >= 45) return "compact";
-  return "very small";
+  if (q >= 70) return "archival (~VMAF 95)";
+  if (q >= 60) return "transparent (~VMAF 93)";
+  if (q >= 50) return "slightly soft (~VMAF 91)";
+  if (q >= 42) return "visibly soft (~VMAF 89)";
+  return "small, artifacts likely";
 }
 
 function Row({ label, hint, children }: { label: string; hint?: string; children: ReactNode }) {
@@ -107,7 +109,21 @@ export default function EncodeOptions({ value: s, onChange, file, streams, hw, a
             ]}
           />
         </Row>
-        <Row label="Quality" hint="Higher keeps more detail and makes a bigger file">
+        <Row label="Quality" hint={s.vmaf_target
+          ? "Samples are encoded and scored against the original before encoding; the smallest file that meets the target wins"
+          : "Higher keeps more detail and makes a bigger file"}>
+          <Seg
+            value={s.vmaf_target ? String(s.vmaf_target) : "fixed"}
+            onChange={(v) => set({ vmaf_target: v === "fixed" ? 0 : Number(v) })}
+            options={[
+              { value: "91", label: "VMAF 91", hint: "Smaller; minor softening on close inspection" },
+              { value: "93", label: "VMAF 93", hint: "Visually indistinguishable at normal viewing" },
+              { value: "95", label: "VMAF 95", hint: "Archival; bigger files" },
+              { value: "fixed", label: "Fixed" },
+            ]}
+          />
+        </Row>
+        <Row label={s.vmaf_target ? "Starting quality" : "Fixed quality"} hint={s.vmaf_target ? "Where the search starts; the measured result replaces it" : undefined}>
           <div className="quality">
             <input
               type="range" min={30} max={90} step={1} value={s.quality}

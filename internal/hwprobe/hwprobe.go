@@ -136,10 +136,10 @@ func testArgs(b encode.Backend, c encode.Codec, node string) []string {
 			[]string{"-frames:v", "10", "-f", "null", "-"})
 	case encode.VAAPI:
 		enc := "hevc_vaapi"
-		extra := []string{"-rc_mode", "CQP", "-qp", "30", "-profile:v", "main10"}
+		extra := []string{"-rc_mode", "ICQ", "-global_quality", "30", "-profile:v", "main10"}
 		if c == encode.AV1 {
 			enc = "av1_vaapi"
-			extra = []string{"-rc_mode", "CQP", "-qp", "30"}
+			extra = []string{"-rc_mode", "ICQ", "-global_quality", "30"}
 		}
 		return cat(common,
 			[]string{"-init_hw_device", "vaapi=va:" + node, "-filter_hw_device", "va"},
