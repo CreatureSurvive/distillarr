@@ -325,7 +325,7 @@ func (s *Store) RealizedSavings() (int64, int, error) {
 	var total int64
 	var n int
 	err := s.dbR.QueryRow(`SELECT COALESCE(SUM(src_size - output_size),0), COUNT(*)
-		FROM jobs WHERE status='done' AND src_size > output_size`).Scan(&total, &n)
+		FROM jobs WHERE status='done' AND src_size > output_size AND NOT (`+isUpscale+`)`).Scan(&total, &n)
 	return total, n, err
 }
 

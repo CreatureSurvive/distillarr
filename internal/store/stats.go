@@ -5,6 +5,7 @@ type HistoryTotals struct {
 	Done        int     `json:"done"`
 	Failed      int     `json:"failed"`
 	Canceled    int     `json:"canceled"`
+	Upscaled    int     `json:"upscaled"` // finished upscale jobs (not part of the savings below)
 	SrcBytes    int64   `json:"src_bytes"`
 	OutBytes    int64   `json:"out_bytes"`
 	Saved       int64   `json:"saved"`
@@ -40,7 +41,13 @@ type HistoryStats struct {
 	Top     []TopSaver    `json:"top"`
 }
 
-const doneRows = `FROM jobs j LEFT JOIN files f ON f.id=j.file_id WHERE j.status='done' AND j.output_size>0`
+// isUpscale matches a job's settings_json (compact JSON: an upscale job carries
+// "upscale_to":N, omitted otherwise). Upscales grow files on purpose, so every
+// "space saved" aggregate excludes them: they would show as negative savings,
+// or as false ones when a low-bitrate upscale lands smaller than a rich source.
+const isUpscale = `settings_json LIKE '%"upscale_to"%'`
+
+const doneRows = `FROM jobs j LEFT JOIN files f ON f.id=j.file_id WHERE j.status='done' AND j.output_size>0 AND NOT (j.` + isUpscale + `)`
 const hoursExpr = `COALESCE(SUM(CASE WHEN j.started_at!='' AND j.finished_at!=''
 	THEN (julianday(j.finished_at)-julianday(j.started_at))*24 ELSE 0 END),0)`
 
@@ -67,7 +74,8 @@ func (s *Store) statGroups(keyExpr, extra string) ([]StatGroup, error) {
 func (s *Store) HistoryStats() (HistoryStats, error) {
 	var h HistoryStats
 	if err := s.dbR.QueryRow(`SELECT COALESCE(SUM(status='done'),0), COALESCE(SUM(status='failed'),0),
-		COALESCE(SUM(status='canceled'),0) FROM jobs`).Scan(&h.Totals.Done, &h.Totals.Failed, &h.Totals.Canceled); err != nil {
+		COALESCE(SUM(status='canceled'),0),
+		COALESCE(SUM(status='done' AND `+isUpscale+`),0) FROM jobs`).Scan(&h.Totals.Done, &h.Totals.Failed, &h.Totals.Canceled, &h.Totals.Upscaled); err != nil {
 		return h, err
 	}
 	if err := s.dbR.QueryRow(`SELECT COALESCE(SUM(j.src_size),0), COALESCE(SUM(j.output_size),0),
