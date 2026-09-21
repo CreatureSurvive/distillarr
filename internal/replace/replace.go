@@ -54,7 +54,7 @@ func Snapshot(path string) (*SrcStat, error) {
 			Size: fi.Size(),
 		}, nil
 	}
-	s := &SrcStat{Size: int64(st.Size), Ino: st.Ino, Mode: st.Mode}
+	s := &SrcStat{Size: int64(st.Size), Ino: st.Ino, Mode: uint32(st.Mode)}
 	s.MtimeSec, s.MtimeNsec = int64(st.Mtime.Sec), int64(st.Mtime.Nsec)
 	s.AtimeSec, s.AtimeNsec = int64(st.Atime.Sec), int64(st.Atime.Nsec)
 	s.BtimeSec, s.BtimeNsec = int64(st.Btime.Sec), int64(st.Btime.Nsec)
