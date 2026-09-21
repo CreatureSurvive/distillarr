@@ -113,46 +113,56 @@ func testArgs(b encode.Backend, c encode.Codec, node string) []string {
 	case encode.SW:
 		enc := "libx265"
 		preset := "ultrafast"
-		if c == encode.AV1 {
+		switch c {
+		case encode.AV1:
 			enc = "libsvtav1"
 			preset = "11" // SVT-AV1 presets are numeric
+		case encode.H264:
+			enc = "libx264"
 		}
 		return cat(common, src, []string{"-c:v", enc, "-preset", preset,
 			"-frames:v", "10", "-f", "null", "-"})
 	case encode.QSV:
 		enc := "hevc_qsv"
 		extra := []string{"-rc_mode", "ICQ", "-global_quality", "30", "-profile:v", "main10"}
-		if c == encode.AV1 {
+		surf := "p010le"
+		switch c {
+		case encode.AV1:
 			enc = "av1_qsv"
 			extra = []string{"-rc_mode", "ICQ", "-global_quality", "30"}
+		case encode.H264:
+			enc, surf = "h264_qsv", "nv12"
+			extra = []string{"-rc_mode", "ICQ", "-global_quality", "30", "-profile:v", "high"}
 		}
 		return cat(common,
 			[]string{"-init_hw_device", "vaapi=va:" + node,
 				"-init_hw_device", "qsv=qsv@va", "-filter_hw_device", "qsv"},
 			src,
-			[]string{"-vf", "format=nv12|p010le,hwupload=extra_hw_frames=64,vpp_qsv=format=p010le",
+			[]string{"-vf", "format=nv12|p010le,hwupload=extra_hw_frames=64,vpp_qsv=format=" + surf,
 				"-c:v", enc},
 			extra,
 			[]string{"-frames:v", "10", "-f", "null", "-"})
 	case encode.VAAPI:
 		enc := "hevc_vaapi"
 		extra := []string{"-rc_mode", "ICQ", "-global_quality", "30", "-profile:v", "main10"}
-		if c == encode.AV1 {
+		surf := "p010le"
+		switch c {
+		case encode.AV1:
 			enc = "av1_vaapi"
 			extra = []string{"-rc_mode", "ICQ", "-global_quality", "30"}
+		case encode.H264:
+			enc, surf = "h264_vaapi", "nv12"
+			extra = []string{"-rc_mode", "ICQ", "-global_quality", "30", "-profile:v", "high"}
 		}
 		return cat(common,
 			[]string{"-init_hw_device", "vaapi=va:" + node, "-filter_hw_device", "va"},
 			src,
-			[]string{"-vf", "format=p010le,hwupload=extra_hw_frames=32,scale_vaapi=format=p010le",
+			[]string{"-vf", "format=" + surf + ",hwupload=extra_hw_frames=32,scale_vaapi=format=" + surf,
 				"-c:v", enc},
 			extra,
 			[]string{"-frames:v", "10", "-f", "null", "-"})
 	case encode.NVENC:
-		enc := "hevc_nvenc"
-		if c == encode.AV1 {
-			enc = "av1_nvenc"
-		}
+		enc := string(c) + "_nvenc"
 		return cat(common, src, []string{"-c:v", enc, "-preset", "p1",
 			"-frames:v", "10", "-f", "null", "-"})
 	}
@@ -164,7 +174,7 @@ func Run(st *store.Store) (*Report, error) {
 	r := &Report{TestedAt: time.Now(), FFmpeg: ffmpegVersion(), RenderNodes: RenderNodes()}
 	r.HasNVENC = detectNVGPU()
 
-	codecs := []encode.Codec{encode.HEVC, encode.AV1}
+	codecs := []encode.Codec{encode.HEVC, encode.AV1, encode.H264}
 
 	// Software.
 	for _, c := range codecs {
