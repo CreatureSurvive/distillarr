@@ -1,0 +1,18 @@
+# Build artifacts
+/dist/
+*.test
+*.out
+
+# Local state (never commit)
+*.db
+*.db-shm
+*.db-wal
+.env
+
+# Node
+node_modules/
+
+# Editor
+.idea/
+.vscode/
+*.swp

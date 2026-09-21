@@ -1,0 +1,8 @@
+.git
+web/node_modules
+web/dist
+config
+*.db
+*.db-shm
+*.db-wal
+README.md

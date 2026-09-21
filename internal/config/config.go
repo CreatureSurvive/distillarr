@@ -1,0 +1,204 @@
+// Package config holds runtime configuration, persisted as JSON in the
+// kv table. Every mutation broadcasts a change so the scheduler and
+// dispatcher pick up new windows / worker counts without a restart.
+package config
+
+import (
+	"log"
+	"sync"
+	"time"
+
+	"mediatrans/internal/store"
+)
+
+// Library is one media root.
+type Library struct {
+	Name string `json:"name"` // "movies" | "tvshows" (display + grouping key)
+	Path string `json:"path"` // absolute, as seen by the container
+}
+
+// Schedule is one processing window. Days is a weekday bitmap,
+// Monday=bit0 … Sunday=bit6 (0x7F = every day). Start/End are minutes
+// since midnight, local time; End may wrap past midnight (e.g. 60→360
+// means 01:00–06:00, 1380→300 means 23:00–05:00).
+type Schedule struct {
+	ID    int    `json:"id"`
+	Label string `json:"label,omitempty"`
+	Days  int    `json:"days"` // Mon=1<<0 .. Sun=1<<6
+	Start int    `json:"start"` // minutes from midnight
+	End   int    `json:"end"`   // minutes from midnight (may wrap)
+}
+
+// Config is the whole persisted configuration.
+type Config struct {
+	Libraries []Library `json:"libraries"`
+	Workers   int       `json:"workers"`
+	Paused    bool      `json:"paused"`
+	Schedules []Schedule `json:"schedules"`
+
+	DefaultCodec       string `json:"default_codec"`        // "hevc" | "av1"
+	DefaultQuality     int    `json:"default_quality"`      // 0..100
+	PreferredBackend   string `json:"preferred_backend"`   // auto|qsv|vaapi|nvenc|sw
+	MinSavingsPct      int    `json:"min_savings_pct"`     // gate for "worth it"
+	AudioPCMTarget     string `json:"audio_pcm_target"`    // flac|aac|eac3
+	TrashEnabled       bool   `json:"trash_enabled"`
+	TrashDays          int    `json:"trash_days"`
+	MaxAttempts        int    `json:"max_attempts"`
+	RecompressHEVC     bool   `json:"recompress_hevc"`     // allow re-encoding existing HEVC
+	MaxHeight          int    `json:"max_height"`          // 0 = keep; e.g. 1080 caps output
+	TonemapHDR         bool   `json:"tonemap_hdr"`         // HDR10→SDR profile off by default
+
+	JellyfinURL    string `json:"jellyfin_url"`
+	JellyfinAPIKey string `json:"jellyfin_api_key"`
+}
+
+// Default returns the initial configuration for a new install.
+func Default() Config {
+	return Config{
+		Libraries: []Library{
+			{Name: "movies", Path: "/srv/media/movies"},
+			{Name: "tvshows", Path: "/srv/media/tvshows"},
+		},
+		Workers:            1,
+		Schedules:          []Schedule{},
+		DefaultCodec:       "hevc",
+		DefaultQuality:     60,
+		PreferredBackend:   "auto",
+		MinSavingsPct:      30,
+		AudioPCMTarget:     "flac",
+		TrashEnabled:       true,
+		TrashDays:          14,
+		MaxAttempts:        3,
+		RecompressHEVC:     false,
+		JellyfinURL:        "http://host.docker.internal:8096",
+	}
+}
+
+const kvKey = "config"
+
+// Manager owns the current config, persisting every change and
+// notifying subscribers.
+type Manager struct {
+	mu   sync.RWMutex
+	cfg  Config
+	st   *store.Store
+	subs []chan struct{}
+}
+
+func NewManager(st *store.Store) *Manager {
+	m := &Manager{cfg: Default(), st: st}
+	if ok, err := store.KVLoad(st, kvKey, &m.cfg); err != nil {
+		log.Printf("config: load failed, using defaults: %v", err)
+	} else if ok {
+		m.normalize()
+	}
+	return m
+}
+
+func (m *Manager) normalize() {
+	d := Default()
+	if len(m.cfg.Libraries) == 0 {
+		m.cfg.Libraries = d.Libraries
+	}
+	if m.cfg.Workers < 1 {
+		m.cfg.Workers = 1
+	}
+	if m.cfg.Workers > 8 {
+		m.cfg.Workers = 8
+	}
+	if m.cfg.DefaultCodec != "av1" {
+		m.cfg.DefaultCodec = "hevc"
+	}
+	if m.cfg.DefaultQuality < 0 || m.cfg.DefaultQuality > 100 {
+		m.cfg.DefaultQuality = 60
+	}
+	switch m.cfg.PreferredBackend {
+	case "qsv", "vaapi", "nvenc", "sw", "auto":
+	default:
+		m.cfg.PreferredBackend = "auto"
+	}
+	if m.cfg.MinSavingsPct <= 0 {
+		m.cfg.MinSavingsPct = 30
+	}
+	switch m.cfg.AudioPCMTarget {
+	case "flac", "aac", "eac3", "copy":
+	default:
+		m.cfg.AudioPCMTarget = "flac"
+	}
+	if m.cfg.TrashDays <= 0 {
+		m.cfg.TrashDays = 14
+	}
+	if m.cfg.MaxAttempts <= 0 {
+		m.cfg.MaxAttempts = 3
+	}
+	if m.cfg.Schedules == nil {
+		m.cfg.Schedules = []Schedule{}
+	}
+}
+
+// Get returns a copy of the current config.
+func (m *Manager) Get() Config {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.cfg
+}
+
+// Update applies fn to the config, persists, and notifies.
+func (m *Manager) Update(fn func(*Config)) error {
+	m.mu.Lock()
+	fn(&m.cfg)
+	m.normalize()
+	cfg := m.cfg
+	err := store.KVJSON(m.st, kvKey, &cfg)
+	subs := append([]chan struct{}(nil), m.subs...)
+	m.mu.Unlock()
+	if err != nil {
+		return err
+	}
+	for _, ch := range subs {
+		select {
+		case ch <- struct{}{}:
+		default:
+		}
+	}
+	return nil
+}
+
+// Subscribe returns a channel notified on every config change.
+func (m *Manager) Subscribe() chan struct{} {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	ch := make(chan struct{}, 1)
+	m.subs = append(m.subs, ch)
+	return ch
+}
+
+// WindowOpen reports whether the queue may start new jobs right now.
+// Paused always closes the window; zero schedules = always open.
+func (m *Manager) WindowOpen(t time.Time) bool {
+	c := m.Get()
+	if c.Paused {
+		return false
+	}
+	if len(c.Schedules) == 0 {
+		return true
+	}
+	min := t.Hour()*60 + t.Minute()
+	// weekday: Monday=0 … Sunday=6 → bitmap bit
+	bit := 1 << int((int(t.Weekday())+6)%7)
+	for _, s := range c.Schedules {
+		if s.Days&bit == 0 {
+			continue
+		}
+		if s.Start <= s.End {
+			if min >= s.Start && min < s.End {
+				return true
+			}
+		} else { // wraps midnight: active if >= start OR < end
+			if min >= s.Start || min < s.End {
+				return true
+			}
+		}
+	}
+	return false
+}

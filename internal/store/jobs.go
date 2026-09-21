@@ -1,0 +1,288 @@
+package store
+
+import (
+	"database/sql"
+	"fmt"
+)
+
+// Job statuses.
+const (
+	StatusQueued    = "queued"
+	StatusRunning   = "running"
+	StatusVerifying = "verifying"
+	StatusReplacing = "replacing"
+	StatusDone      = "done"
+	StatusFailed    = "failed"
+	StatusCanceled  = "canceled"
+)
+
+// Job is one transcode queue entry.
+type Job struct {
+	ID          int64  `json:"id"`
+	FileID      int64  `json:"file_id"`
+	SrcPath     string `json:"src_path"`
+	TempPath    string `json:"temp_path"`
+	Status      string `json:"status"`
+	Priority    int    `json:"priority"`
+	RunNow      bool   `json:"run_now"`
+	Backend     string `json:"backend"`
+	Codec       string `json:"codec"`
+	Quality     int    `json:"quality"`
+	SettingsJSON string `json:"settings_json"`
+	Attempts    int    `json:"attempts"`
+	MaxAttempts int    `json:"max_attempts"`
+	Error       string `json:"error,omitempty"`
+	ErrorTail   string `json:"error_tail,omitempty"`
+	ProgressJSON string `json:"progress_json,omitempty"`
+	SrcStatJSON string `json:"src_stat_json,omitempty"`
+	SrcSize     int64  `json:"src_size"`
+	OutputSize  int64  `json:"output_size"`
+	StartedAt   string `json:"started_at,omitempty"`
+	FinishedAt  string `json:"finished_at,omitempty"`
+	CreatedAt   string `json:"created_at,omitempty"`
+
+	// Joined for API convenience:
+	FileTitle string `json:"file_title,omitempty"`
+}
+
+const jobCols = `id, file_id, src_path, temp_path, status, priority, run_now, backend, codec,
+	quality, settings_json, attempts, max_attempts, error, error_tail, progress_json,
+	src_stat_json, src_size, output_size, started_at, finished_at, created_at`
+
+func scanJob(row interface{ Scan(...any) error }) (*Job, error) {
+	j := &Job{}
+	var fileID sql.NullInt64
+	var runNow int
+	err := row.Scan(&j.ID, &fileID, &j.SrcPath, &j.TempPath, &j.Status, &j.Priority, &runNow,
+		&j.Backend, &j.Codec, &j.Quality, &j.SettingsJSON, &j.Attempts, &j.MaxAttempts,
+		&j.Error, &j.ErrorTail, &j.ProgressJSON, &j.SrcStatJSON, &j.SrcSize, &j.OutputSize,
+		&j.StartedAt, &j.FinishedAt, &j.CreatedAt)
+	if err != nil {
+		return nil, err
+	}
+	if fileID.Valid {
+		j.FileID = fileID.Int64
+	}
+	j.RunNow = runNow != 0
+	return j, nil
+}
+
+// CreateJob enqueues a job.
+func (s *Store) CreateJob(j *Job) error {
+	res, err := s.dbW.Exec(`INSERT INTO jobs(file_id, src_path, status, priority, run_now,
+		backend, codec, quality, settings_json, attempts, max_attempts, src_size)
+		VALUES(?,?,?,?,?,?,?,?,?,0,?,?)`,
+		nullID(j.FileID), j.SrcPath, StatusQueued, j.Priority, b2i(j.RunNow),
+		j.Backend, j.Codec, j.Quality, j.SettingsJSON, j.MaxAttempts, j.SrcSize)
+	if err != nil {
+		return err
+	}
+	j.ID, err = res.LastInsertId()
+	return err
+}
+
+func nullID(id int64) any {
+	if id == 0 {
+		return nil
+	}
+	return id
+}
+
+// ClaimNext atomically claims the next runnable job. windowOpen gates
+// regular jobs; run-now jobs are always claimable.
+func (s *Store) ClaimNext(windowOpen bool) (*Job, error) {
+	wo := 0
+	if windowOpen {
+		wo = 1
+	}
+	row := s.dbW.QueryRow(`UPDATE jobs SET status='running', started_at=strftime('%Y-%m-%dT%H:%M:%fZ','now'),
+		attempts=attempts+1, run_now=0
+		WHERE id=(SELECT id FROM jobs WHERE status='queued' AND (run_now=1 OR ?=1)
+			ORDER BY priority, id LIMIT 1)
+		RETURNING `+jobCols, wo)
+	j, err := scanJob(row)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	return j, err
+}
+
+// UpdateJobStatus sets status (and optionally error text) on a job.
+func (s *Store) UpdateJobStatus(id int64, status, errMsg string) error {
+	_, err := s.dbW.Exec(`UPDATE jobs SET status=?, error=? WHERE id=?`, status, errMsg, id)
+	return err
+}
+
+// SetJobProgress stores throttled progress JSON.
+func (s *Store) SetJobProgress(id int64, progressJSON string) error {
+	_, err := s.dbW.Exec(`UPDATE jobs SET progress_json=? WHERE id=?`, progressJSON, id)
+	return err
+}
+
+// FinishJob marks terminal state with output size.
+func (s *Store) FinishJob(id int64, status string, outputSize int64, errMsg, errorTail string) error {
+	_, err := s.dbW.Exec(`UPDATE jobs SET status=?, output_size=?, error=?, error_tail=?,
+		finished_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=?`,
+		status, outputSize, errMsg, errorTail, id)
+	return err
+}
+
+// SetJobTemp records the temp path and pre-encode stat snapshot.
+func (s *Store) SetJobTemp(id int64, tempPath, srcStatJSON string) error {
+	_, err := s.dbW.Exec(`UPDATE jobs SET temp_path=?, src_stat_json=? WHERE id=?`,
+		tempPath, srcStatJSON, id)
+	return err
+}
+
+// Requeue sends a job back to queued (used for user pause/requeue and
+// crash recovery when the source is intact).
+func (s *Store) Requeue(id int64) error {
+	_, err := s.dbW.Exec(`UPDATE jobs SET status='queued', progress_json='',
+		started_at='' WHERE id=?`, id)
+	return err
+}
+
+// Reprioritize sets a new priority value.
+func (s *Store) Reprioritize(id int64, priority int) error {
+	_, err := s.dbW.Exec(`UPDATE jobs SET priority=? WHERE id=? AND status='queued'`, priority, id)
+	return err
+}
+
+// SetRunNow promotes a job to run-now (bypasses schedule windows).
+func (s *Store) SetRunNow(id int64) error {
+	_, err := s.dbW.Exec(`UPDATE jobs SET run_now=1, priority=0 WHERE id=? AND status='queued'`, id)
+	return err
+}
+
+// ListJobs lists jobs newest first, optionally filtered by status set.
+func (s *Store) ListJobs(statuses []string, beforeID int64, limit int) ([]*Job, error) {
+	where, args := "1=1", []any{}
+	if len(statuses) > 0 {
+		q := ""
+		for _, st := range statuses {
+			if q != "" {
+				q += ","
+			}
+			q += "?"
+			args = append(args, st)
+		}
+		where = "status IN (" + q + ")"
+	}
+	if beforeID > 0 {
+		where += " AND id < ?"
+		args = append(args, beforeID)
+	}
+	if limit <= 0 || limit > 200 {
+		limit = 100
+	}
+	rows, err := s.dbR.Query(`SELECT `+jobCols+`, COALESCE((SELECT title FROM files WHERE id=jobs.file_id),'')
+		FROM jobs WHERE `+where+` ORDER BY id DESC LIMIT ?`, append(args, limit)...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []*Job{}
+	for rows.Next() {
+		j := &Job{}
+		var fileID sql.NullInt64
+		var runNow int
+		if err := rows.Scan(&j.ID, &fileID, &j.SrcPath, &j.TempPath, &j.Status, &j.Priority, &runNow,
+			&j.Backend, &j.Codec, &j.Quality, &j.SettingsJSON, &j.Attempts, &j.MaxAttempts,
+			&j.Error, &j.ErrorTail, &j.ProgressJSON, &j.SrcStatJSON, &j.SrcSize, &j.OutputSize,
+			&j.StartedAt, &j.FinishedAt, &j.CreatedAt, &j.FileTitle); err != nil {
+			return nil, err
+		}
+		if fileID.Valid {
+			j.FileID = fileID.Int64
+		}
+		j.RunNow = runNow != 0
+		out = append(out, j)
+	}
+	return out, rows.Err()
+}
+
+// GetJob fetches one job.
+func (s *Store) GetJob(id int64) (*Job, error) {
+	row := s.dbR.QueryRow(`SELECT `+jobCols+` FROM jobs WHERE id=?`, id)
+	j, err := scanJob(row)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	return j, err
+}
+
+// ActiveJobs returns jobs in non-terminal states (for boot recovery
+// and dashboard display).
+func (s *Store) ActiveJobs() ([]*Job, error) {
+	rows, err := s.dbR.Query(`SELECT `+jobCols+` FROM jobs
+		WHERE status IN ('running','verifying','replacing') ORDER BY id`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []*Job{}
+	for rows.Next() {
+		j, err := scanJob(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, j)
+	}
+	return out, rows.Err()
+}
+
+// CountJobsByStatus gives queue counts for the dashboard.
+func (s *Store) CountJobsByStatus() (map[string]int, error) {
+	rows, err := s.dbR.Query(`SELECT status, COUNT(*) FROM jobs GROUP BY status`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string]int{}
+	for rows.Next() {
+		var st string
+		var n int
+		if err := rows.Scan(&st, &n); err != nil {
+			return nil, err
+		}
+		out[st] = n
+	}
+	return out, rows.Err()
+}
+
+// RealizedSavings totals saved bytes across completed jobs.
+func (s *Store) RealizedSavings() (int64, int, error) {
+	var total int64
+	var n int
+	err := s.dbR.QueryRow(`SELECT COALESCE(SUM(src_size - output_size),0), COUNT(*)
+		FROM jobs WHERE status='done' AND src_size > output_size`).Scan(&total, &n)
+	return total, n, err
+}
+
+// HasQueuedForFile reports whether a pending job exists for a path.
+func (s *Store) HasQueuedForFile(path string) (bool, error) {
+	var n int
+	err := s.dbR.QueryRow(`SELECT COUNT(*) FROM jobs WHERE src_path=? AND status IN
+		('queued','running','verifying','replacing')`, path).Scan(&n)
+	return n > 0, err
+}
+
+// RetryJob requeues a failed/canceled job with fresh attempts.
+func (s *Store) RetryJob(id int64) error {
+	res, err := s.dbW.Exec(`UPDATE jobs SET status='queued', attempts=0, error='', error_tail='',
+		finished_at='', progress_json='' WHERE id=? AND status IN ('failed','canceled')`, id)
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return fmt.Errorf("job %d is not failed or canceled", id)
+	}
+	return nil
+}
+
+// ClearOldPath hides the row for a path that was renamed by a
+// container change (the new path has its own row).
+func (s *Store) ClearOldPath(path string) error {
+	_, err := s.dbW.Exec(`UPDATE files SET missing=1, updated_at=? WHERE path=?`, nowRFC(), path)
+	return err
+}
