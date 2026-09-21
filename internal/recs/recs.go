@@ -542,6 +542,10 @@ func baseSettings(cfg config.Config) encode.Settings {
 	return s
 }
 
+// IsAnimation reports whether Jellyfin files f under an animation genre;
+// it picks the anime upscaler over the live-action one.
+func IsAnimation(f *store.File) bool { return isAnimation(f) }
+
 func isAnimation(f *store.File) bool {
 	for _, g := range Genres(f.Path) {
 		g = strings.ToLower(g)

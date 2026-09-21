@@ -399,6 +399,13 @@ func (s *Server) concrete(st encode.Settings) encode.Settings {
 	if rep := s.eng.Report(); rep != nil && st.Backend != encode.SW {
 		st.RenderNode = hwprobe.NodeFor(rep, st.Backend, st.Codec)
 	}
+	if st.UpscaleTo > 0 {
+		// Vulkan picks by index, not render node: prefer the encode node's own
+		// GPU so decode, upscale and encode stay on one device.
+		if d := hwprobe.BestVulkan(s.eng.Report(), st.RenderNode); d != nil {
+			st.VulkanDevice = d.Index
+		}
+	}
 	return st
 }
 

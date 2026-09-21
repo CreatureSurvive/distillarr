@@ -19,6 +19,7 @@ import (
 	"mediatrans/internal/preview"
 	"mediatrans/internal/recs"
 	"mediatrans/internal/scan"
+	"mediatrans/internal/still"
 	"mediatrans/internal/store"
 )
 
@@ -28,14 +29,15 @@ type Server struct {
 	cfg  *config.Manager
 	scan *scan.Scanner
 	eng  *jobs.Engine
-	prev *preview.Manager
-	hub  *Hub
+	prev  *preview.Manager
+	still *still.Manager
+	hub   *Hub
 	ui   fs.FS // embedded frontend (web/dist)
 }
 
 func NewServer(st *store.Store, cfg *config.Manager, sc *scan.Scanner,
-	eng *jobs.Engine, pv *preview.Manager, ui fs.FS) *Server {
-	s := &Server{st: st, cfg: cfg, scan: sc, eng: eng, prev: pv, hub: NewHub(), ui: ui}
+	eng *jobs.Engine, pv *preview.Manager, stl *still.Manager, ui fs.FS) *Server {
+	s := &Server{st: st, cfg: cfg, scan: sc, eng: eng, prev: pv, still: stl, hub: NewHub(), ui: ui}
 	sc.Progress = func(st scan.Stats) { s.hub.Broadcast("scan", st) }
 	eng.Notify = func(event string, payload any) { s.hub.Broadcast(event, payload) }
 	return s
@@ -90,6 +92,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/v1/issues/{key}/fix", s.fixIssue)
 	mux.HandleFunc("GET /api/v1/libraries/composition", s.composition)
 	mux.HandleFunc("POST /api/v1/files/{id}/preview", s.createPreview)
+	mux.HandleFunc("GET /api/v1/files/{id}/upscale", s.upscaleInfo)
+	mux.HandleFunc("POST /api/v1/files/{id}/still", s.makeStill)
+	mux.HandleFunc("GET /api/v1/stills/{key}/{name}", s.stillFile)
 
 	// jobs + queue
 	mux.HandleFunc("GET /api/v1/jobs", s.listJobs)

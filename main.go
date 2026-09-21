@@ -24,6 +24,7 @@ import (
 	"mediatrans/internal/recs"
 	"mediatrans/internal/replace"
 	"mediatrans/internal/scan"
+	"mediatrans/internal/still"
 	"mediatrans/internal/store"
 	"mediatrans/internal/tune"
 )
@@ -72,7 +73,8 @@ func main() {
 				hubNotify(event, data)
 			}
 		})
-	srv := api.NewServer(st, cfg, sc, eng, pv, webFS())
+	stl := still.New(filepath.Join(prevRoot, "still"), eng.AcquireSem)
+	srv := api.NewServer(st, cfg, sc, eng, pv, stl, webFS())
 	hubNotify = srv.Hub().Broadcast
 	pv.OnTuned = func(fileID int64, s encode.Settings, r tune.Result) {
 		f, err := st.GetFile(fileID)
