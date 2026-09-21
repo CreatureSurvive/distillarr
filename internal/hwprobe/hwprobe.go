@@ -31,6 +31,7 @@ type Report struct {
 	RenderNodes []string        `json:"render_nodes"`
 	HasNVENC    bool            `json:"has_nvenc"`
 	Results     []EncoderResult `json:"results"`
+	Vulkan      []VulkanDevice  `json:"vulkan"` // upscaler GPUs (see vulkan.go)
 }
 
 // Available reports whether backend+codec passed its test encode.
@@ -194,6 +195,8 @@ func Run(st *store.Store) (*Report, error) {
 			r.Results = append(r.Results, runOne(encode.NVENC, c, ""))
 		}
 	}
+
+	r.Vulkan = probeVulkan(r.RenderNodes)
 
 	if err := store.KVJSON(st, "hw_probe", r); err != nil {
 		return r, err
