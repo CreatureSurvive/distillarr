@@ -61,7 +61,7 @@ export type FileItem = {
   queued?: boolean;
   video_tag?: string;
   faststart?: number;
-  issues?: string; // ",hev1,pcm_audio,"
+  issues?: string; // ",no_hvc1,pcm_audio,"
 };
 
 export type IssueType = {

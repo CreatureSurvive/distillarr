@@ -30,7 +30,7 @@ type Type struct {
 
 // Types lists every issue in display order.
 var Types = []Type{
-	{"hev1", "HEVC tagged hev1", Quick, "Apple devices (and some TVs) only play HEVC in MP4 when it's tagged hvc1. Fixed by re-tagging; the video isn't touched.", "file"},
+	{"no_hvc1", "HEVC not tagged hvc1 (Apple)", Quick, "Apple devices (and some TVs) only play HEVC in MP4 when it's tagged hvc1; hev1 and other tags won't play. Fixed by re-tagging; the video isn't touched.", "file"},
 	{"no_faststart", "Index at the end (no faststart)", Quick, "The MP4 index sits after the video, so players must read the whole file before starting and seeking is slow over the network. Fixed by rewriting the file with the index first.", "file"},
 	{"pcm_audio", "Uncompressed PCM audio", Quick, "Raw PCM is several times larger than lossless FLAC/ALAC for identical sound. Fixed by converting only the audio.", "file"},
 	{"legacy_container", "Legacy container", Quick, "AVI, WMV, TS, MPG and similar containers have poor seeking, no modern subtitle support and patchy player support. Fixed by moving the streams into MKV/MP4.", "file"},
@@ -70,8 +70,10 @@ func isMP4(container string) bool {
 // from its current recommendation.
 func Detect(f *store.File, worth, measuredMiss bool) []string {
 	var out []string
-	if f.MetaChecked && f.VideoCodec == "hevc" && isMP4(f.Container) && f.VideoTag == "hev1" {
-		out = append(out, "hev1")
+	// Any tag other than hvc1 (hev1, blank-in-MP4 "[0][0][0][0]", ...);
+	// "" means the tag couldn't be read, so don't guess.
+	if f.MetaChecked && f.VideoCodec == "hevc" && isMP4(f.Container) && f.VideoTag != "" && f.VideoTag != "hvc1" {
+		out = append(out, "no_hvc1")
 	}
 	if isMP4(f.Container) && f.Faststart == 0 {
 		out = append(out, "no_faststart")

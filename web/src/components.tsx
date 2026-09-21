@@ -68,7 +68,7 @@ export function SavingsTag({ f }: { f: FileItem }) {
 
 // Short issue names for chips (full text comes from /api/v1/issues).
 export const ISSUE_SHORT: Record<string, { label: string; fix: "quick" | "reencode" | "info" }> = {
-  hev1: { label: "hev1 tag", fix: "quick" },
+  no_hvc1: { label: "not hvc1", fix: "quick" },
   no_faststart: { label: "no faststart", fix: "quick" },
   pcm_audio: { label: "PCM audio", fix: "quick" },
   legacy_container: { label: "legacy container", fix: "quick" },

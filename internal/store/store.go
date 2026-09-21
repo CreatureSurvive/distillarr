@@ -198,7 +198,7 @@ var alters = []string{
 	`ALTER TABLE files ADD COLUMN video_tag TEXT NOT NULL DEFAULT ''`,
 	`ALTER TABLE files ADD COLUMN faststart INTEGER NOT NULL DEFAULT -1`, // -1 n/a or unknown
 	`ALTER TABLE files ADD COLUMN meta_checked INTEGER NOT NULL DEFAULT 0`,
-	`ALTER TABLE files ADD COLUMN issues TEXT NOT NULL DEFAULT ''`,        // ",hev1,pcm_audio,"
+	`ALTER TABLE files ADD COLUMN issues TEXT NOT NULL DEFAULT ''`,        // ",no_hvc1,pcm_audio,"
 	`CREATE INDEX IF NOT EXISTS files_meta ON files(meta_checked)`,
 }
 

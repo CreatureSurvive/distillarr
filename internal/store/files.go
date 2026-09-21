@@ -75,7 +75,7 @@ type File struct {
 	VideoTag    string `json:"video_tag"`    // codec_tag_string: hvc1 / hev1 / avc1 ...
 	Faststart   int    `json:"faststart"`    // MP4 only: 1 moov first, 0 not, -1 n/a or unknown
 	MetaChecked bool   `json:"-"`
-	Issues      string `json:"issues"` // ",hev1,pcm_audio," (see internal/issues)
+	Issues      string `json:"issues"` // ",no_hvc1,pcm_audio," (see internal/issues)
 }
 
 // HasBars reports detected black bars inside the encoded frame.
