@@ -50,10 +50,10 @@ func BuildPreview(s Settings, src *media.Probe, outPath string, start, dur float
 				"-global_quality", itoa(crf + 3), "-async_depth", "4",
 				"-preset", presetOr(s.Preset, "medium")}
 		case s.Backend == VAAPI && s.Codec == HEVC:
-			return []string{"-c:v", "hevc_vaapi", "-rc_mode", "QP", "-qp", itoa(crf + 2),
+			return []string{"-c:v", "hevc_vaapi", "-rc_mode", "CQP", "-qp", itoa(crf + 2),
 				"-bf", "2", "-profile:v", "main10"}
 		case s.Backend == VAAPI && s.Codec == AV1:
-			return []string{"-c:v", "av1_vaapi", "-rc_mode", "QP", "-qp", itoa(crf + 2)}
+			return []string{"-c:v", "av1_vaapi", "-rc_mode", "CQP", "-qp", itoa(crf + 2)}
 		case s.Backend == NVENC:
 			return []string{"-c:v", string(s.Codec) + "_nvenc", "-preset", "p5", "-tune", "hq",
 				"-rc", "vbr", "-cq", itoa(crf + 4), "-b:v", "0",

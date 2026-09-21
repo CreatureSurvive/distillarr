@@ -112,10 +112,12 @@ func testArgs(b encode.Backend, c encode.Codec, node string) []string {
 	switch b {
 	case encode.SW:
 		enc := "libx265"
+		preset := "ultrafast"
 		if c == encode.AV1 {
 			enc = "libsvtav1"
+			preset = "11" // SVT-AV1 presets are numeric
 		}
-		return cat(common, src, []string{"-c:v", enc, "-preset", "ultrafast",
+		return cat(common, src, []string{"-c:v", enc, "-preset", preset,
 			"-frames:v", "10", "-f", "null", "-"})
 	case encode.QSV:
 		enc := "hevc_qsv"
@@ -134,10 +136,10 @@ func testArgs(b encode.Backend, c encode.Codec, node string) []string {
 			[]string{"-frames:v", "10", "-f", "null", "-"})
 	case encode.VAAPI:
 		enc := "hevc_vaapi"
-		extra := []string{"-rc_mode", "QP", "-qp", "30", "-profile:v", "main10"}
+		extra := []string{"-rc_mode", "CQP", "-qp", "30", "-profile:v", "main10"}
 		if c == encode.AV1 {
 			enc = "av1_vaapi"
-			extra = []string{"-rc_mode", "QP", "-qp", "30"}
+			extra = []string{"-rc_mode", "CQP", "-qp", "30"}
 		}
 		return cat(common,
 			[]string{"-init_hw_device", "vaapi=va:" + node, "-filter_hw_device", "va"},

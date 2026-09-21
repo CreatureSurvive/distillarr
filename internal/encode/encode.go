@@ -46,8 +46,11 @@ type Settings struct {
 	RenderNode     string  `json:"render_node,omitempty"` // /dev/dri/renderD128
 }
 
-// DefaultRenderNode is the Arc A380 on this host.
-const DefaultRenderNode = "/dev/dri/renderD128"
+// DefaultRenderNode is only a last-resort fallback — real node choice
+// always comes from hwprobe results (on this host the Arc A380 is
+// renderD129; the UHD 630 is renderD128 — verify via the probe, not
+// stale docs).
+const DefaultRenderNode = "/dev/dri/renderD129"
 
 // CmdSpec is a complete ffmpeg invocation.
 type CmdSpec struct {
@@ -197,10 +200,10 @@ func buildIntel(s Settings, src *media.Probe, out, container string, scale bool,
 			"-global_quality", itoa(crf + 3), "-async_depth", "4",
 			"-preset", presetOr(s.Preset, "medium")}
 	case s.Backend == VAAPI && s.Codec == HEVC:
-		video = []string{"-c:v", "hevc_vaapi", "-rc_mode", "QP",
+		video = []string{"-c:v", "hevc_vaapi", "-rc_mode", "CQP",
 			"-qp", itoa(crf + 2), "-bf", "2", "-profile:v", "main10"}
 	case s.Backend == VAAPI && s.Codec == AV1:
-		video = []string{"-c:v", "av1_vaapi", "-rc_mode", "QP", "-qp", itoa(crf + 2)}
+		video = []string{"-c:v", "av1_vaapi", "-rc_mode", "CQP", "-qp", itoa(crf + 2)}
 	default:
 		return nil, nil, fmt.Errorf("unsupported backend/codec %s/%s", s.Backend, s.Codec)
 	}

@@ -1,0 +1,80 @@
+/* mediatrans design tokens — encode bay console */
+
+:root {
+  /* surfaces */
+  --bg: #101214;
+  --bg-deep: #0b0d0f;
+  --surface: #181b1f;
+  --surface-2: #1f232a;
+  --surface-3: #262b33;
+  --line: #2a2f37;
+  --line-soft: #22262d;
+
+  /* text */
+  --text: #e8eaed;
+  --text-dim: #9aa3ad;
+  --text-faint: #5c6670;
+
+  /* signal colors */
+  --amber: #ffb257;      /* signal / attention / HEVC gauge */
+  --teal: #45d6c0;       /* savings / healthy / HEVC */
+  --violet: #b8a6ff;     /* AV1 */
+  --red: #f7768e;        /* failure */
+  --green: #7ad98b;      /* success */
+
+  /* type */
+  --font-display: "Big Shoulders Display", "Archivo", system-ui, sans-serif;
+  --font-body: "Archivo", system-ui, -apple-system, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "SF Mono", monospace;
+
+  /* shape */
+  --r-sm: 4px;
+  --r-md: 8px;
+  --r-lg: 14px;
+
+  --shadow: 0 8px 30px rgba(0, 0, 0, 0.45);
+}
+
+* { box-sizing: border-box; }
+
+html, body, #root { height: 100%; }
+
+body {
+  margin: 0;
+  background:
+    radial-gradient(1200px 500px at 85% -10%, rgba(69, 214, 192, 0.05), transparent 60%),
+    radial-gradient(900px 420px at -10% 110%, rgba(255, 178, 87, 0.04), transparent 55%),
+    var(--bg);
+  color: var(--text);
+  font-family: var(--font-body);
+  font-size: 15px;
+  line-height: 1.45;
+  -webkit-font-smoothing: antialiased;
+}
+
+::selection { background: rgba(69, 214, 192, 0.25); }
+
+a { color: inherit; text-decoration: none; }
+
+button {
+  font-family: inherit;
+  font-size: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+
+:focus-visible {
+  outline: 2px solid var(--teal);
+  outline-offset: 2px;
+  border-radius: 3px;
+}
+
+/* scrollbars */
+* { scrollbar-width: thin; scrollbar-color: var(--line) transparent; }
+*::-webkit-scrollbar { width: 9px; height: 9px; }
+*::-webkit-scrollbar-thumb { background: var(--line); border-radius: 6px; }
+*::-webkit-scrollbar-track { background: transparent; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0.001s !important; transition-duration: 0.001s !important; }
+}
