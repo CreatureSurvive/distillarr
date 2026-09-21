@@ -8,6 +8,7 @@ import Shows from "./views/Shows";
 import ShowView from "./views/Show";
 import FileDetail from "./views/FileDetail";
 import Queue from "./views/Queue";
+import Issues from "./views/Issues";
 import PreviewView from "./views/Preview";
 import SettingsView from "./views/Settings";
 
@@ -25,6 +26,7 @@ export type LiveState = {
 const NAV = [
   { to: "/", label: "Movies", icon: "▦", end: true },
   { to: "/shows", label: "Shows", icon: "▤", end: false },
+  { to: "/issues", label: "Issues", icon: "!", end: false },
   { to: "/queue", label: "Queue", icon: "≡", end: false },
   { to: "/settings", label: "Settings", icon: "⚙", end: false },
 ];
@@ -114,6 +116,7 @@ export default function App() {
           <Route path="/shows" element={<Shows live={live} />} />
           <Route path="/show/:title" element={<ShowView live={live} />} />
           <Route path="/file/:id" element={<FileDetail live={live} />} />
+          <Route path="/issues" element={<Issues live={live} />} />
           <Route path="/queue" element={<Queue live={live} />} />
           <Route path="/preview/:id" element={<PreviewView live={live} />} />
           <Route path="/settings" element={<SettingsView live={live} onJellyfin={() => setLive((l) => ({ ...l, jfVersion: l.jfVersion + 1 }))} />} />

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useParams, useSearchParams } from "react-router-dom";
 import { api, type FileItem, type HwReport, type ShowDetail, type ShowOverrides, type ShowPlan } from "../api";
 import { Art, CodecChip, Empty, SavingsGauge, Seg, toast } from "../components";
 import { backendLabel, bitrate, bytes, codecLabel, hdrLabel, resLabel, se, seasonName } from "../format";
@@ -10,7 +10,8 @@ export default function ShowView({ live }: { live: LiveState }) {
   const title = decodeURIComponent(useParams<{ title: string }>().title ?? "");
   const [show, setShow] = useState<ShowDetail | null>(null);
   const [err, setErr] = useState("");
-  const [season, setSeason] = useState<number | null>(null);
+  const [params] = useSearchParams();
+  const [season, setSeason] = useState<number | null>(params.get("season") ? Number(params.get("season")) : null);
   const [eps, setEps] = useState<FileItem[]>([]);
   const [hw, setHw] = useState<HwReport | null>(null);
   const [auto, setAuto] = useState<Record<string, string>>({});

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { api, type FileItem, type HwReport, type Plan, type Settings, type Stream } from "../api";
-import { Art, Copyable, Empty, FileChips, SavingsGauge, toast } from "../components";
+import { Art, Copyable, Empty, FileChips, IssueChips, SavingsGauge, hasQuickFix, toast } from "../components";
 import EncodeOptions, { hasBars } from "../options";
 import { backendLabel, bitrate, bytes, channelsLabel, codecLabel, dur, se } from "../format";
 import type { LiveState } from "../App";
@@ -112,6 +112,26 @@ export default function FileDetail({ live }: { live: LiveState }) {
             <span>{dur(file.duration)}</span>
             {file.interlaced && <span className="warm">interlaced</span>}
           </div>
+          {(file.issues || "").replace(/,/g, "") !== "" && (
+            <div className="hero-issues">
+              <IssueChips f={file} />
+              {hasQuickFix(file) && !file.queued && (
+                <button className="btn mini" disabled={busy !== ""} title="Remux with the video copied bit-exact: fixes hvc1 tagging, faststart, PCM audio and legacy containers in minutes"
+                  onClick={async () => {
+                    setBusy("fix");
+                    try {
+                      await api.fixFile(file.id, true);
+                      toast("Quick fix started. Video is copied, not re-encoded.");
+                      setFile({ ...file, queued: true });
+                    } catch (e: any) {
+                      toast(e.message, "err");
+                    } finally {
+                      setBusy("");
+                    }
+                  }}>Quick fix</button>
+              )}
+            </div>
+          )}
           {file.overview && <p className="hero-overview">{file.overview}</p>}
         </div>
       </section>
