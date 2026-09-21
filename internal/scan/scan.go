@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"mediatrans/internal/config"
+	"mediatrans/internal/issues"
 	"mediatrans/internal/media"
 	"mediatrans/internal/recs"
 	"mediatrans/internal/store"
@@ -214,6 +215,7 @@ func (s *Scanner) probeOne(path string, cfg config.Config) {
 	rec := recs.Recommend(f, cfg)
 	f.TranscodeScore = rec.Score
 	f.RecJSON = rec.JSON()
+	f.Issues = issues.Encode(issues.Detect(f, rec.Action == "transcode", rec.Limited))
 
 	if err := s.st.UpsertFile(f, buildStreams(f.ID, p)); err != nil {
 		log.Printf("scan: upsert %s: %v", path, err)
@@ -255,6 +257,7 @@ func buildFile(lib, path string, p *media.Probe) *store.File {
 	}
 	f.Duration = p.DurationSec()
 	f.TotalBitrate = p.TotalBitrate()
+	f.Faststart, f.MetaChecked = faststartOf(path, f.Container), true
 	audio := []store.AudioStream{}
 	for _, a := range p.Audios() {
 		audio = append(audio, store.AudioStream{
@@ -272,6 +275,7 @@ func buildFile(lib, path string, p *media.Probe) *store.File {
 		f.FPS = v.FPS()
 		f.HDR = v.HDRType()
 		f.Interlaced = v.Interlaced()
+		f.VideoTag = v.CodecTagString
 		f.VideoBitrate = p.VideoBitrate()
 	}
 	return f
@@ -360,18 +364,19 @@ func (s *Scanner) markMissing(seen map[string]bool) {
 // hardware or size-model calibration change). Cheap: no probing.
 func (s *Scanner) RefreshRecs() {
 	cfg := s.cfg.Get()
-	batch := map[int64][2]any{}
+	batch := map[int64]store.RecUpdate{}
 	flush := func() {
 		if len(batch) > 0 {
 			if err := s.st.UpdateRecs(batch); err != nil {
 				log.Printf("scan: refresh recs: %v", err)
 			}
-			batch = map[int64][2]any{}
+			batch = map[int64]store.RecUpdate{}
 		}
 	}
 	_ = s.st.EachFile(func(f *store.File) error {
 		r := recs.Recommend(f, cfg)
-		batch[f.ID] = [2]any{r.Score, r.JSON()}
+		batch[f.ID] = store.RecUpdate{Score: r.Score, Rec: r.JSON(),
+			Issues: issues.Encode(issues.Detect(f, r.Action == "transcode", r.Limited))}
 		if len(batch) >= 500 {
 			flush()
 		}
@@ -403,6 +408,43 @@ func (s *Scanner) ProbeSingle(path string) error {
 	return nil
 }
 
+// faststartOf reports MP4 index placement: 1 first, 0 last, -1 not MP4
+// or unreadable.
+func faststartOf(path, container string) int {
+	switch container {
+	case "mp4", "m4v", "mov":
+	default:
+		return -1
+	}
+	ok, err := media.MoovFirst(path)
+	if err != nil {
+		return -1
+	}
+	if ok {
+		return 1
+	}
+	return 0
+}
+
+// fillMeta reads video tag + faststart for files scanned before those
+// facts were recorded. Cheap: one small ffprobe and a few box headers.
+func (s *Scanner) fillMeta() int {
+	todo, err := s.st.FilesNeedingMeta(200)
+	if err != nil || len(todo) == 0 {
+		return 0
+	}
+	for _, t := range todo {
+		tag := ""
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		if p, err := media.ProbeFile(ctx, t.Path); err == nil && p.Video() != nil {
+			tag = p.Video().CodecTagString
+		}
+		cancel()
+		_ = s.st.SetMeta(t.ID, tag, faststartOf(t.Path, t.Container))
+	}
+	return len(todo)
+}
+
 // CropLoop detects black bars in the background, re-encode candidates
 // first, two files at a time. New or changed files are picked up after
 // each scan pass; recommendations refresh as results land.
@@ -411,6 +453,13 @@ func (s *Scanner) CropLoop(stop <-chan struct{}) {
 		if s.Running() {
 			if sleepOr(stop, 30*time.Second) {
 				return
+			}
+			continue
+		}
+		// Container facts first: fast, and they feed the issues list.
+		if n := s.fillMeta(); n > 0 {
+			if n < 200 { // last batch: recompute issues once
+				s.RefreshRecsSoon()
 			}
 			continue
 		}

@@ -46,6 +46,7 @@ type Recommendation struct {
 	Headroom float64         `json:"headroom"`   // source bits vs what the target needs
 	Samples  int             `json:"calibration_samples"` // real results behind the estimate
 	Measured bool            `json:"measured"`            // quality + size come from a VMAF search on this file
+	Limited  bool            `json:"limited,omitempty"`   // measured: the quality target can't be reached
 }
 
 // JSON serializes for files.rec_json caching.
@@ -343,6 +344,7 @@ func Recommend(f *store.File, cfg config.Config) Recommendation {
 			msg := fmt.Sprintf("Measured on 3 samples: quality %d scores VMAF %.1f against the original (worst moments %.1f), for your target of %.0f.",
 				t.Quality, t.VMAF.Mean, t.VMAF.P5, t.Target)
 			if !t.Met {
+				r.Limited = true
 				msg = fmt.Sprintf("Measured on 3 samples: even quality %d only reaches VMAF %.1f (target %.0f); the source's own artifacts limit it.",
 					t.Quality, t.VMAF.Mean, t.Target)
 			}

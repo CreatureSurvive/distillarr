@@ -71,6 +71,11 @@ type File struct {
 
 	// TuneJSON is the last VMAF quality search for this file.
 	TuneJSON string `json:"-"`
+
+	VideoTag    string `json:"video_tag"`    // codec_tag_string: hvc1 / hev1 / avc1 ...
+	Faststart   int    `json:"faststart"`    // MP4 only: 1 moov first, 0 not, -1 n/a or unknown
+	MetaChecked bool   `json:"-"`
+	Issues      string `json:"issues"` // ",hev1,pcm_audio," (see internal/issues)
 }
 
 // HasBars reports detected black bars inside the encoded frame.
@@ -97,24 +102,27 @@ func (f *File) CropRect() string {
 const fileCols = `id, path, library, title, year, season, episode, ep_title, quality_tag,
 	size, mtime_ns, container, duration, video_codec, width, height, bit_depth, fps, hdr,
 	video_bitrate, total_bitrate, audio_json, sub_count, sidecars_json, transcode_score,
-	rec_json, missing, scanned_at, updated_at, interlaced, crop_w, crop_h, crop_x, crop_y, crop_checked, tune_json`
+	rec_json, missing, scanned_at, updated_at, interlaced, crop_w, crop_h, crop_x, crop_y, crop_checked, tune_json,
+	video_tag, faststart, meta_checked, issues`
 
 func scanFile(row interface{ Scan(...any) error }) (*File, error) {
 	f := &File{}
 	var audio, sidecars string
-	var missing, interlaced, cropChecked int
+	var missing, interlaced, cropChecked, metaChecked int
 	err := row.Scan(&f.ID, &f.Path, &f.Library, &f.Title, &f.Year, &f.Season, &f.Episode,
 		&f.EpTitle, &f.QualityTag, &f.Size, &f.MtimeNS, &f.Container, &f.Duration,
 		&f.VideoCodec, &f.Width, &f.Height, &f.BitDepth, &f.FPS, &f.HDR,
 		&f.VideoBitrate, &f.TotalBitrate, &audio, &f.SubCount, &sidecars,
 		&f.TranscodeScore, &f.RecJSON, &missing, &f.ScannedAt, &f.UpdatedAt, &interlaced,
-		&f.CropW, &f.CropH, &f.CropX, &f.CropY, &cropChecked, &f.TuneJSON)
+		&f.CropW, &f.CropH, &f.CropX, &f.CropY, &cropChecked, &f.TuneJSON,
+		&f.VideoTag, &f.Faststart, &metaChecked, &f.Issues)
 	if err != nil {
 		return nil, err
 	}
 	f.Missing = missing != 0
 	f.Interlaced = interlaced != 0
 	f.CropChecked = cropChecked != 0
+	f.MetaChecked = metaChecked != 0
 	_ = json.Unmarshal([]byte(audio), &f.Audio)
 	if f.Audio == nil {
 		f.Audio = []AudioStream{}
@@ -181,7 +189,8 @@ func (s *Store) UpsertFile(f *File, streams []Stream) error {
 	f.ID = id
 	// A (re)probed file is a new picture: bars must be detected again.
 	if _, err := tx.Exec(`UPDATE files SET interlaced=?, crop_w=0, crop_h=0, crop_x=0, crop_y=0,
-		crop_checked=0, tune_json='' WHERE id=?`, b2i(f.Interlaced), id); err != nil {
+		crop_checked=0, tune_json='', video_tag=?, faststart=?, meta_checked=?, issues=? WHERE id=?`,
+		b2i(f.Interlaced), f.VideoTag, f.Faststart, b2i(f.MetaChecked), f.Issues, id); err != nil {
 		return err
 	}
 	for i := range streams {
@@ -415,19 +424,58 @@ func (s *Store) EachFile(fn func(*File) error) error {
 	return nil
 }
 
+// RecUpdate is a refreshed recommendation + issues for one file.
+type RecUpdate struct {
+	Score  float64
+	Rec    string
+	Issues string
+}
+
 // UpdateRecs writes refreshed recommendation caches in one transaction.
-func (s *Store) UpdateRecs(recs map[int64][2]any) error {
+func (s *Store) UpdateRecs(recs map[int64]RecUpdate) error {
 	tx, err := s.dbW.Begin()
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
 	for id, v := range recs {
-		if _, err := tx.Exec(`UPDATE files SET transcode_score=?, rec_json=? WHERE id=?`, v[0], v[1], id); err != nil {
+		if _, err := tx.Exec(`UPDATE files SET transcode_score=?, rec_json=?, issues=? WHERE id=?`,
+			v.Score, v.Rec, v.Issues, id); err != nil {
 			return err
 		}
 	}
 	return tx.Commit()
+}
+
+// MetaTodo is a file whose container facts haven't been read yet.
+type MetaTodo struct {
+	ID        int64
+	Path      string
+	Container string
+}
+
+// FilesNeedingMeta lists files without video tag / faststart facts.
+func (s *Store) FilesNeedingMeta(limit int) ([]MetaTodo, error) {
+	rows, err := s.dbR.Query(`SELECT id, path, container FROM files WHERE missing=0 AND meta_checked=0 LIMIT ?`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []MetaTodo
+	for rows.Next() {
+		var t MetaTodo
+		if err := rows.Scan(&t.ID, &t.Path, &t.Container); err != nil {
+			return nil, err
+		}
+		out = append(out, t)
+	}
+	return out, rows.Err()
+}
+
+// SetMeta stores container facts.
+func (s *Store) SetMeta(id int64, tag string, faststart int) error {
+	_, err := s.dbW.Exec(`UPDATE files SET video_tag=?, faststart=?, meta_checked=1 WHERE id=?`, tag, faststart, id)
+	return err
 }
 
 func (f FileFilter) where() (string, []any) {

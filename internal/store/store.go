@@ -194,6 +194,12 @@ var alters = []string{
 	`ALTER TABLE files ADD COLUMN crop_checked INTEGER NOT NULL DEFAULT 0`,
 	// Per-file VMAF quality search result (JSON, "" = not tuned).
 	`ALTER TABLE files ADD COLUMN tune_json TEXT NOT NULL DEFAULT ''`,
+	// Container/stream facts for the issues list, and the issues found.
+	`ALTER TABLE files ADD COLUMN video_tag TEXT NOT NULL DEFAULT ''`,
+	`ALTER TABLE files ADD COLUMN faststart INTEGER NOT NULL DEFAULT -1`, // -1 n/a or unknown
+	`ALTER TABLE files ADD COLUMN meta_checked INTEGER NOT NULL DEFAULT 0`,
+	`ALTER TABLE files ADD COLUMN issues TEXT NOT NULL DEFAULT ''`,        // ",hev1,pcm_audio,"
+	`CREATE INDEX IF NOT EXISTS files_meta ON files(meta_checked)`,
 }
 
 func (s *Store) migrate() error {

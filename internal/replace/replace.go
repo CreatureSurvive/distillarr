@@ -129,8 +129,10 @@ func Verify(ctx context.Context, tempPath string, spec VerifySpec) ([]string, er
 		if spec.WantVideoCodec == "hevc" && v.CodecTagString != "hvc1" {
 			return nil, fmt.Errorf("HEVC in MP4 is tagged %q, Apple players need hvc1", v.CodecTagString)
 		}
-		if err := moovFirst(tempPath); err != nil {
+		if ok, err := media.MoovFirst(tempPath); err != nil {
 			return nil, err
+		} else if !ok {
+			return nil, fmt.Errorf("moov atom is after the media data (faststart failed)")
 		}
 	}
 
@@ -151,45 +153,6 @@ func Verify(ctx context.Context, tempPath string, spec VerifySpec) ([]string, er
 		return nil, fmt.Errorf("mid-file decode check failed: %w", err)
 	}
 	return warns, nil
-}
-
-// moovFirst walks top-level MP4 boxes and requires the moov (index) box
-// before mdat, so playback and streaming can start without the whole file.
-func moovFirst(path string) error {
-	f, err := os.Open(path)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-	var off int64
-	hdr := make([]byte, 16)
-	for i := 0; i < 64; i++ {
-		if _, err := f.ReadAt(hdr[:8], off); err != nil {
-			return fmt.Errorf("mp4 box walk: %w", err)
-		}
-		size := int64(uint32(hdr[0])<<24 | uint32(hdr[1])<<16 | uint32(hdr[2])<<8 | uint32(hdr[3]))
-		typ := string(hdr[4:8])
-		if size == 1 {
-			if _, err := f.ReadAt(hdr[8:16], off+8); err != nil {
-				return err
-			}
-			size = 0
-			for _, b := range hdr[8:16] {
-				size = size<<8 | int64(b)
-			}
-		}
-		switch typ {
-		case "moov":
-			return nil
-		case "mdat":
-			return fmt.Errorf("moov atom is after the media data (faststart failed)")
-		}
-		if size < 8 {
-			return fmt.Errorf("mp4 box walk: bad size for %q", typ)
-		}
-		off += size
-	}
-	return fmt.Errorf("mp4 box walk: no moov found")
 }
 
 // spotCheck decodes ~200 frames from ~5% into the file.
