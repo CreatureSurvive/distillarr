@@ -175,6 +175,20 @@ select.input { width: auto; }
 .tag-save { background: rgba(69, 214, 192, 0.92); color: #06201a; }
 .tag-warn { background: rgba(255, 178, 87, 0.92); color: #2a1a05; }
 .tag-queued { background: rgba(184, 166, 255, 0.92); color: #150f2e; }
+.tag-fix { background: rgba(255, 178, 87, 0.18); color: var(--amber); border: 1px solid rgba(255, 178, 87, 0.5); }
+.c-h264 { color: var(--amber); }
+.issue-quick { color: var(--amber); border-color: rgba(255, 178, 87, 0.45); }
+.issue-reencode { color: var(--teal); border-color: rgba(69, 214, 192, 0.35); }
+.issue-info { color: var(--text-faint); }
+
+/* facet filters */
+.facets { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: -6px 0 14px; }
+.facets .facet { font-size: 13px; min-height: 34px; padding: 6px 9px; max-width: 100%; }
+.facets .facet-on { border-color: var(--teal); color: var(--teal); }
+@media (max-width: 640px) {
+  .facets { display: grid; grid-template-columns: 1fr 1fr; }
+  .facets .facet { width: 100%; }
+}
 
 .gauge { position: relative; background: var(--surface-3); border-radius: 3px; overflow: hidden; flex: 1; min-width: 40px; }
 .gauge-fill { height: 100%; background: linear-gradient(90deg, var(--amber), var(--teal)); transition: width 0.4s ease; }
@@ -443,3 +457,36 @@ details.panel[open] > summary { margin-bottom: 12px; }
 .tune-steps { list-style: none; margin: 10px 0 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
 .tune-steps li { display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: center; font-size: 13px; padding: 6px 8px; border-radius: var(--r-sm); }
 .tune-steps li.chosen { background: rgba(69, 214, 192, 0.07); }
+
+/* ---------- measuring panel ---------- */
+.sched-violet .tl24-span { background: linear-gradient(90deg, rgba(184, 166, 255, 0.55), rgba(184, 166, 255, 0.8)); }
+.measure-row { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr); gap: 18px; align-items: start; margin: 4px 0 14px; }
+.measure-stat { display: flex; flex-direction: column; gap: 6px; min-width: 0; overflow-wrap: anywhere; }
+.measure-bar { height: 4px; background: var(--surface-3); border-radius: 2px; overflow: hidden; }
+.measure-bar > div { height: 100%; background: var(--violet); }
+@media (max-width: 720px) { .measure-row { grid-template-columns: 1fr; } }
+
+/* ---------- history stats ---------- */
+.stats { margin-bottom: 16px; }
+.kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 12px; margin-bottom: 18px; }
+.kpi-val { font: 700 28px/1 var(--font-display); letter-spacing: 0.02em; }
+.kpi-label { font: 11px var(--font-mono); color: var(--text-faint); margin-top: 5px; text-transform: uppercase; letter-spacing: 0.08em; }
+.bad { color: var(--red); }
+.stats-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 24px; }
+@media (max-width: 760px) { .stats-grid { grid-template-columns: 1fr; } }
+.wk-chart { display: flex; align-items: flex-end; gap: 4px; height: 120px; border-bottom: 1px solid var(--line); }
+.wk-col { flex: 1; height: 100%; display: flex; align-items: flex-end; }
+.wk-bar { width: 100%; min-height: 1px; background: var(--teal); border-radius: 2px 2px 0 0; opacity: 0.85; }
+.wk-col:hover .wk-bar { opacity: 1; }
+.wk-scale { display: flex; justify-content: space-between; font-size: 10.5px; margin-top: 4px; }
+.bd { margin-bottom: 14px; }
+.bd-row { display: grid; grid-template-columns: 90px minmax(40px, 1fr) 70px; gap: 4px 10px; align-items: center; margin: 5px 0; }
+.bd-key { font-size: 13px; }
+.bd-bar { height: 8px; background: var(--surface-3); border-radius: 2px; overflow: hidden; }
+.bd-bar > div { height: 100%; background: var(--teal); }
+.bd-val { text-align: right; }
+.bd-sub { grid-column: 2 / -1; margin-top: -3px; }
+.top-savers ol { list-style: none; margin: 0; padding: 0; }
+.top-savers li { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 12px; padding: 6px 0; border-top: 1px solid var(--line-soft); align-items: baseline; }
+.ts-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
+@media (max-width: 560px) { .top-savers li { grid-template-columns: minmax(0, 1fr) auto; } .top-savers li > :last-child { display: none; } }

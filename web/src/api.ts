@@ -59,6 +59,55 @@ export type FileItem = {
   overview?: string;
   genres?: string;
   queued?: boolean;
+  video_tag?: string;
+  faststart?: number;
+  issues?: string; // ",hev1,pcm_audio,"
+};
+
+export type IssueType = {
+  key: string;
+  label: string;
+  fix: "quick" | "reencode" | "info";
+  help: string;
+  scope: "file" | "season";
+  movies: number;
+  episodes: number;
+  bytes: number;
+};
+
+export type MixedSeason = {
+  show: string;
+  season: number;
+  episodes: number;
+  codecs: string;
+  containers: string;
+  classes: string;
+  size: number;
+};
+
+export type Facet = { value: string; files: number; bytes: number };
+export type Composition = { containers: Facet[]; video: Facet[]; audio: Facet[]; res: Facet[] };
+
+export type MeasureStatus = {
+  enabled: boolean;
+  window_open: boolean;
+  running: boolean;
+  current?: string;
+  note?: string;
+  measured: number;
+  remaining: number;
+  done_this_window: number;
+  last_error?: string;
+};
+
+export type StatGroup = { key: string; jobs: number; src_bytes: number; out_bytes: number; saved: number; hours: number };
+export type HistoryStats = {
+  totals: { done: number; failed: number; canceled: number; src_bytes: number; out_bytes: number; saved: number; encode_hours: number };
+  kinds: StatGroup[];
+  codecs: StatGroup[];
+  library: StatGroup[];
+  weeks: StatGroup[];
+  top: { job_id: number; path: string; src_bytes: number; out_bytes: number; finished_at: string }[];
 };
 
 export type Stream = {
@@ -310,6 +359,8 @@ export type Config = {
   workers: number;
   paused: boolean;
   schedules: Schedule[];
+  measure_enabled: boolean | null;
+  measure_schedules: Schedule[];
   default_codec: string;
   default_quality: number;
   default_speed: string;
@@ -461,6 +512,15 @@ export const api = {
     post<Job>(`/api/v1/files/${id}/queue`, body),
   previewFile: (id: number, body: { settings?: Settings; segments?: number }) =>
     post<Preview>(`/api/v1/files/${id}/preview`, body),
+
+  fixFile: (id: number, run_now = false) => post<Job>(`/api/v1/files/${id}/fix`, { run_now }),
+  issues: () => req<{ types: IssueType[] }>("/api/v1/issues"),
+  mixedSeasons: (show?: string) => req<{ seasons: MixedSeason[] }>(`/api/v1/issues/mixed?${qs({ show })}`),
+  fixIssue: (key: string, body: { library?: string; show?: string; run_now?: boolean }) =>
+    post<{ queued: number; skipped: number }>(`/api/v1/issues/${key}/fix`, body),
+  composition: (library?: string) => req<Composition>(`/api/v1/libraries/composition?${qs({ library })}`),
+  measure: () => req<MeasureStatus>("/api/v1/measure"),
+  stats: () => req<HistoryStats>("/api/v1/stats"),
 
   jobs: (status?: string, limit = 100) => req<{ jobs: Job[] }>(`/api/v1/jobs?${qs({ status, limit })}`),
   job: (id: number) => req<{ job: Job; progress: Progress | null }>(`/api/v1/jobs/${id}`),

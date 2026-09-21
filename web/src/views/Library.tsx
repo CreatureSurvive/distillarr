@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, type FileItem } from "../api";
-import { Empty, MovieCard, Seg, Toggle } from "../components";
+import { Empty, MovieCard, Toggle } from "../components";
+import { FacetFilters, NO_FACETS, facetParams, type Facets } from "../filters";
 import { bytes } from "../format";
 import type { LiveState } from "../App";
 
@@ -27,7 +28,7 @@ export function useSessionState<T>(key: string, init: T): [T, (v: T) => void] {
 export default function Library({ live }: { live: LiveState }) {
   const [search, setSearch] = useSessionState("mv.search", "");
   const [sort, setSort] = useSessionState("mv.sort", "savings");
-  const [codec, setCodec] = useSessionState("mv.codec", "");
+  const [facets, setFacets] = useSessionState<Facets>("mv.facets", NO_FACETS);
   const [worth, setWorth] = useSessionState("mv.worth", true);
   const [files, setFiles] = useState<FileItem[]>([]);
   const [total, setTotal] = useState(0);
@@ -37,8 +38,8 @@ export default function Library({ live }: { live: LiveState }) {
   const reqId = useRef(0);
 
   const params = useCallback(
-    (offset: number) => ({ library: "movies", title: search, sort, codec, candidates: worth, offset, limit: PAGE }),
-    [search, sort, codec, worth]
+    (offset: number) => ({ library: "movies", title: search, sort, ...facetParams(facets), candidates: worth, offset, limit: PAGE }),
+    [search, sort, facets, worth]
   );
 
   useEffect(() => {
@@ -103,10 +104,9 @@ export default function Library({ live }: { live: LiveState }) {
           <option value="title">Title</option>
           <option value="added">Recently changed</option>
         </select>
-        <Seg value={codec} onChange={setCodec} label="Codec"
-          options={[{ value: "", label: "All" }, { value: "h264", label: "H.264" }, { value: "hevc", label: "HEVC" }, { value: "av1", label: "AV1" }]} />
         <Toggle on={worth} onChange={setWorth} label="Worth re-encoding" />
       </div>
+      <FacetFilters library="movies" value={facets} onChange={setFacets} />
 
       <div className="result-count mono dim">{loading && files.length === 0 ? "Loading…" : `${total.toLocaleString()} movies`}</div>
 

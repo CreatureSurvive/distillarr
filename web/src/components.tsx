@@ -66,6 +66,38 @@ export function SavingsTag({ f }: { f: FileItem }) {
   return null;
 }
 
+// Short issue names for chips (full text comes from /api/v1/issues).
+export const ISSUE_SHORT: Record<string, { label: string; fix: "quick" | "reencode" | "info" }> = {
+  hev1: { label: "hev1 tag", fix: "quick" },
+  no_faststart: { label: "no faststart", fix: "quick" },
+  pcm_audio: { label: "PCM audio", fix: "quick" },
+  legacy_container: { label: "legacy container", fix: "quick" },
+  legacy_codec: { label: "legacy codec", fix: "reencode" },
+  interlaced: { label: "interlaced", fix: "reencode" },
+  worth_reencoding: { label: "worth re-encoding", fix: "reencode" },
+  quality_limited: { label: "can't reach target", fix: "info" },
+};
+
+export function issueKeys(f: FileItem): string[] {
+  return (f.issues || "").split(",").filter(Boolean);
+}
+
+export function hasQuickFix(f: FileItem): boolean {
+  return issueKeys(f).some((k) => ISSUE_SHORT[k]?.fix === "quick");
+}
+
+export function IssueChips({ f, skip = [] }: { f: FileItem; skip?: string[] }) {
+  const keys = issueKeys(f).filter((k) => !skip.includes(k));
+  if (keys.length === 0) return null;
+  return (
+    <div className="chips">
+      {keys.map((k) => (
+        <span key={k} className={`chip issue-${ISSUE_SHORT[k]?.fix || "info"}`}>{ISSUE_SHORT[k]?.label || k}</span>
+      ))}
+    </div>
+  );
+}
+
 export function MovieCard({ f }: { f: FileItem }) {
   return (
     <a className="card-link" href={`#/file/${f.id}`}>
@@ -73,6 +105,7 @@ export function MovieCard({ f }: { f: FileItem }) {
         <Art src={f.image} title={f.title} sub={f.year ? String(f.year) : undefined} />
         <div className="pcard-overlay">
           <SavingsTag f={f} />
+          {hasQuickFix(f) && !f.queued && <span className="tag tag-fix" title="Has issues a quick remux fixes">fix</span>}
         </div>
       </div>
       <div className="pcard-body">

@@ -1,6 +1,7 @@
-import { useEffect, useState } from "react";
-import { api, type Config, type Job, type Schedule } from "../api";
-import { Copyable, Empty, Seg, toast } from "../components";
+import { useEffect, useState, type ReactNode } from "react";
+import { api, subscribe, type Config, type Job, type MeasureStatus, type Schedule } from "../api";
+import { Copyable, Empty, Seg, Toggle, toast } from "../components";
+import { HistoryStatsPanel } from "./Stats";
 import { ago, backendLabel, bytes, DAY_LABELS, dur, minutesToHM } from "../format";
 import type { LiveState } from "../App";
 
@@ -66,6 +67,7 @@ export default function Queue({ live }: { live: LiveState }) {
       </div>
 
       {config && <ScheduleTimeline config={config} onSaved={setConfig} />}
+      {config && <MeasurePanel config={config} onSaved={setConfig} live={live} />}
 
       <div className="tabs-row">
         <Seg value={tab} onChange={setTab} label="Job list" options={[
@@ -79,6 +81,8 @@ export default function Queue({ live }: { live: LiveState }) {
           </button>
         )}
       </div>
+
+      {tab === "history" && <HistoryStatsPanel version={live.queueVersion} />}
 
       {jobs.length === 0 ? (
         <Empty title={tab === "active" ? "Nothing encoding" : tab === "pending" ? "Queue is empty" : "No history yet"}>
@@ -101,7 +105,9 @@ export default function Queue({ live }: { live: LiveState }) {
                   </div>
                   <div className="job-meta mono dim">
                     <span className={`badge b-${j.status}`}>{j.status}</span>
-                    <span>{j.codec.toUpperCase()} · {backendLabel(settings.backend || j.backend || "auto")} · q{j.quality}</span>
+                    {j.backend === "remux"
+                      ? <span className="warm">Quick fix · remux · video copied</span>
+                      : <span>{j.codec.toUpperCase()} · {backendLabel(settings.backend || j.backend || "auto")} · q{j.quality}</span>}
                     <span>{bytes(j.src_size)}{saved && <span className="teal"> → {bytes(j.output_size)} (−{Math.round((1 - j.output_size / j.src_size) * 100)}%)</span>}</span>
                     {j.attempts > 1 && <span>try {j.attempts}/{j.max_attempts}</span>}
                     {j.finished_at && <span>{ago(j.finished_at)}</span>}
@@ -155,16 +161,27 @@ function safeSettings(s: string) {
 }
 
 // 24-hour window timeline with an editor.
-function ScheduleTimeline({ config, onSaved }: { config: Config; onSaved: (c: Config) => void }) {
+type SchedField = "schedules" | "measure_schedules";
+
+export function ScheduleTimeline({ config, onSaved, field = "schedules", title = "When the queue runs", anyTime = true, children, accent }: {
+  config: Config;
+  onSaved: (c: Config) => void;
+  field?: SchedField;
+  title?: string;
+  anyTime?: boolean; // no windows = always (queue) vs never (measuring)
+  children?: ReactNode;
+  accent?: "violet";
+}) {
   const [editing, setEditing] = useState<Schedule | null>(null);
   const now = new Date();
   const nowMin = now.getHours() * 60 + now.getMinutes();
   const dayIdx = (now.getDay() + 6) % 7;
-  const today = config.schedules.filter((s) => s.days & (1 << dayIdx));
+  const list = config[field] || [];
+  const today = list.filter((s) => s.days & (1 << dayIdx));
 
-  const save = async (schedules: Schedule[]) => {
+  const save = async (next: Schedule[]) => {
     try {
-      onSaved(await api.saveConfig({ schedules }));
+      onSaved(await api.saveConfig({ [field]: next } as Partial<Config>));
       setEditing(null);
       toast("Schedule saved");
     } catch (e: any) {
@@ -173,16 +190,17 @@ function ScheduleTimeline({ config, onSaved }: { config: Config; onSaved: (c: Co
   };
 
   return (
-    <section className="panel sched">
+    <section className={`panel sched${accent ? " sched-" + accent : ""}`}>
       <div className="sched-head">
-        <div className="eyebrow">When the queue runs · today ({DAY_LABELS[dayIdx]})</div>
+        <div className="eyebrow">{title} · today ({DAY_LABELS[dayIdx]})</div>
         <button className="btn mini" onClick={() => setEditing({ id: 0, days: 0x7f, start: 60, end: 360, label: "Nightly" })}>Add window</button>
       </div>
+      {children}
       <div className="tl24">
         <div className="tl24-track">
-          {config.schedules.length === 0 && <div className="tl24-none">Any time: no windows set</div>}
-          {config.schedules.length > 0 && today.length === 0 && <div className="tl24-none">No window today</div>}
-          {config.schedules.length === 0 && <div className="tl24-span" style={{ left: 0, width: "100%", opacity: 0.35 }} />}
+          {list.length === 0 && <div className="tl24-none">{anyTime ? "Any time: no windows set" : "Never: no windows set"}</div>}
+          {list.length > 0 && today.length === 0 && <div className="tl24-none">No window today</div>}
+          {list.length === 0 && anyTime && <div className="tl24-span" style={{ left: 0, width: "100%", opacity: 0.35 }} />}
           {today.flatMap((s) => (s.start <= s.end ? [[s.start, s.end]] : [[s.start, 1440], [0, s.end]]).map(([a, b], k) => (
             <div key={`${s.id}-${k}`} className="tl24-span" style={{ left: `${(a / 1440) * 100}%`, width: `${((b - a) / 1440) * 100}%` }} />
           )))}
@@ -190,9 +208,9 @@ function ScheduleTimeline({ config, onSaved }: { config: Config; onSaved: (c: Co
         </div>
         <div className="tl24-scale mono"><span>00</span><span>06</span><span>12</span><span>18</span><span>24</span></div>
       </div>
-      {config.schedules.length > 0 && (
+      {list.length > 0 && (
         <div className="chips" style={{ marginTop: 10 }}>
-          {config.schedules.map((s) => (
+          {list.map((s) => (
             <button key={s.id} className="chip chip-btn" onClick={() => setEditing(s)}>
               {s.label || "Window"} · {minutesToHM(s.start)}–{minutesToHM(s.end)} · {s.days === 0x7f ? "daily" : DAY_LABELS.filter((_, i) => s.days & (1 << i)).join(" ")}
             </button>
@@ -201,8 +219,8 @@ function ScheduleTimeline({ config, onSaved }: { config: Config; onSaved: (c: Co
       )}
       {editing && (
         <ScheduleEditor sched={editing} onClose={() => setEditing(null)}
-          onSave={(s) => save(editing.id === 0 ? [...config.schedules, { ...s, id: Date.now() % 1e9 }] : config.schedules.map((x) => (x.id === s.id ? s : x)))}
-          onDelete={() => save(config.schedules.filter((x) => x.id !== editing.id))} />
+          onSave={(s) => save(editing.id === 0 ? [...list, { ...s, id: Date.now() % 1e9 }] : list.map((x) => (x.id === s.id ? s : x)))}
+          onDelete={() => save(list.filter((x) => x.id !== editing.id))} />
       )}
     </section>
   );
@@ -237,5 +255,51 @@ function ScheduleEditor({ sched, onClose, onSave, onDelete }: { sched: Schedule;
         </div>
       </div>
     </div>
+  );
+}
+
+// Overnight measuring: VMAF quality searches on candidates while the GPU
+// is otherwise idle, turning estimates into measurements.
+function MeasurePanel({ config, onSaved, live }: { config: Config; onSaved: (c: Config) => void; live: LiveState }) {
+  const [st, setSt] = useState<MeasureStatus | null>(null);
+  useEffect(() => {
+    api.measure().then(setSt).catch(() => {});
+    const unsub = subscribe((ev, data) => {
+      if (ev === "measure") setSt((s) => ({ ...(s || data), ...data, measured: s?.measured ?? 0, remaining: s?.remaining ?? 0 }));
+    });
+    const t = setInterval(() => api.measure().then(setSt).catch(() => {}), 60000);
+    return () => { unsub(); clearInterval(t); };
+  }, [live.queueVersion]);
+  const enabled = config.measure_enabled !== false;
+  const toggle = async (on: boolean) => {
+    try {
+      onSaved(await api.saveConfig({ measure_enabled: on }));
+      api.measure().then(setSt).catch(() => {});
+    } catch (e: any) {
+      toast(e.message, "err");
+    }
+  };
+  const total = st ? st.measured + st.remaining : 0;
+  return (
+    <ScheduleTimeline config={config} onSaved={onSaved} field="measure_schedules" title="Overnight measuring" anyTime={false} accent="violet">
+      <div className="measure-row">
+        <Toggle on={enabled} onChange={toggle} label="Measure quality in the background"
+          hint="Runs real VMAF quality searches on candidates, biggest files first, so estimates become measurements. Only inside these windows, and it steps aside the moment an encode or scan needs the machine." />
+        {st && (
+          <div className="measure-stat mono small">
+            {st.running ? (
+              <><span className="pulse-dot" aria-hidden /> {st.current}{st.note ? <span className="dim"> · {st.note}</span> : null}</>
+            ) : (
+              <span className="dim">{!enabled ? "Off" : st.window_open ? "Window open, waiting for idle GPU" : "Waiting for the next window"}</span>
+            )}
+            <div className="measure-bar" title={`${st.measured} measured of ${total}`}>
+              <div style={{ width: `${total ? (st.measured / total) * 100 : 0}%` }} />
+            </div>
+            <span className="dim">{st.measured.toLocaleString()} measured · {st.remaining.toLocaleString()} to go{st.done_this_window ? ` · ${st.done_this_window} this window` : ""}</span>
+            {st.last_error && <div className="faint" title={st.last_error}>last skip: {st.last_error.slice(0, 80)}</div>}
+          </div>
+        )}
+      </div>
+    </ScheduleTimeline>
   );
 }
