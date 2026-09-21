@@ -5,6 +5,7 @@ package jobs
 
 import (
 	"context"
+	"errors"
 	"encoding/json"
 	"fmt"
 	"io/fs"
@@ -20,11 +21,13 @@ import (
 	"mediatrans/internal/encode"
 	"mediatrans/internal/hwprobe"
 	"mediatrans/internal/media"
+	"mediatrans/internal/neural"
 	"mediatrans/internal/recs"
 	"mediatrans/internal/replace"
 	"mediatrans/internal/res"
 	"mediatrans/internal/scan"
 	"mediatrans/internal/store"
+	"mediatrans/internal/upscale"
 	"mediatrans/internal/tune"
 )
 
@@ -50,6 +53,7 @@ type Engine struct {
 	OnReplaced func(path string, oldStat *replace.SrcStat)
 
 	windowOpen atomic.Bool
+	neuralOpen atomic.Bool // the neural upscale window (see config UpscaleSchedules)
 	active     atomic.Int32
 	workerCap  atomic.Int32
 
@@ -71,7 +75,7 @@ type Engine struct {
 
 // semCap is the per-backend concurrent-encode cap.
 // "vulkan" is the upscale key: one GPU-bound libplacebo job at a time.
-var semCap = map[string]int{"qsv": 2, "vaapi": 2, "nvenc": 2, "sw": 8, "vulkan": 1}
+var semCap = map[string]int{"qsv": 2, "vaapi": 2, "nvenc": 2, "sw": 8, "vulkan": 1, "neural": 1}
 
 func New(st *store.Store, cfg *config.Manager, sc *scan.Scanner) *Engine {
 	e := &Engine{
@@ -179,6 +183,7 @@ func (e *Engine) schedulerLoop() {
 	cfgCh := e.cfg.Subscribe()
 	for {
 		e.windowOpen.Store(e.cfg.WindowOpen(time.Now()))
+		e.neuralOpen.Store(e.cfg.UpscaleOpen(time.Now()))
 		cap := e.cfg.Get().Workers
 		e.workerCap.Store(int32(cap))
 		select {
@@ -209,7 +214,7 @@ func (e *Engine) tryDispatch() {
 		if int(e.active.Load()) >= int(e.workerCap.Load()) {
 			return
 		}
-		j, err := e.st.ClaimNext(e.windowOpen.Load())
+		j, err := e.st.ClaimNext(e.windowOpen.Load(), e.neuralOpen.Load())
 		if err != nil {
 			log.Printf("jobs: claim: %v", err)
 			return
@@ -322,7 +327,28 @@ func (e *Engine) runJob(j *store.Job, resume bool) {
 		}
 		tempPath = filepath.Join(filepath.Dir(j.SrcPath), fmt.Sprintf(".mediatrans-%d.%s.tmp", j.ID, c))
 	}
-	primary, fallback, err := encode.Build(settings, src, tempPath, nil)
+	// A neural job is not one ffmpeg command (see encode.PlanNeural): its
+	// "primary" is the final mux, which carries the container and stream counts
+	// Verify needs, and its finished chunks outlive a pause or restart.
+	neuralJob := upscaling && settings.UpscaleTier == upscale.TierNeural
+	work := neuralWorkDir(j.ID)
+	keepWork := false
+	if neuralJob {
+		defer func() {
+			if !keepWork {
+				neural.Cleanup(work)
+			}
+		}()
+	}
+	var primary, fallback *encode.CmdSpec
+	var nplan *encode.NeuralPlan
+	if neuralJob {
+		if nplan, err = encode.PlanNeural(settings, src.Video(), src.DurationSec()); err == nil {
+			primary, err = encode.BuildNeuralMux(settings, src, filepath.Join(work, "list.txt"), tempPath)
+		}
+	} else {
+		primary, fallback, err = encode.Build(settings, src, tempPath, nil)
+	}
 	if err != nil {
 		e.fail(j, err.Error(), "")
 		return
@@ -332,9 +358,34 @@ func (e *Engine) runJob(j *store.Job, resume bool) {
 		if err := e.st.SetJobTemp(j.ID, tempPath, string(stJSON)); err != nil {
 			log.Printf("jobs: set temp: %v", err)
 		}
-		_ = e.st.SetJobCmd(j.ID, encode.CommandString(primary.Args))
+		if neuralJob {
+			_ = e.st.SetJobCmd(j.ID, neuralCmd(nplan, settings))
+		} else {
+			_ = e.st.SetJobCmd(j.ID, encode.CommandString(primary.Args))
+		}
 		j.TempPath = tempPath
-		if serr := e.encode(ctx, j, primary, fallback, src); serr != nil {
+		var serr error
+		if neuralJob {
+			serr = e.runNeural(ctx, j, settings, src, nplan, tempPath)
+		} else {
+			serr = e.encode(ctx, j, primary, fallback, src)
+		}
+		if serr != nil {
+			stopping := false
+			select {
+			case <-e.stopCh:
+				stopping = true
+			default:
+			}
+			// The window closed, or the app is shutting down: keep the finished
+			// chunks and queue the job again without counting it as an attempt.
+			if neuralJob && (errors.Is(serr, neural.ErrPaused) || (stopping && ctx.Err() != nil)) {
+				keepWork = true
+				removeTemp(tempPath)
+				_ = e.st.PauseJob(j.ID)
+				e.notify(EvJob, map[string]any{"id": j.ID, "status": store.StatusQueued, "note": "paused: resumes when the upscale window opens"})
+				return
+			}
 			if ctx.Err() != nil {
 				e.st.FinishJob(j.ID, store.StatusCanceled, 0, "canceled", "")
 				removeTemp(tempPath)
@@ -342,6 +393,8 @@ func (e *Engine) runJob(j *store.Job, resume bool) {
 				return
 			}
 			removeTemp(tempPath)
+			// A retry resumes from the chunks already finished.
+			keepWork = neuralJob && j.Attempts < j.MaxAttempts
 			e.handleEncodeFailure(j, settings, serr)
 			return
 		}
@@ -697,7 +750,12 @@ func (e *Engine) recoverAtBoot() {
 		switch j.Status {
 		case store.StatusRunning:
 			removeTemp(j.TempPath)
-			if j.Attempts < j.MaxAttempts {
+			if isNeuralJob(j) {
+				// Hours of finished chunks are on disk: resume, and don't let
+				// restarts use up the retries.
+				_ = e.st.PauseJob(j.ID)
+				log.Printf("jobs: recovery: paused neural job %d (its chunks are kept)", j.ID)
+			} else if j.Attempts < j.MaxAttempts {
 				_ = e.st.Requeue(j.ID)
 				log.Printf("jobs: recovery: requeued %d", j.ID)
 			} else {
@@ -737,6 +795,7 @@ func srcUnchanged(j *store.Job) bool {
 func (e *Engine) housekeepingLoop() {
 	defer e.wg.Done()
 	e.sweepStaleTemps()
+	e.sweepNeuralWork()
 	e.PurgeTrash(false)
 	ticker := time.NewTicker(time.Hour)
 	defer ticker.Stop()
@@ -746,6 +805,7 @@ func (e *Engine) housekeepingLoop() {
 			e.PurgeTrash(false)
 			if n%24 == 0 {
 				e.sweepStaleTemps()
+				e.sweepNeuralWork()
 				if n, err := e.st.SweepMissing(); err == nil && n > 0 {
 					log.Printf("jobs: swept %d missing files", n)
 				}

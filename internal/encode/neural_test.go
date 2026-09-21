@@ -162,3 +162,32 @@ func TestUpscaleTierFollowsPreset(t *testing.T) {
 		}
 	}
 }
+
+// PNG frames are RGB, so the YUV->RGB matrix is chosen at decode. swscale's
+// default (BT.601) would tint every HD source.
+func TestNeuralDecodeUsesTheSourceMatrix(t *testing.T) {
+	s := Settings{UpscaleTo: 2160, UpscalePreset: "neural-anime"}
+	for _, c := range []struct {
+		name          string
+		w, h          int
+		space, wantIn string
+	}{
+		{"untagged SD", 854, 480, "", "bt601"},
+		{"untagged HD", 1920, 1080, "", "bt709"},
+		{"tagged", 1920, 1080, "bt470bg", "auto"},
+	} {
+		src := probe("/m/a.mkv", "h264", "yuv420p", "", nil, nil)
+		src.Streams[0].Width, src.Streams[0].Height, src.Streams[0].ColorSpace = c.w, c.h, c.space
+		a, err := NeuralDecodeArgs(s, src, 0, 20, "/w/%06d.png")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if j := strings.Join(a, " "); !strings.Contains(j, "scale=in_color_matrix="+c.wantIn+",format=rgb24") {
+			t.Errorf("%s: want in_color_matrix=%s then rgb24: %s", c.name, c.wantIn, j)
+		}
+		_, _, pre, err := NeuralStill(Settings{UpscaleTo: 2160, UpscalePreset: "neural-anime"}, &src.Streams[0])
+		if err != nil || !strings.Contains(strings.Join(pre, ","), "scale=in_color_matrix="+c.wantIn) {
+			t.Errorf("%s: the still must decode the same way: %v %v", c.name, pre, err)
+		}
+	}
+}

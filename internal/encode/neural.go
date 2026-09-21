@@ -17,9 +17,9 @@ import (
 
 // NeuralPlan is the geometry of a neural upscale of one source.
 type NeuralPlan struct {
-	Scale        int     // the model's native scale factor
-	InW, InH     int     // frame size fed to the upscaler (after crop)
-	ModelW       int     // size the model produces (InW*Scale, InH*Scale)
+	Scale        int // the model's native scale factor
+	InW, InH     int // frame size fed to the upscaler (after crop)
+	ModelW       int // size the model produces (InW*Scale, InH*Scale)
 	ModelH       int
 	OutW, OutH   int     // exact final size (res.Up), resized down from the model's
 	FPS          string  // source rate as a rational, e.g. 24000/1001
@@ -102,7 +102,10 @@ func neuralPre(s Settings, v *media.Stream) []string {
 		pre = append(pre, "zscale=t=linear:npl=100", "format=gbrpf32le", "zscale=p=bt709",
 			"tonemap=tonemap=hable:desat=0", "zscale=t=bt709:m=bt709:r=tv")
 	}
-	return pre
+	// Frames go to RGB PNGs. swscale assumes BT.601 unless told otherwise, which
+	// is right for SD and visibly wrong for HD: decode with the matrix the source
+	// really uses (the same guess libplacebo and players make).
+	return append(pre, "scale=in_color_matrix="+srcMatrix(v), "format=rgb24")
 }
 
 // NeuralDecodeArgs decodes one chunk's frames to numbered PNGs (outPattern is
@@ -196,4 +199,27 @@ func BuildNeuralMux(s Settings, src *media.Probe, listPath, outPath string) (*Cm
 	args = append(args, "-y", outPath)
 	return &CmdSpec{Args: args, SemKey: "copy", Container: container,
 		ExpectAudio: plan.nAudio, ExpectSubs: plan.nSubs}, nil
+}
+
+// NeuralStill is what a single-frame neural preview needs: the model and native
+// scale to run, and the CPU prefilters (crop, deinterlace, tone-map) to apply to
+// the decoded frame first, so it matches what a real job would upscale.
+func NeuralStill(s Settings, v *media.Stream) (model string, scale int, pre []string, err error) {
+	s.Normalize()
+	p, ok := upscale.Get(s.UpscalePreset)
+	if !ok || !p.Neural() {
+		return "", 0, nil, fmt.Errorf("%q is not a neural upscale preset", s.UpscalePreset)
+	}
+	outW, _, ok := UpscaleSize(s, v)
+	if !ok {
+		return "", 0, nil, fmt.Errorf("nothing to upscale: the source is already %dx%d", v.Width, v.Height)
+	}
+	if v.HDRType() != "" && !(s.TonemapHDR && v.HDRType() != "dolby_vision") {
+		return "", 0, nil, fmt.Errorf("HDR sources can't be upscaled unless tone-mapped to SDR")
+	}
+	inW := v.Width
+	if cw, _, _, _, crop := parseCrop(s.Crop, v.Width, v.Height); crop {
+		inW = cw
+	}
+	return p.Model(), p.PickScale(inW, outW), neuralPre(s, v), nil
 }

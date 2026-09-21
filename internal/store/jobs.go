@@ -91,23 +91,41 @@ func nullID(id int64) any {
 	return id
 }
 
-// ClaimNext atomically claims the next runnable job. windowOpen gates
-// regular jobs; run-now jobs are always claimable.
-func (s *Store) ClaimNext(windowOpen bool) (*Job, error) {
-	wo := 0
+// isNeural matches a job whose settings select the neural upscale tier (see
+// isUpscale for why a LIKE on the compact JSON is enough).
+const isNeural = `settings_json LIKE '%"upscale_tier":"neural"%'`
+
+// ClaimNext atomically claims the next runnable job. Regular jobs need
+// windowOpen and neural upscales need neuralOpen (they run in their own,
+// usually overnight, window); run-now jobs are always claimable.
+func (s *Store) ClaimNext(windowOpen, neuralOpen bool) (*Job, error) {
+	wo, no := 0, 0
 	if windowOpen {
 		wo = 1
 	}
+	if neuralOpen {
+		no = 1
+	}
 	row := s.dbW.QueryRow(`UPDATE jobs SET status='running', started_at=strftime('%Y-%m-%dT%H:%M:%fZ','now'),
 		attempts=attempts+1, run_now=0
-		WHERE id=(SELECT id FROM jobs WHERE status='queued' AND (run_now=1 OR ?=1)
+		WHERE id=(SELECT id FROM jobs WHERE status='queued'
+			AND (run_now=1 OR (CASE WHEN `+isNeural+` THEN ? ELSE ? END)=1)
 			ORDER BY priority, id LIMIT 1)
-		RETURNING `+jobCols, wo)
+		RETURNING `+jobCols, no, wo)
 	j, err := scanJob(row)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
 	return j, err
+}
+
+// PauseJob returns a running job to the queue without counting the run as an
+// attempt: a neural upscale that stops at the end of its window and resumes in
+// the next is not failing, and must not use up its retries doing so.
+func (s *Store) PauseJob(id int64) error {
+	_, err := s.dbW.Exec(`UPDATE jobs SET status='queued', started_at='',
+		attempts=MAX(attempts-1,0) WHERE id=?`, id)
+	return err
 }
 
 // UpdateJobStatus sets status (and optionally error text) on a job.

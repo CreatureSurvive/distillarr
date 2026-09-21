@@ -11,6 +11,7 @@ import (
 	"mediatrans/internal/hwprobe"
 	"mediatrans/internal/recs"
 	"mediatrans/internal/store"
+	"mediatrans/internal/upscale"
 )
 
 // recSummary is the slim per-row recommendation shown in lists.
@@ -510,6 +511,12 @@ func (s *Server) createPreview(w http.ResponseWriter, r *http.Request) {
 	st, _ := s.resolve(f, req.Settings)
 	if err := s.checkUpscale(r, f, &st); err != nil {
 		fail(w, http.StatusConflict, err)
+		return
+	}
+	if p, ok := upscale.Get(st.UpscalePreset); ok && st.UpscaleTo > 0 && p.Neural() {
+		// A clip would need the whole chunked pipeline; the single-frame still
+		// shows the same detail in seconds.
+		fail(w, http.StatusConflict, fmt.Errorf("clip previews aren't available for neural presets: use the frame preview to judge the detail"))
 		return
 	}
 	st = s.concrete(st)

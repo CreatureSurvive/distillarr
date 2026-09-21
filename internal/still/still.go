@@ -15,11 +15,13 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
 	"mediatrans/internal/encode"
 	"mediatrans/internal/media"
+	"mediatrans/internal/neural"
 )
 
 const (
@@ -112,6 +114,16 @@ func (m *Manager) Make(ctx context.Context, r Request) (*Result, error) {
 	if err != nil {
 		return nil, err
 	}
+	// A nil B chain means the neural tier: B comes from the upscaler, not a filter.
+	var nModel string
+	var nScale int
+	var nPre []string
+	if fb == nil {
+		if nModel, nScale, nPre, err = encode.NeuralStill(r.Settings, v); err != nil {
+			return nil, err
+		}
+		fb = []string{"neural", nModel, strconv.Itoa(nScale)} // what distinguishes one neural render from another
+	}
 	key := keyFor(r, at, fa, fb)
 	dir := filepath.Join(m.root, key)
 	res := &Result{Key: key, W: w, H: h, At: at}
@@ -137,6 +149,14 @@ func (m *Manager) Make(ctx context.Context, r Request) (*Result, error) {
 	if err := m.run(ctx, dir, "a.png", func(o string) []string { return cat(base, grab(o, fa)) }); err != nil {
 		return nil, fmt.Errorf("baseline frame: %w", err)
 	}
+	if nModel != "" {
+		if err := m.neuralB(ctx, r, dir, seek, nModel, nScale, nPre, w, h); err != nil {
+			return nil, fmt.Errorf("upscaled frame: %w", err)
+		}
+		res.MS = time.Since(start).Milliseconds()
+		m.prune()
+		return res, nil
+	}
 	// B: the real chain, holding the shared Vulkan slot.
 	vk := []string{"-init_hw_device", "vulkan=vk:" + fmt.Sprint(r.Settings.VulkanDevice), "-filter_hw_device", "vk"}
 	if m.acquire != nil {
@@ -149,6 +169,34 @@ func (m *Manager) Make(ctx context.Context, r Request) (*Result, error) {
 	res.MS = time.Since(start).Milliseconds()
 	m.prune()
 	return res, nil
+}
+
+// neuralB renders the upscaled side with Real-ESRGAN: decode the frame with the
+// same prefilters a job uses, upscale it, and resize to the exact target.
+func (m *Manager) neuralB(ctx context.Context, r Request, dir, seek, model string, scale int, pre []string, w, h int) error {
+	frame := filepath.Join(dir, fmt.Sprintf(".frame-%d.png", time.Now().UnixNano()))
+	up := filepath.Join(dir, fmt.Sprintf(".up-%d.png", time.Now().UnixNano()))
+	defer os.Remove(frame)
+	defer os.Remove(up)
+
+	dctx, cancel := context.WithTimeout(ctx, runTimeout)
+	args := []string{"-hide_banner", "-loglevel", "error", "-nostdin", "-ss", seek, "-i", r.Path, "-map", "0:v:0",
+		"-frames:v", "1", "-vf", strings.Join(pre, ","), "-y", frame}
+	b, err := exec.CommandContext(dctx, encode.FFmpeg, args...).CombinedOutput()
+	cancel()
+	if err != nil {
+		return fmt.Errorf("decode: %s", tail(string(b), err))
+	}
+	// A single frame at a heavy model can take a while; give it longer than a shader.
+	nctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
+	defer cancel()
+	if err := neural.Frame(nctx, m.acquire, frame, up, model, scale, r.Settings.VulkanDevice); err != nil {
+		return err
+	}
+	return m.run(ctx, dir, "b.png", func(o string) []string {
+		return []string{"-hide_banner", "-loglevel", "error", "-nostdin", "-i", up,
+			"-vf", fmt.Sprintf("scale=%d:%d:flags=lanczos,format=rgb24", w, h), "-frames:v", "1", "-y", o}
+	})
 }
 
 // run executes ffmpeg writing to a temp file, then renames it to name so a

@@ -70,6 +70,11 @@ type Config struct {
 	// upscaling is subjective and its result can't be undone by re-encoding),
 	// "replace" swaps it in place with the original kept in trash.
 	UpscaleOutput string `json:"upscale_output"`
+	// UpscaleSchedules is when neural upscales may run. They take hours per file
+	// and hold a worker throughout, so they get their own window (overnight by
+	// default) instead of the encode schedule. Empty means never on their own;
+	// "Upscale now" always runs.
+	UpscaleSchedules []Schedule `json:"upscale_schedules"`
 
 	JellyfinURL    string `json:"jellyfin_url"`
 	JellyfinAPIKey string `json:"jellyfin_api_key"`
@@ -189,6 +194,9 @@ func (m *Manager) normalize() {
 	if m.cfg.Schedules == nil {
 		m.cfg.Schedules = []Schedule{}
 	}
+	if m.cfg.UpscaleSchedules == nil {
+		m.cfg.UpscaleSchedules = []Schedule{{ID: 1, Label: "Overnight", Days: 0x7F, Start: 22 * 60, End: 7 * 60}}
+	}
 	if m.cfg.MeasureSchedules == nil {
 		m.cfg.MeasureSchedules = []Schedule{{ID: 1, Label: "Overnight", Days: 0x7F, Start: 60, End: 420}}
 	}
@@ -199,6 +207,12 @@ func (c Config) Measure() bool { return c.MeasureEnabled == nil || *c.MeasureEna
 
 // MeasureOpen reports whether a measurement may start at t. Unlike the
 // encode queue, no schedules means never (measuring is opt-in by window).
+// UpscaleOpen reports whether a neural upscale may start or continue at t.
+func (m *Manager) UpscaleOpen(t time.Time) bool {
+	c := m.Get()
+	return !c.Paused && inWindows(c.UpscaleSchedules, t)
+}
+
 func (m *Manager) MeasureOpen(t time.Time) bool {
 	c := m.Get()
 	return c.Measure() && inWindows(c.MeasureSchedules, t)

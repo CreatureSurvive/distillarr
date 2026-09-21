@@ -417,9 +417,6 @@ func StillFilters(s Settings, v *media.Stream) (a, b []string, w, h int, err err
 	if !ok {
 		return nil, nil, 0, 0, fmt.Errorf("nothing to upscale: the source already meets the %dp target", s.UpscaleTo)
 	}
-	if s.UpscaleTier != upscale.TierShader {
-		return nil, nil, 0, 0, fmt.Errorf("%s upscaling has no still preview yet", s.UpscaleTier)
-	}
 	var pre []string
 	if cw, ch, cx, cy, crop := parseCrop(s.Crop, v.Width, v.Height); crop {
 		pre = append(pre, fmt.Sprintf("crop=%d:%d:%d:%d", cw, ch, cx, cy))
@@ -427,15 +424,16 @@ func StillFilters(s Settings, v *media.Stream) (a, b []string, w, h int, err err
 	if s.Deinterlace == "on" || (s.Deinterlace == "auto" && v.Interlaced()) {
 		pre = append(pre, "bwdif=mode=send_frame")
 	}
+	a = append(append([]string{}, pre...),
+		fmt.Sprintf("scale=%d:%d:flags=lanczos:in_color_matrix=%s", w, h, srcMatrix(v)), "format=rgb24")
+	if s.UpscaleTier == upscale.TierNeural {
+		return a, nil, w, h, nil // b comes from the neural upscaler (see NeuralStill)
+	}
 	// Both sides stay RGB into the PNG, skipping a lossy YUV round trip.
 	chain, err := upscale.Spec{W: w, H: h, Preset: s.UpscalePreset, Params: s.UpscaleParams}.RGBChain("nv12", "rgba")
 	if err != nil {
 		return nil, nil, 0, 0, err
 	}
-	// The baseline decodes the source with the matrix libplacebo would infer
-	// for it, so A and B differ only by the scaler, never by colour.
-	a = append(append([]string{}, pre...),
-		fmt.Sprintf("scale=%d:%d:flags=lanczos:in_color_matrix=%s", w, h, srcMatrix(v)), "format=rgb24")
 	b = append(append(append([]string{}, pre...), chain...), "format=rgb24")
 	return a, b, w, h, nil
 }

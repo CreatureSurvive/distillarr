@@ -35,14 +35,16 @@ type Job struct {
 	Out      string // where the finished (still unverified) file goes
 	GPU      int    // Vulkan device index (ncnn numbers devices the same way ffmpeg does)
 
-	Acquire  func(key string) func()            // GPU slot, shared with other GPU work; nil = none
-	Keep     func() bool                        // false: stop after the current chunk (ErrPaused); nil = never stop
-	Progress func(done float64, note string)    // 0..1 across the whole job
+	Acquire  func(key string) func()         // GPU slot, shared with other GPU work; nil = none
+	Keep     func() bool                     // false: stop after the current chunk (ErrPaused); nil = never stop
+	Progress func(done float64, note string) // 0..1 across the whole job
 }
 
 // chunkPath is where a finished chunk lives. It only ever appears under this
 // name once complete (written as a .part file, then renamed).
-func chunkPath(work string, k int) string { return filepath.Join(work, fmt.Sprintf("chunk-%05d.mkv", k)) }
+func chunkPath(work string, k int) string {
+	return filepath.Join(work, fmt.Sprintf("chunk-%05d.mkv", k))
+}
 
 // endMarker records that the source ran out of frames after n chunks, so a
 // resume doesn't try to decode past the end.
@@ -171,9 +173,41 @@ func (j Job) upscaleFrames(ctx context.Context, in, out string, prog func(float6
 	if j.Acquire != nil {
 		defer j.Acquire("neural")()
 	}
+	if err := runNCNN(ctx, in, out, j.Plan.Model, j.Plan.Scale, j.GPU, prog); err != nil {
+		return err
+	}
+	// A run that exits 0 but wrote too few frames is a failure, not a success.
+	a, _ := os.ReadDir(in)
+	b, _ := os.ReadDir(out)
+	if len(b) != len(a) {
+		return fmt.Errorf("upscaler wrote %d of %d frames", len(b), len(a))
+	}
+	return nil
+}
+
+// Frame upscales one image (a single-frame preview), holding the shared GPU slot.
+func Frame(ctx context.Context, acquire func(string) func(), in, out, model string, scale, gpu int) error {
+	if !upscale.NeuralAvailable() {
+		return fmt.Errorf("the neural upscaler isn't installed in this image")
+	}
+	if acquire != nil {
+		defer acquire("neural")()
+	}
+	if err := runNCNN(ctx, in, out, model, scale, gpu, nil); err != nil {
+		return err
+	}
+	if fi, err := os.Stat(out); err != nil || fi.Size() == 0 {
+		return fmt.Errorf("the upscaler wrote no image")
+	}
+	return nil
+}
+
+// runNCNN runs realesrgan-ncnn-vulkan on a file or a directory (-i/-o take
+// either), reporting its percentage lines to prog if given.
+func runNCNN(ctx context.Context, in, out, model string, scale, gpu int, prog func(float64)) error {
 	cmd := exec.CommandContext(ctx, upscale.NeuralBin(),
-		"-i", in, "-o", out, "-n", j.Plan.Model, "-s", strconv.Itoa(j.Plan.Scale),
-		"-g", strconv.Itoa(j.GPU), "-m", filepath.Join(upscale.NeuralDir, "models"),
+		"-i", in, "-o", out, "-n", model, "-s", strconv.Itoa(scale),
+		"-g", strconv.Itoa(gpu), "-m", filepath.Join(upscale.NeuralDir, "models"),
 		"-f", "png", "-j", "2:2:4")
 	cmd.Env = append(os.Environ(), vulkanEnv()...)
 	stderr, err := cmd.StderrPipe()
@@ -189,7 +223,7 @@ func (j Job) upscaleFrames(ctx context.Context, in, out string, prog func(float6
 	for sc.Scan() {
 		line := sc.Text()
 		if m := pctRe.FindStringSubmatch(line); m != nil {
-			if f, err := strconv.ParseFloat(m[1], 64); err == nil {
+			if f, err := strconv.ParseFloat(m[1], 64); err == nil && prog != nil {
 				prog(f / 100)
 			}
 			continue
@@ -202,12 +236,6 @@ func (j Job) upscaleFrames(ctx context.Context, in, out string, prog func(float6
 	}
 	if err := cmd.Wait(); err != nil {
 		return fmt.Errorf("upscaler: %v: %s", err, strings.Join(last, " | "))
-	}
-	// A run that exits 0 but wrote too few frames is a failure, not a success.
-	a, _ := os.ReadDir(in)
-	b, _ := os.ReadDir(out)
-	if len(b) != len(a) {
-		return fmt.Errorf("upscaler wrote %d of %d frames: %s", len(b), len(a), strings.Join(last, " | "))
 	}
 	return nil
 }

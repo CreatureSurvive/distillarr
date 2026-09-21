@@ -6,6 +6,7 @@ import (
 
 	"mediatrans/internal/encode"
 	"mediatrans/internal/hwprobe"
+	"mediatrans/internal/media"
 	"mediatrans/internal/recs"
 	"mediatrans/internal/res"
 	"mediatrans/internal/still"
@@ -63,13 +64,23 @@ func (s *Server) upscaleInfo(w http.ResponseWriter, r *http.Request) {
 	if rep != nil {
 		devs = rep.Vulkan
 	}
+	// Neural presets are only offered where the upscaler is installed.
+	var presets []upscale.Preset
+	for _, p := range upscale.All() {
+		if !p.Neural() || upscale.NeuralAvailable() {
+			presets = append(presets, p)
+		}
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"source":    map[string]any{"w": f.Width, "h": f.Height, "class": class},
-		"targets":   targets,
-		"suggested": sug,
-		"presets":   upscale.All(),
-		"vulkan":    devs,
-		"available": hwprobe.BestVulkan(rep, "") != nil,
+		"source":           map[string]any{"w": f.Width, "h": f.Height, "class": class},
+		"targets":          targets,
+		"suggested":        sug,
+		"presets":          presets,
+		"vulkan":           devs,
+		"available":        hwprobe.BestVulkan(rep, "") != nil,
+		"neural":           upscale.NeuralAvailable(),
+		"ref_pixels":       upscale.RefPixels,
+		"max_neural_hours": upscale.MaxNeuralHours,
 	})
 }
 
@@ -101,10 +112,32 @@ func (s *Server) checkUpscale(r *http.Request, f *store.File, st *encode.Setting
 	if _, _, ok := encode.UpscaleSize(cst, v); !ok {
 		return fmt.Errorf("nothing to upscale: the source is already %dx%d", v.Width, v.Height)
 	}
+	if p, ok := upscale.Get(cst.UpscalePreset); ok && p.Neural() {
+		return checkNeural(cst, src)
+	}
 	if _, _, err := encode.Build(cst, src, "/path/to/output", nil); err != nil {
 		return err
 	}
 	return nil
+}
+
+// checkNeural validates a neural upscale: installed, plannable, and not so slow
+// that it would hold the GPU for days. The estimate is in the message, so the
+// refusal says how long it would actually take.
+func checkNeural(st encode.Settings, src *media.Probe) error {
+	if !upscale.NeuralAvailable() {
+		return fmt.Errorf("the neural upscaler isn't installed in this build")
+	}
+	plan, err := encode.PlanNeural(st, src.Video(), src.DurationSec())
+	if err != nil {
+		return err
+	}
+	if h := plan.EstimateSecs / 3600; h > upscale.MaxNeuralHours {
+		return fmt.Errorf("a neural upscale of this file would take about %.0f hours (%.1f days) on this GPU, over the %d-hour limit; use a shader preset, or a shorter file",
+			h, h/24, upscale.MaxNeuralHours)
+	}
+	_, err = encode.BuildNeuralMux(st, src, "/path/to/list.txt", "/path/to/output")
+	return err
 }
 
 // stillReq asks for one A/B frame.
