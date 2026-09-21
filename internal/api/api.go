@@ -75,6 +75,14 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/v1/files/{id}/queue", s.queueFile)
 	mux.HandleFunc("POST /api/v1/files/{id}/fix", s.fixFile)
 	mux.HandleFunc("GET /api/v1/issues", s.issueSummary)
+	mux.HandleFunc("GET /api/v1/stats", func(w http.ResponseWriter, r *http.Request) {
+		h, err := s.st.HistoryStats()
+		if err != nil {
+			fail(w, 500, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, h)
+	})
 	mux.HandleFunc("GET /api/v1/measure", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, s.eng.MeasureStatus())
 	})
