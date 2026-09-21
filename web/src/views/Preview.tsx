@@ -37,6 +37,8 @@ export default function PreviewView({ live }: { live: LiveState }) {
   }
 
   const seg = p.segments[segIdx];
+  const up = p.settings.upscale_to ?? 0; // an upscale grows the file on purpose: "% smaller" and VMAF don't apply
+  const upLabel = up === 2160 ? "4K" : `${up}p`;
   const srcURL = api.previewClipURL(p.id, seg.src_path);
   const encURL = api.previewClipURL(p.id, seg.enc_path);
 
@@ -73,7 +75,9 @@ export default function PreviewView({ live }: { live: LiveState }) {
           <h1 className="page-title">A / B Compare</h1>
           <div className="page-sub">
             {codecLabel(p.settings.codec)} {p.settings.bit_depth === 8 ? "8" : "10"}-bit · quality {p.settings.quality} · {p.settings.speed || "medium"} · {backendLabel(p.settings.backend || "auto")}
-            {p.measured_ratio ? <> · <span className="teal">video {Math.round((1 - p.measured_ratio) * 100)}% smaller across all samples</span></> : null}
+            {up > 0
+              ? <> · <span className="teal">{upLabel} upscale{p.measured_ratio ? `, video ${p.measured_ratio.toFixed(1)}× the source's size` : ""}</span></>
+              : p.measured_ratio ? <> · <span className="teal">video {Math.round((1 - p.measured_ratio) * 100)}% smaller across all samples</span></> : null}
           </div>
         </div>
         <div className="toolbar">
@@ -148,15 +152,15 @@ export default function PreviewView({ live }: { live: LiveState }) {
                 onPause={() => sync && srcRef.current?.pause()}
               />
               <figcaption>
-                <span className="ab-tag teal">B · {codecLabel(p.settings.codec)} q{p.settings.quality}</span>
-                {seg.vmaf && <span className={`mono ${seg.vmaf.mean >= 93 ? "teal" : seg.vmaf.mean >= 90 ? "" : "warm"}`}>VMAF {seg.vmaf.mean.toFixed(1)}</span>}
+                <span className="ab-tag teal">B · {up > 0 ? `${upLabel} upscale` : `${codecLabel(p.settings.codec)} q${p.settings.quality}`}</span>
+                {!up && seg.vmaf && <span className={`mono ${seg.vmaf.mean >= 93 ? "teal" : seg.vmaf.mean >= 90 ? "" : "warm"}`}>VMAF {seg.vmaf.mean.toFixed(1)}</span>}
                 <span className="mono dim">
                   {bytes(seg.enc_size)}
-                  {seg.src_size > 0 && (
-                    <span style={{ color: "var(--teal)" }}>
-                      {" "}−{Math.max(0, Math.round((1 - seg.enc_size / seg.src_size) * 100))}%
-                    </span>
-                  )}
+                  {seg.src_size > 0 && (up > 0
+                    ? <span className="dim"> {(seg.enc_size / seg.src_size).toFixed(1)}×</span>
+                    : <span style={{ color: "var(--teal)" }}>
+                        {" "}−{Math.max(0, Math.round((1 - seg.enc_size / seg.src_size) * 100))}%
+                      </span>)}
                 </span>
               </figcaption>
             </figure>

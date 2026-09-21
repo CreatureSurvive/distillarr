@@ -41,6 +41,7 @@ export default function SettingsView({ live, onJellyfin }: { live: LiveState; on
       <nav className="settings-nav">
         <a href="#/settings" onClick={(e) => { e.preventDefault(); document.getElementById("s-jf")?.scrollIntoView({ behavior: "smooth" }); }}>Jellyfin</a>
         <a href="#/settings" onClick={(e) => { e.preventDefault(); document.getElementById("s-enc")?.scrollIntoView({ behavior: "smooth" }); }}>Encoding</a>
+        <a href="#/settings" onClick={(e) => { e.preventDefault(); document.getElementById("s-up")?.scrollIntoView({ behavior: "smooth" }); }}>Upscaling</a>
         <a href="#/settings" onClick={(e) => { e.preventDefault(); document.getElementById("s-hw")?.scrollIntoView({ behavior: "smooth" }); }}>Hardware</a>
         <a href="#/settings" onClick={(e) => { e.preventDefault(); document.getElementById("s-trash")?.scrollIntoView({ behavior: "smooth" }); }}>Storage &amp; trash</a>
       </nav>
@@ -111,6 +112,28 @@ export default function SettingsView({ live, onJellyfin }: { live: LiveState; on
           <Toggle on={cfg.tonemap_hdr} onChange={(v) => save({ tonemap_hdr: v })} label="Tone-map HDR to SDR by default" hint="Off keeps HDR10/HLG intact" />
         </div>
         <Calibration />
+      </section>
+
+      <section className="panel" id="s-up">
+        <h2 className="panel-title">Upscaling</h2>
+        <p className="dim small">
+          Tune an upscale from a file's page (the Upscale button), then queue it. Upscaling only makes sense for
+          sources below 4K, and it is slow: about 3x realtime to 1080p and roughly realtime to 4K on the Arc.
+        </p>
+        <div className="opts">
+          <Field label="When an upscale finishes" hint="Each queued upscale can override this">
+            <Seg value={cfg.upscale_output} onChange={(v) => save({ upscale_output: v })}
+              options={[
+                { value: "copy", label: "Keep the original, add a copy", hint: "Writes “… - 1080p upscale” beside the source; the original is never touched" },
+                { value: "replace", label: "Replace the original", hint: "The original is kept in the trash for the retention period" },
+              ]} />
+          </Field>
+        </div>
+        <p className="dim small" style={{ marginTop: 10 }}>
+          {cfg.upscale_output === "copy"
+            ? "The copy is a separate file: Jellyfin will list it beside the original, and Sonarr/Radarr don't know about it."
+            : "The upscaled file takes the original's place. Restore the original from the trash if you don't like it."}
+        </p>
       </section>
 
       <HardwareSection live={live} />

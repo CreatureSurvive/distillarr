@@ -403,6 +403,7 @@ export type Config = {
   prefer_mp4: boolean;
   crop_bars: boolean;
   vmaf_target: number;
+  upscale_output: string;
   jellyfin_url: string;
   jellyfin_api_key?: string;
   jellyfin_key_set?: boolean;

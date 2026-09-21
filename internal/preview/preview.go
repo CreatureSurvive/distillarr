@@ -209,7 +209,9 @@ func (m *Manager) run(p *Preview) {
 	v := src.Video()
 	dir := filepath.Join(m.root, p.ID)
 	proxy := true // the A side is always rendered from the lossless cut
-	canScore := media.VMAFAvailable() && !(p.Settings.TonemapHDR && v.HDRType() != "")
+	// An upscale is never scored: the metric scales the result back down to the
+	// source's size, where any competent upscale looks near-perfect (VMAF ~99).
+	canScore := media.VMAFAvailable() && !(p.Settings.TonemapHDR && v.HDRType() != "") && p.Settings.UpscaleTo == 0
 	refW, refH, crop := v.Width, v.Height, ""
 	if w, h, ok := cropSize(p.Settings.Crop, v.Width, v.Height); ok {
 		refW, refH, crop = w, h, p.Settings.Crop

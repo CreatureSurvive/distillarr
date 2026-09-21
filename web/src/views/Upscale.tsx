@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { api, type FileItem, type Settings, type Still, type UpscaleInfo } from "../api";
+import { api, type Config, type FileItem, type Plan, type Settings, type Still, type UpscaleInfo } from "../api";
 import { Empty, Seg, Toggle, toast } from "../components";
 import { dur, resLabel } from "../format";
 
@@ -31,12 +31,19 @@ export default function UpscaleView() {
   const [view, setView] = useState<View>("split");
   const [zoom, setZoom] = useState<Zoom>("fit");
   const [clipBusy, setClipBusy] = useState(false);
+  const [base, setBase] = useState<Settings | null>(null);      // the file's own recommended settings
+  const [output, setOutput] = useState<"copy" | "replace">("copy");
+  const [qBusy, setQBusy] = useState<"" | "queue" | "now">("");
+  const [queued, setQueued] = useState(false);
   const seq = useRef(0);
   const wrap = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    Promise.all([api.file(id), api.upscaleInfo(id)])
-      .then(([f, u]) => {
+    Promise.all([api.file(id), api.upscaleInfo(id), api.plan(id), api.config()])
+      .then(([f, u, p, c]: [{ file: FileItem }, UpscaleInfo, Plan, Config]) => {
+        setBase(p.auto.settings);
+        setOutput(c.upscale_output === "replace" ? "replace" : "copy");
+        setQueued(!!f.file.queued);
         setFile(f.file);
         setInfo(u);
         const t = u.targets.find((x) => x.class === u.suggested.to) ?? u.targets[0];
@@ -49,9 +56,14 @@ export default function UpscaleView() {
 
   const preset = info?.presets.find((p) => p.id === presetId);
 
+  // The file's own recommendation (codec, quality, crop, tone-map…) plus the
+  // upscale choices, so the preview, stills and queued job all agree.
   const settings = useMemo<Settings>(
-    () => ({ codec: "hevc", quality: 60, upscale_to: to, upscale_preset: presetId, upscale_params: params }),
-    [to, presetId, params],
+    () => ({
+      ...(base ?? { codec: "hevc", quality: 60 }),
+      upscale_to: to, upscale_preset: presetId, upscale_params: params, upscale_output: output,
+    }),
+    [base, to, presetId, params, output],
   );
 
   // Debounced render. A response that arrives after a newer request started is
@@ -99,6 +111,19 @@ export default function UpscaleView() {
   const pick = (e: React.PointerEvent) => {
     const r = wrap.current?.getBoundingClientRect();
     if (r && r.width > 0) setSplit(Math.min(1, Math.max(0, (e.clientX - r.left) / r.width)));
+  };
+
+  const enqueue = async (kind: "queue" | "now") => {
+    setQBusy(kind);
+    try {
+      await api.queueFile(id, { settings, run_now: kind === "now" });
+      setQueued(true);
+      toast(kind === "now" ? "Upscaling started. Progress shows at the bottom." : "Added to the queue.");
+    } catch (e: any) {
+      toast(e.message, "err");
+    } finally {
+      setQBusy("");
+    }
   };
 
   const renderClip = async () => {
@@ -240,6 +265,28 @@ export default function UpscaleView() {
               </div>
             </section>
           )}
+
+          <section className="panel">
+            <div className="eyebrow">Queue it</div>
+            <Seg<"copy" | "replace"> value={output} onChange={setOutput} label="When done"
+              options={[
+                { value: "copy", label: "Add a copy", hint: "Writes “… - " + classLabel(to) + " upscale” beside the source; the original is never touched" },
+                { value: "replace", label: "Replace original", hint: "The original is kept in the trash for the retention period" },
+              ]} />
+            <p className="dim small" style={{ margin: "8px 0 10px" }}>
+              {output === "copy"
+                ? "The original stays as it is. Jellyfin will list the upscale beside it."
+                : "The upscale takes the original's place; the original goes to the trash."}
+            </p>
+            <div className="actions">
+              <button className="btn" disabled={!!qBusy || queued} onClick={() => enqueue("queue")}>
+                {queued ? "In queue" : qBusy === "queue" ? "Adding…" : "Add to queue"}
+              </button>
+              <button className="btn btn-primary" disabled={!!qBusy || queued} onClick={() => enqueue("now")}>
+                {qBusy === "now" ? "Starting…" : "Upscale now"}
+              </button>
+            </div>
+          </section>
 
           <section className="panel">
             <div className="eyebrow">Confirm motion</div>
