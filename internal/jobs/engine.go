@@ -51,6 +51,9 @@ type Engine struct {
 	// OnReplaced runs after a successful in-place replace (Jellyfin
 	// refresh + DateCreated patch); set by main wiring.
 	OnReplaced func(path string, oldStat *replace.SrcStat)
+	// OnCopied runs after an upscale was added beside its source (copy mode).
+	// The file is new to Jellyfin, so there is no item to refresh, only a path to announce.
+	OnCopied func(path string)
 
 	windowOpen atomic.Bool
 	neuralOpen atomic.Bool // the neural upscale window (see config UpscaleSchedules)
@@ -486,6 +489,9 @@ func (e *Engine) runJob(j *store.Job, resume bool) {
 			_ = e.st.ClearOldPath(j.SrcPath)
 		}
 		e.scan.RefreshRecsSoon()
+	}
+	if e.OnCopied != nil && copyMode {
+		go e.OnCopied(destPath)
 	}
 	if e.OnReplaced != nil && !copyMode {
 		go e.OnReplaced(destPath, st)

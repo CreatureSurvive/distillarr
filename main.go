@@ -126,6 +126,19 @@ func main() {
 		}
 	}
 
+	// A copy-mode upscale is a new file: tell Jellyfin where to look.
+	eng.OnCopied = func(path string) {
+		c := cfg.Get()
+		if c.JellyfinURL == "" || c.JellyfinAPIKey == "" {
+			return
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		if err := jellyfin.New(c.JellyfinURL, c.JellyfinAPIKey).MediaUpdated(ctx, c.ToJellyfinPath(path), "Created"); err != nil {
+			log.Printf("jellyfin: announce %s: %v", path, err)
+		}
+	}
+
 	eng.Start()
 	defer eng.Stop()
 	cropStop := make(chan struct{})

@@ -279,6 +279,20 @@ func (c Config) MapJellyfinPath(p string) string {
 	return p
 }
 
+// ToJellyfinPath is MapJellyfinPath's inverse: our path as Jellyfin sees it
+// (/srv/media/movies/x.mp4 becomes /data/movies/x.mp4).
+func (c Config) ToJellyfinPath(p string) string {
+	from, to, ok := strings.Cut(c.JellyfinPathMap, "=")
+	from, to = strings.TrimRight(from, "/"), strings.TrimRight(to, "/")
+	if !ok || to == "" {
+		return p
+	}
+	if p == to || strings.HasPrefix(p, to+"/") {
+		return from + strings.TrimPrefix(p, to)
+	}
+	return p
+}
+
 // WindowOpen reports whether the queue may start new jobs right now.
 // Paused always closes the window; zero schedules = always open.
 func (m *Manager) WindowOpen(t time.Time) bool {

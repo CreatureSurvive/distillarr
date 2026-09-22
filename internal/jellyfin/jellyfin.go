@@ -216,6 +216,15 @@ func (c *Client) Refresh(ctx context.Context, itemID string) error {
 	return c.post(ctx, "/Items/"+itemID+"/Refresh", q, nil)
 }
 
+// MediaUpdated tells Jellyfin that a file appeared, changed or vanished, so it
+// scans just that path instead of waiting for the next library scan (the call
+// Sonarr and Radarr make). updateType is Created, Modified or Deleted. path
+// must be Jellyfin's view of the file.
+func (c *Client) MediaUpdated(ctx context.Context, path, updateType string) error {
+	body := map[string]any{"Updates": []map[string]string{{"Path": path, "UpdateType": updateType}}}
+	return c.post(ctx, "/Library/Media/Updated", url.Values{}, body)
+}
+
 // PatchDateCreated restores an item's DateCreated to the original
 // file's birth time: GET the item, set DateCreated, POST it back.
 func (c *Client) PatchDateCreated(ctx context.Context, itemID string, btimeUTC time.Time) error {
