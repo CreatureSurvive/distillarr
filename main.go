@@ -150,6 +150,16 @@ func main() {
 		time.Sleep(8 * time.Second)
 		sc.RefreshRecs()
 	}()
+	// One-time reconciliation for jobs restored from trash before this
+	// was tracked directly; a no-op on every later boot.
+	go func() {
+		time.Sleep(5 * time.Second)
+		if n, err := st.BackfillRevertedJobs(); err != nil {
+			log.Printf("history: backfill reverted jobs: %v", err)
+		} else if n > 0 {
+			log.Printf("history: marked %d already-reverted job(s) excluded from savings", n)
+		}
+	}()
 
 	// First boot: kick an incremental scan shortly after start.
 	go func() {

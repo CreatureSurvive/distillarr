@@ -47,7 +47,7 @@ type HistoryStats struct {
 // or as false ones when a low-bitrate upscale lands smaller than a rich source.
 const isUpscale = `settings_json LIKE '%"upscale_to"%'`
 
-const doneRows = `FROM jobs j LEFT JOIN files f ON f.id=j.file_id WHERE j.status='done' AND j.output_size>0 AND NOT (j.` + isUpscale + `)`
+const doneRows = `FROM jobs j LEFT JOIN files f ON f.id=j.file_id WHERE j.status='done' AND j.reverted_at='' AND j.output_size>0 AND NOT (j.` + isUpscale + `)`
 const hoursExpr = `COALESCE(SUM(CASE WHEN j.started_at!='' AND j.finished_at!=''
 	THEN (julianday(j.finished_at)-julianday(j.started_at))*24 ELSE 0 END),0)`
 
@@ -73,9 +73,11 @@ func (s *Store) statGroups(keyExpr, extra string) ([]StatGroup, error) {
 // HistoryStats aggregates the job history.
 func (s *Store) HistoryStats() (HistoryStats, error) {
 	var h HistoryStats
-	if err := s.dbR.QueryRow(`SELECT COALESCE(SUM(status='done'),0), COALESCE(SUM(status='failed'),0),
+	// Done (and the upscaled share of it) counts only kept output - a
+	// job that was later restored from trash didn't keep anything.
+	if err := s.dbR.QueryRow(`SELECT COALESCE(SUM(status='done' AND reverted_at=''),0), COALESCE(SUM(status='failed'),0),
 		COALESCE(SUM(status='canceled'),0),
-		COALESCE(SUM(status='done' AND `+isUpscale+`),0) FROM jobs`).Scan(&h.Totals.Done, &h.Totals.Failed, &h.Totals.Canceled, &h.Totals.Upscaled); err != nil {
+		COALESCE(SUM(status='done' AND reverted_at='' AND `+isUpscale+`),0) FROM jobs`).Scan(&h.Totals.Done, &h.Totals.Failed, &h.Totals.Canceled, &h.Totals.Upscaled); err != nil {
 		return h, err
 	}
 	if err := s.dbR.QueryRow(`SELECT COALESCE(SUM(j.src_size),0), COALESCE(SUM(j.output_size),0),

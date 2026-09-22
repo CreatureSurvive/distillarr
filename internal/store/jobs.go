@@ -338,13 +338,50 @@ func (s *Store) CountJobsByStatus() (map[string]int, error) {
 	return out, rows.Err()
 }
 
-// RealizedSavings totals saved bytes across completed jobs.
+// RealizedSavings totals saved bytes across completed jobs whose output
+// is still in place (excludes reverted jobs - the space isn't actually
+// saved once the original came back).
 func (s *Store) RealizedSavings() (int64, int, error) {
 	var total int64
 	var n int
 	err := s.dbR.QueryRow(`SELECT COALESCE(SUM(src_size - output_size),0), COUNT(*)
-		FROM jobs WHERE status='done' AND src_size > output_size AND NOT (`+isUpscale+`)`).Scan(&total, &n)
+		FROM jobs WHERE status='done' AND reverted_at='' AND src_size > output_size AND NOT (`+isUpscale+`)`).Scan(&total, &n)
 	return total, n, err
+}
+
+// MarkJobReverted flags a job's output as no longer kept, because its
+// original was restored from trash. History/savings stats exclude it;
+// the job's own status stays 'done' since it did complete.
+func (s *Store) MarkJobReverted(id int64) error {
+	if id <= 0 {
+		return nil
+	}
+	_, err := s.dbW.Exec(`UPDATE jobs SET reverted_at=? WHERE id=? AND reverted_at=''`, nowRFC(), id)
+	return err
+}
+
+// BackfillRevertedJobs runs once (guarded by a kv flag) to catch jobs
+// that were restored before reverted_at existed to record it directly:
+// a 'done' job whose source path currently holds a file the exact size
+// of what the job started from is, for all practical purposes, back to
+// its pre-job state. Exact size match after a real encode is not a
+// coincidence worth worrying about.
+func (s *Store) BackfillRevertedJobs() (int, error) {
+	if done, _, _ := s.KVGet("reverted_backfill_done"); done == "1" {
+		return 0, nil
+	}
+	res, err := s.dbW.Exec(`UPDATE jobs SET reverted_at=? WHERE status='done' AND reverted_at=''
+		AND output_size>0 AND src_size>0 AND NOT (`+isUpscale+`)
+		AND EXISTS (SELECT 1 FROM files f WHERE f.path=jobs.src_path AND f.missing=0 AND f.size=jobs.src_size)`,
+		nowRFC())
+	if err != nil {
+		return 0, err
+	}
+	n, _ := res.RowsAffected()
+	if err := s.KVSet("reverted_backfill_done", "1"); err != nil {
+		return int(n), err
+	}
+	return int(n), nil
 }
 
 // HasQueuedForFile reports whether a pending job exists for a path.

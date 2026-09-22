@@ -51,6 +51,118 @@ func TestUpscaleJobsAreNotSavings(t *testing.T) {
 	}
 }
 
+// A restored job's savings were never actually kept: it must vanish
+// from RealizedSavings and the history totals, while its status stays
+// 'done' (the encode itself did complete).
+func TestMarkJobRevertedExcludesFromStats(t *testing.T) {
+	st, err := Open(filepath.Join(t.TempDir(), "t.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	add := func(src, out int64) *Job {
+		j := &Job{SrcPath: "/m/x.mp4", Backend: "qsv", Codec: "hevc", SettingsJSON: `{"codec":"hevc"}`, MaxAttempts: 1, SrcSize: src}
+		if err := st.CreateJob(j); err != nil {
+			t.Fatal(err)
+		}
+		if err := st.FinishJob(j.ID, StatusDone, out, "", ""); err != nil {
+			t.Fatal(err)
+		}
+		return j
+	}
+	kept := add(1000, 400)   // real, kept saving: 600
+	reverted := add(2000, 800) // would-be saving of 1200, but gets restored below
+
+	if saved, n, _ := st.RealizedSavings(); saved != 1800 || n != 2 {
+		t.Fatalf("before revert: saved=%d jobs=%d, want 1800/2", saved, n)
+	}
+	if err := st.MarkJobReverted(reverted.ID); err != nil {
+		t.Fatal(err)
+	}
+	saved, n, err := st.RealizedSavings()
+	if err != nil || saved != 600 || n != 1 {
+		t.Errorf("reverted job must drop out: saved=%d jobs=%d err=%v", saved, n, err)
+	}
+	h, err := st.HistoryStats()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if h.Totals.Saved != 600 || h.Totals.Done != 1 {
+		t.Errorf("history totals must exclude the reverted job: %+v", h.Totals)
+	}
+	j, err := st.GetJob(reverted.ID)
+	if err != nil || j == nil || j.Status != StatusDone {
+		t.Errorf("the job's own status stays done: %+v", j)
+	}
+
+	// Marking an already-reverted or nonexistent job is harmless.
+	if err := st.MarkJobReverted(reverted.ID); err != nil {
+		t.Errorf("re-marking must not error: %v", err)
+	}
+	if err := st.MarkJobReverted(0); err != nil {
+		t.Errorf("a zero job id (no trash.job_id) must not error: %v", err)
+	}
+	_ = kept
+}
+
+// The one-time backfill catches jobs restored before reverted_at
+// existed: a 'done' job whose source path now holds a file the exact
+// size of what the job started from is back to its pre-job state.
+func TestBackfillRevertedJobs(t *testing.T) {
+	st, err := Open(filepath.Join(t.TempDir(), "t.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	add := func(path string, src, out int64) *Job {
+		j := &Job{SrcPath: path, Backend: "qsv", Codec: "hevc", SettingsJSON: `{"codec":"hevc"}`, MaxAttempts: 1, SrcSize: src}
+		if err := st.CreateJob(j); err != nil {
+			t.Fatal(err)
+		}
+		if err := st.FinishJob(j.ID, StatusDone, out, "", ""); err != nil {
+			t.Fatal(err)
+		}
+		return j
+	}
+	reverted := add("/m/back.mp4", 1000, 400) // current file is back to 1000 bytes
+	kept := add("/m/kept.mp4", 1000, 400)     // current file matches the job's own output
+
+	upsert := func(path string, size int64) {
+		if err := st.UpsertFile(&File{Path: path, Library: "movies", Title: path, Size: size, Container: "mp4", VideoCodec: "hevc"}, nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	upsert("/m/back.mp4", 1000) // reverted: matches src_size, not output_size
+	upsert("/m/kept.mp4", 400)  // kept: matches output_size, not src_size
+
+	n, err := st.BackfillRevertedJobs()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 1 {
+		t.Fatalf("expected exactly 1 backfilled job, got %d", n)
+	}
+	if j, _ := st.GetJob(reverted.ID); j.Status != StatusDone {
+		t.Fatal("status must stay done")
+	}
+	if saved, jobs, _ := st.RealizedSavings(); saved != 600 || jobs != 1 {
+		t.Errorf("only the kept job should count: saved=%d jobs=%d", saved, jobs)
+	}
+
+	// The kv guard makes a second run a no-op, even against fresh matches.
+	upsert("/m/kept.mp4", 1000) // now the kept job's path also matches src_size
+	n2, err := st.BackfillRevertedJobs()
+	if err != nil || n2 != 0 {
+		t.Errorf("second run must be a no-op: n=%d err=%v", n2, err)
+	}
+	if saved, _, _ := st.RealizedSavings(); saved != 600 {
+		t.Errorf("the kv guard must have prevented a second pass: saved=%d", saved)
+	}
+	_ = kept
+}
+
 func TestClaimNextHonoursBothWindows(t *testing.T) {
 	st, err := Open(filepath.Join(t.TempDir(), "t.db"))
 	if err != nil {

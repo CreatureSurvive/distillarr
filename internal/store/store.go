@@ -200,6 +200,10 @@ var alters = []string{
 	`ALTER TABLE files ADD COLUMN meta_checked INTEGER NOT NULL DEFAULT 0`,
 	`ALTER TABLE files ADD COLUMN issues TEXT NOT NULL DEFAULT ''`,        // ",no_hvc1,pcm_audio,"
 	`CREATE INDEX IF NOT EXISTS files_meta ON files(meta_checked)`,
+	// Set when a job's output was later restored from trash: history/savings
+	// stats exclude it (the work wasn't kept), while status stays 'done'
+	// since the job itself did complete.
+	`ALTER TABLE jobs ADD COLUMN reverted_at TEXT NOT NULL DEFAULT ''`,
 }
 
 func (s *Store) migrate() error {
