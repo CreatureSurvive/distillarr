@@ -69,7 +69,7 @@ export default function FileDetail({ live }: { live: LiveState }) {
     const body = { settings: custom ? settings : undefined };
     try {
       if (kind === "preview") {
-        const p = await api.previewFile(file.id, { ...body, segments: 3 });
+        const p = await api.previewFile(file.id, body);
         nav(`/preview/${p.id}`);
         return;
       }

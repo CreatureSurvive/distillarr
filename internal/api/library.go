@@ -527,6 +527,14 @@ func (s *Server) createPreview(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	st = s.concrete(st)
+	// req.Segments picks a manual, evenly-spread sample count - only send
+	// it when the caller actually wants fixed positions. It bypasses
+	// Manager.Create's smart sampling entirely (packet-size scan for a
+	// VMAF-target search), which found this the hard way: FileDetail's
+	// "Measure & compare" button used to send segments:3 unconditionally,
+	// silently defeating every sample-placement improvement for its whole
+	// lifetime. Leave req.Starts/req.Segments both unset to get the smart
+	// default (3 samples).
 	manual := req.Starts
 	if manual == nil && req.Segments > 1 && req.Segments <= 5 {
 		for i := 1; i <= req.Segments; i++ {
