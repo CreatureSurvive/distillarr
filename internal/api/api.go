@@ -127,6 +127,14 @@ func (s *Server) Handler() http.Handler {
 
 	mux.HandleFunc("GET /api/v1/calibration", s.calibration)
 
+	// maintenance: reset caches/derived state that a pipeline change can
+	// make stale, without touching the media files themselves.
+	mux.HandleFunc("POST /api/v1/maintenance/measurements/clear", s.clearMeasurements)
+	mux.HandleFunc("POST /api/v1/maintenance/history/clear", s.clearHistory)
+	mux.HandleFunc("POST /api/v1/maintenance/calibration/clear", s.clearCalibration)
+	mux.HandleFunc("POST /api/v1/maintenance/crop/clear", s.clearCrop)
+	mux.HandleFunc("POST /api/v1/maintenance/issues/clear", s.clearIssueTags)
+
 	if s.ui != nil {
 		mux.Handle("GET /", s.spaHandler())
 	}

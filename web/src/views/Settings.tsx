@@ -45,6 +45,7 @@ export default function SettingsView({ live, onJellyfin }: { live: LiveState; on
         <a href="#/settings" onClick={(e) => { e.preventDefault(); document.getElementById("s-up")?.scrollIntoView({ behavior: "smooth" }); }}>Upscaling</a>
         <a href="#/settings" onClick={(e) => { e.preventDefault(); document.getElementById("s-hw")?.scrollIntoView({ behavior: "smooth" }); }}>Hardware</a>
         <a href="#/settings" onClick={(e) => { e.preventDefault(); document.getElementById("s-trash")?.scrollIntoView({ behavior: "smooth" }); }}>Storage &amp; trash</a>
+        <a href="#/settings" onClick={(e) => { e.preventDefault(); document.getElementById("s-maint")?.scrollIntoView({ behavior: "smooth" }); }}>Maintenance</a>
       </nav>
 
       <JellyfinSection cfg={cfg} setCfg={setCfg} live={live} onJellyfin={onJellyfin} />
@@ -146,6 +147,7 @@ export default function SettingsView({ live, onJellyfin }: { live: LiveState; on
 
       <HardwareSection live={live} />
       <TrashSection cfg={cfg} save={save} />
+      <MaintenanceSection />
     </div>
   );
 }
@@ -356,6 +358,58 @@ function TrashSection({ cfg, save }: { cfg: Config; save: (p: Partial<Config>, m
           </button>
         </>
       )}
+    </section>
+  );
+}
+
+// Resets for caches/derived state that a pipeline or logic change can make
+// stale. None of these touch media files - everything but history rebuilds
+// itself automatically (measurements in the overnight queue; crop/issue
+// detection the same way it backfilled on first scan).
+function MaintenanceSection() {
+  const act = async (fn: () => Promise<{ cleared?: number; ok?: boolean }>, label: string) => {
+    try {
+      const r = await fn();
+      toast(r.cleared !== undefined ? `${label}: ${r.cleared.toLocaleString()} file${r.cleared === 1 ? "" : "s"}` : label);
+    } catch (e: any) {
+      toast(e.message, "err");
+    }
+  };
+  const item = (name: string, hint: string, confirmMsg: string, fn: () => Promise<{ cleared?: number; ok?: boolean }>, doneMsg: string, danger = false) => (
+    <li key={name}>
+      <div className="trash-name">
+        <div>{name}</div>
+        <div className="mono faint small">{hint}</div>
+      </div>
+      <button className={`btn mini ${danger ? "btn-danger" : ""}`} onClick={() => confirm(confirmMsg) && act(fn, doneMsg)}>
+        {danger ? "Delete" : "Clear"}
+      </button>
+    </li>
+  );
+  return (
+    <section className="panel" id="s-maint">
+      <h2 className="panel-title">Maintenance</h2>
+      <p className="dim small">
+        Resets caches that a pipeline change can leave stale. Nothing here touches media files. Job history is the
+        one exception below: it's deleted outright, not rebuilt.
+      </p>
+      <ul className="trash-list">
+        {item("Quality measurements", "VMAF/CAMBI results for every file, so the overnight queue re-measures with the current sampling method.",
+          "Clear all quality measurements? Every measured file goes back into the overnight queue.",
+          api.clearMeasurements, "Measurements cleared")}
+        {item("Size-estimate calibration", "The self-correcting size model, back to the raw formula. It relearns from new measurements and finished jobs.",
+          "Reset size-estimate calibration to neutral?",
+          api.clearCalibration, "Calibration reset")}
+        {item("Black-bar (crop) detection", "Re-checks every file for letterboxing/pillarboxing from scratch.",
+          "Re-run black-bar detection on every file?",
+          api.clearCrop, "Crop detection cleared")}
+        {item("Issue detection (hvc1, faststart, …)", "Re-probes every file's container tags and recomputes its issue list.",
+          "Re-run issue detection on every file?",
+          api.clearIssueTags, "Issue tags cleared")}
+        {item("Job history & stats", "Permanently deletes done/failed/canceled job records - what the savings/history dashboard and the “upscaled” badge are built from. Active jobs aren't touched.",
+          "Permanently delete all job history? This cannot be undone - it removes the record of past work, not just a cache.",
+          api.clearHistory, "Job history cleared", true)}
+      </ul>
     </section>
   );
 }

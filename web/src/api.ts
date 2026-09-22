@@ -587,6 +587,13 @@ export const api = {
   preview: (id: string) => req<Preview>(`/api/v1/previews/${id}`),
   previews: () => req<{ previews: Preview[] }>("/api/v1/previews"),
   previewClipURL: (id: string, clip: string) => `/api/v1/previews/${id}/${clip}`,
+
+  // Maintenance: reset caches/derived state without touching media files.
+  clearMeasurements: () => post<{ cleared: number }>("/api/v1/maintenance/measurements/clear"),
+  clearHistory: () => post<{ cleared: number }>("/api/v1/maintenance/history/clear"),
+  clearCalibration: () => post<{ ok: boolean }>("/api/v1/maintenance/calibration/clear"),
+  clearCrop: () => post<{ cleared: number }>("/api/v1/maintenance/crop/clear"),
+  clearIssueTags: () => post<{ cleared: number }>("/api/v1/maintenance/issues/clear"),
 };
 
 // ---- SSE: one shared EventSource, many listeners ----

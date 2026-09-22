@@ -272,6 +272,33 @@ func (s *Store) SetTune(id int64, tuneJSON string) error {
 	return err
 }
 
+// ClearMeasurements resets every file's quality search result, so the
+// overnight loop and future encodes re-measure with the current
+// sampling/search method.
+func (s *Store) ClearMeasurements() (int64, error) {
+	return execChanges(s.dbW, `UPDATE files SET tune_json='' WHERE tune_json!=''`)
+}
+
+// ClearCrop re-queues every checked file for black-bar detection.
+func (s *Store) ClearCrop() (int64, error) {
+	return execChanges(s.dbW, `UPDATE files SET crop_checked=0, crop_w=0, crop_h=0, crop_x=0, crop_y=0 WHERE crop_checked!=0`)
+}
+
+// ClearIssueTags re-queues every checked file for container-tag
+// re-probing (hvc1/faststart) and clears the cached issue list so it
+// doesn't keep showing stale results until the backfill catches up.
+func (s *Store) ClearIssueTags() (int64, error) {
+	return execChanges(s.dbW, `UPDATE files SET meta_checked=0, video_tag='', faststart=-1, issues='' WHERE meta_checked!=0`)
+}
+
+func execChanges(w *sql.DB, query string) (int64, error) {
+	res, err := w.Exec(query)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
+}
+
 // CropProgress reports checked / total present files.
 func (s *Store) CropProgress() (checked, total, withBars int) {
 	_ = s.dbR.QueryRow(`SELECT COALESCE(SUM(crop_checked),0), COUNT(*),

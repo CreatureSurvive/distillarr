@@ -349,6 +349,20 @@ func (s *Store) RealizedSavings() (int64, int, error) {
 	return total, n, err
 }
 
+// ClearJobHistory permanently deletes finished job records (done,
+// failed, canceled) - active jobs are never touched. This is the data
+// behind RealizedSavings/HistoryStats (the savings/history dashboard)
+// and behind the "upscaled" badge and library filter, which look up
+// the latest done upscale job per path: clearing history removes those
+// badges too, not just the stats.
+func (s *Store) ClearJobHistory() (int64, error) {
+	res, err := s.dbW.Exec(`DELETE FROM jobs WHERE status IN ('done','failed','canceled')`)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
+}
+
 // MarkJobReverted flags a job's output as no longer kept, because its
 // original was restored from trash. History/savings stats exclude it;
 // the job's own status stays 'done' since it did complete.

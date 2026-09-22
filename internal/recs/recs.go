@@ -244,6 +244,20 @@ func calFactor(key string) (float64, int) {
 	return math.Exp(b.SumLog / float64(b.N) * w), b.N
 }
 
+// ResetCalibration discards every learned size-model correction,
+// starting fresh from the raw bits-per-pixel formula. Estimates widen
+// back out immediately; the buckets refill from real measurements and
+// finished jobs as usual.
+func ResetCalibration() {
+	cal.Lock()
+	cal.m = map[string]*bucket{}
+	m, st := cal.m, cal.st
+	cal.Unlock()
+	if st != nil {
+		_ = store.KVJSON(st, "calibration", &m)
+	}
+}
+
 // CalibrationSummary exposes buckets for the settings page.
 func CalibrationSummary() map[string]map[string]float64 {
 	cal.Lock()
