@@ -1,6 +1,7 @@
 package upscale
 
 import (
+	"encoding/json"
 	"os"
 	"strings"
 	"testing"
@@ -204,5 +205,17 @@ func TestNeuralAvailable(t *testing.T) {
 	os.Mkdir(NeuralDir+"/models", 0o755)
 	if !NeuralAvailable() {
 		t.Error("binary plus models/ is an install")
+	}
+}
+
+// Clients read preset.params.length: a preset with no tunables must serialise
+// its params as [], never null (a neural preset once crashed the UI this way).
+func TestPresetParamsAreNeverNull(t *testing.T) {
+	b, err := json.Marshal(All())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(b), `"params":null`) {
+		t.Errorf("a preset serialised params as null: %s", b)
 	}
 }

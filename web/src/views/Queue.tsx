@@ -161,7 +161,7 @@ function safeSettings(s: string) {
 }
 
 // 24-hour window timeline with an editor.
-type SchedField = "schedules" | "measure_schedules";
+type SchedField = "schedules" | "measure_schedules" | "upscale_schedules";
 
 export function ScheduleTimeline({ config, onSaved, field = "schedules", title = "When the queue runs", anyTime = true, children, accent }: {
   config: Config;

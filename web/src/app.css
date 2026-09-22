@@ -547,3 +547,4 @@ details.panel[open] > summary { margin-bottom: 12px; }
 .up-preset-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .up-params { display: flex; flex-direction: column; gap: 12px; }
 .up-params .field { margin-bottom: 0; }
+.up-group { margin-top: 6px; padding-top: 10px; border-top: 1px solid var(--line-soft); }

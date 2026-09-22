@@ -4,6 +4,7 @@ import { Seg, Toggle, toast } from "../components";
 import { ago, backendLabel, bytes } from "../format";
 import { qualityWord } from "../options";
 import type { LiveState } from "../App";
+import { ScheduleTimeline } from "./Queue";
 
 function Field({ label, hint, children }: { label: string; hint?: string; children: ReactNode }) {
   return (
@@ -134,6 +135,13 @@ export default function SettingsView({ live, onJellyfin }: { live: LiveState; on
             ? "The copy is a separate file: Jellyfin will list it beside the original, and Sonarr/Radarr don't know about it."
             : "The upscaled file takes the original's place. Restore the original from the trash if you don't like it."}
         </p>
+        <ScheduleTimeline config={cfg} onSaved={setCfg} field="upscale_schedules" title="Neural upscale window" anyTime={false} accent="violet">
+          <p className="dim small" style={{ margin: "0 0 8px" }}>
+            Neural upscales take hours per file and hold the GPU throughout, so they run only inside this window (overnight by
+            default), pause when it closes and pick up where they left off. “Upscale now” ignores it. Shader upscales run on the
+            normal queue schedule.
+          </p>
+        </ScheduleTimeline>
       </section>
 
       <HardwareSection live={live} />

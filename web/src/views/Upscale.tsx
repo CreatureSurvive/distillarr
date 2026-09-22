@@ -1,13 +1,14 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { api, type Config, type FileItem, type Plan, type Settings, type Still, type UpscaleInfo } from "../api";
 import { Empty, Seg, Toggle, toast } from "../components";
-import { dur, resLabel } from "../format";
+import { dur, minutesToHM, resLabel } from "../format";
 
 type View = "split" | "a" | "b";
 type Zoom = "fit" | 1 | 2;
 
 const classLabel = (c: number) => (c === 2160 ? "4K" : `${c}p`);
+const fmtHours = (h: number) => (h < 1 ? `${Math.max(1, Math.round(h * 60))} min` : h < 48 ? `${h.toFixed(1)} h` : `${(h / 24).toFixed(1)} days`);
 
 // Tune an upscale against real frames: a standard Lanczos resize (A) and the
 // same frame through the chosen upscaler (B), with a wipe divider. Frames
@@ -35,6 +36,7 @@ export default function UpscaleView() {
   const [output, setOutput] = useState<"copy" | "replace">("copy");
   const [qBusy, setQBusy] = useState<"" | "queue" | "now">("");
   const [queued, setQueued] = useState(false);
+  const [window_, setWindow] = useState("");                    // the neural window, as text
   const seq = useRef(0);
   const wrap = useRef<HTMLDivElement>(null);
 
@@ -43,6 +45,11 @@ export default function UpscaleView() {
       .then(([f, u, p, c]: [{ file: FileItem }, UpscaleInfo, Plan, Config]) => {
         setBase(p.auto.settings);
         setOutput(c.upscale_output === "replace" ? "replace" : "copy");
+        setWindow(
+          (c.upscale_schedules ?? []).length === 0
+            ? "no window is set, so only “Upscale now” will run it"
+            : c.upscale_schedules.map((s) => `${minutesToHM(s.start)}–${minutesToHM(s.end)}`).join(", "),
+        );
         setQueued(!!f.file.queued);
         setFile(f.file);
         setInfo(u);
@@ -106,6 +113,15 @@ export default function UpscaleView() {
   if (info.targets.length === 0) {
     return <div>{back}<Empty title="Nothing to upscale to">This file is already {classLabel(info.source.class)}.</Empty></div>;
   }
+
+  // A neural preset's run time comes from its measured cost per frame, scaled by
+  // this file's own size; past the limit the server refuses it, so say so here.
+  const estHours = (p?: { sec_per_frame?: number }) =>
+    p?.sec_per_frame && info.ref_pixels
+      ? (file.duration * (file.fps || 24) * p.sec_per_frame * ((file.width * file.height) / info.ref_pixels)) / 3600
+      : 0;
+  const isNeural = preset?.tier === "neural";
+  const tooLong = isNeural && estHours(preset) > info.max_neural_hours;
 
   const setParam = (k: string, v: number) => setParams((p) => ({ ...p, [k]: v }));
   const pick = (e: React.PointerEvent) => {
@@ -231,8 +247,12 @@ export default function UpscaleView() {
           <section className="panel">
             <div className="eyebrow">Method</div>
             <div className="up-presets">
-              {info.presets.filter((p) => p.tier === "shader").map((p) => (
-                <button key={p.id} className={`up-preset${p.id === presetId ? " on" : ""}`}
+              {info.presets.map((p, i, all) => (
+                <Fragment key={p.id}>
+                  {p.tier === "neural" && all[i - 1]?.tier !== "neural" && (
+                    <div className="up-group dim small">Neural: far more detail, but hours per file. Runs overnight.</div>
+                  )}
+                <button className={`up-preset${p.id === presetId ? " on" : ""}`}
                   onClick={() => { setPresetId(p.id); setParams({}); }}>
                   <span className="up-preset-head">
                     <b>{p.label}</b>
@@ -242,17 +262,23 @@ export default function UpscaleView() {
                     {p.id === suggested.preset && <span className="tag tag-save">suggested</span>}
                   </span>
                   <span className="dim small">{p.desc}</span>
+                  {p.tier === "neural" && (
+                    <span className={`mono small ${estHours(p) > info.max_neural_hours ? "warm" : "teal"}`}>
+                      ≈ {fmtHours(estHours(p))} for this file{estHours(p) > info.max_neural_hours ? ": too long to queue" : ""}
+                    </span>
+                  )}
                 </button>
+                </Fragment>
               ))}
             </div>
             <div className="dim small" style={{ marginTop: 8 }}>Suggested: {suggested.why}.</div>
           </section>
 
-          {preset && preset.params.length > 0 && (
+          {preset && (preset.params ?? []).length > 0 && (
             <section className="panel">
               <div className="eyebrow">Tuning</div>
               <div className="up-params">
-              {preset.params.map((p) => {
+              {(preset.params ?? []).map((p) => {
                 const v = params[p.key] ?? p.def;
                 return p.max === 1 && p.step === 1 ? (
                   <Toggle key={p.key} on={v >= 1} onChange={(on) => setParam(p.key, on ? 1 : 0)} label={p.label} />
@@ -280,11 +306,18 @@ export default function UpscaleView() {
                 ? "The original stays as it is. Jellyfin will list the upscale beside it."
                 : "The upscale takes the original's place; the original goes to the trash."}
             </p>
+            {isNeural && (
+              <p className={`small ${tooLong ? "warm" : "dim"}`} style={{ margin: "0 0 10px" }}>
+                {tooLong
+                  ? `This would take about ${fmtHours(estHours(preset))}, over the ${info.max_neural_hours}-hour limit. Pick a shader method, or a shorter file.`
+                  : `About ${fmtHours(estHours(preset))} of GPU time. “Add to queue” runs it in the upscale window (${window_}); “Upscale now” starts immediately.`}
+              </p>
+            )}
             <div className="actions">
-              <button className="btn" disabled={!!qBusy || queued} onClick={() => enqueue("queue")}>
+              <button className="btn" disabled={!!qBusy || queued || tooLong} onClick={() => enqueue("queue")}>
                 {queued ? "In queue" : qBusy === "queue" ? "Adding…" : "Add to queue"}
               </button>
-              <button className="btn btn-primary" disabled={!!qBusy || queued} onClick={() => enqueue("now")}>
+              <button className="btn btn-primary" disabled={!!qBusy || queued || tooLong} onClick={() => enqueue("now")}>
                 {qBusy === "now" ? "Starting…" : "Upscale now"}
               </button>
             </div>
@@ -293,9 +326,11 @@ export default function UpscaleView() {
           <section className="panel">
             <div className="eyebrow">Confirm motion</div>
             <p className="dim small" style={{ marginTop: 0 }}>
-              Encode a 20-second clip with these settings and compare it against the source, playing side by side.
+              {isNeural
+                ? "Clip previews aren't available for neural methods: they need the whole chunked pipeline. Judge the detail on the frames above; a frame renders in a few seconds."
+                : "Encode a 20-second clip with these settings and compare it against the source, playing side by side."}
             </p>
-            <button className="btn btn-primary" disabled={clipBusy} onClick={renderClip}>
+            <button className="btn btn-primary" disabled={clipBusy || isNeural} onClick={renderClip}>
               {clipBusy ? "Starting…" : "Render 20s clip"}
             </button>
           </section>

@@ -170,6 +170,7 @@ export type UpscalePreset = {
   tier: string;
   content: "film" | "anime" | "any";
   params: UpscaleParam[];
+  sec_per_frame?: number; // neural presets: measured cost at ref_pixels of input
 };
 export type UpscaleInfo = {
   source: { w: number; h: number; class: number };
@@ -178,6 +179,9 @@ export type UpscaleInfo = {
   presets: UpscalePreset[];
   vulkan: { index: number; name: string; ok: boolean; discrete: boolean; error?: string }[];
   available: boolean;
+  neural: boolean;
+  ref_pixels: number;
+  max_neural_hours: number;
 };
 export type Still = { key: string; w: number; h: number; at: number; ms: number; cached: boolean; a_url: string; b_url: string };
 
@@ -404,6 +408,7 @@ export type Config = {
   crop_bars: boolean;
   vmaf_target: number;
   upscale_output: string;
+  upscale_schedules: Schedule[];
   jellyfin_url: string;
   jellyfin_api_key?: string;
   jellyfin_key_set?: boolean;

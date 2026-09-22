@@ -176,7 +176,15 @@ var presets = []Preset{
 }
 
 // All returns every preset in registry order (film first, then anime).
-func All() []Preset { return append([]Preset(nil), presets...) }
+func All() []Preset {
+	out := append([]Preset(nil), presets...)
+	for i := range out {
+		if out[i].Params == nil {
+			out[i].Params = []Param{} // JSON [] not null: clients index into it
+		}
+	}
+	return out
+}
 
 // Get looks a preset up by id.
 func Get(id string) (Preset, bool) {
