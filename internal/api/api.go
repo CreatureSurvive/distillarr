@@ -14,6 +14,7 @@ import (
 
 	"mediatrans/internal/config"
 	"mediatrans/internal/encode"
+	"mediatrans/internal/hwprobe"
 	"mediatrans/internal/jobs"
 	"mediatrans/internal/media"
 	"mediatrans/internal/preview"
@@ -284,11 +285,16 @@ func (s *Server) getHW(w http.ResponseWriter, r *http.Request) {
 	for _, b := range encode.AllBackends {
 		health[string(b)] = s.eng.BackendDegraded(string(b))
 	}
+	rep := s.eng.Report()
+	pref := s.cfg.Get().PreferredBackend
 	resolved := map[string]string{}
+	active := map[string]hwprobe.Device{} // what an encode would run on now, by codec
 	for _, c := range []encode.Codec{encode.HEVC, encode.AV1} {
 		resolved[string(c)] = string(s.eng.ResolveFor("auto", c))
+		active[string(c)] = rep.ActiveDevice(s.eng.ResolveFor(pref, c), c)
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"report": s.eng.Report(), "health": health, "auto": resolved})
+	writeJSON(w, http.StatusOK, map[string]any{"report": rep, "health": health, "auto": resolved,
+		"devices": rep.Devices(), "active": active, "upscale_device": rep.UpscaleDevice()})
 }
 
 func (s *Server) reprobe(w http.ResponseWriter, r *http.Request) {

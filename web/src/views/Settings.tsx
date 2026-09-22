@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactNode } from "react";
-import { api, subscribe, type Config, type HwReport, type JfStatus, type JfTest, type TrashItem } from "../api";
+import { api, subscribe, type Config, type HwInfo, type JfStatus, type JfTest, type TrashItem } from "../api";
 import { Seg, Toggle, toast } from "../components";
 import { ago, backendLabel, bytes } from "../format";
 import { qualityWord } from "../options";
@@ -17,8 +17,10 @@ function Field({ label, hint, children }: { label: string; hint?: string; childr
 
 export default function SettingsView({ live, onJellyfin }: { live: LiveState; onJellyfin: () => void }) {
   const [cfg, setCfg] = useState<Config | null>(null);
+  const [hw, setHw] = useState<HwInfo | null>(null);
 
   useEffect(() => { api.config().then(setCfg).catch(() => {}); }, []);
+  useEffect(() => { api.hw().then(setHw).catch(() => {}); }, [live.hwVersion]);
 
   const save = async (patch: Partial<Config>, msg = "Saved") => {
     try {
@@ -97,7 +99,7 @@ export default function SettingsView({ live, onJellyfin }: { live: LiveState; on
             <Seg value={cfg.max_height} onChange={(v) => save({ max_height: v })}
               options={[{ value: 0, label: "Keep source" }, { value: 1080, label: "Max 1080p" }, { value: 720, label: "Max 720p" }]} />
           </Field>
-          <Field label="Parallel encodes" hint="The Arc handles 2 comfortably; Unmanic shares the same GPU">
+          <Field label="Parallel encodes" hint={workersHint(hw, cfg.default_codec)}>
             <Seg value={cfg.workers} onChange={(v) => save({ workers: v })} options={[1, 2, 3, 4].map((n) => ({ value: n, label: String(n) }))} />
           </Field>
           <Field label="Retries per job">
@@ -120,7 +122,9 @@ export default function SettingsView({ live, onJellyfin }: { live: LiveState; on
         <h2 className="panel-title">Upscaling</h2>
         <p className="dim small">
           Tune an upscale from a file's page (the Upscale button), then queue it. Upscaling only makes sense for
-          sources below 4K, and it is slow: about 3x realtime to 1080p and roughly realtime to 4K on the Arc.
+          sources below 4K, and it is slow.{" "}
+          {hw?.upscale_device ? <>Upscales run on {hw.upscale_device}. </> : hw ? <>No Vulkan GPU passed the upscaler self-test, so upscaling is unavailable. </> : null}
+          For reference, the shader methods run at about 3x realtime to 1080p and roughly realtime to 4K on an Intel Arc A380; other GPUs will differ.
         </p>
         <div className="opts">
           <Field label="When an upscale finishes" hint="Each queued upscale can override this">
@@ -262,8 +266,17 @@ function JellyfinSection({ cfg, setCfg, live, onJellyfin }: { cfg: Config; setCf
   );
 }
 
+// workersHint names the device encodes run on now, so the advice fits
+// whatever hardware the probe found.
+function workersHint(hw: HwInfo | null, codec: string): string {
+  const dev = hw?.active[codec] || hw?.active.hevc;
+  if (!dev) return "Most GPUs handle 2 at once; lower it if other apps share the GPU";
+  if (dev.backend === "sw") return "Encodes run on the CPU (software), and each one already uses every core: 1 is usually best";
+  return `Encodes run on ${dev.name}. Most GPUs handle 2 at once; lower it if other apps (a media server, other transcoders) share the GPU`;
+}
+
 function HardwareSection({ live }: { live: LiveState }) {
-  const [hw, setHw] = useState<{ report: HwReport | null; health: Record<string, boolean>; auto: Record<string, string> } | null>(null);
+  const [hw, setHw] = useState<HwInfo | null>(null);
   const [probing, setProbing] = useState(false);
   useEffect(() => {
     api.hw().then(setHw).catch(() => {});
@@ -277,12 +290,19 @@ function HardwareSection({ live }: { live: LiveState }) {
         <h2 className="panel-title">Hardware</h2>
         <button className="btn mini" disabled={probing} onClick={() => { setProbing(true); api.reprobe(); }}>{probing ? "Testing…" : "Test again"}</button>
       </div>
-      <p className="dim small">Each encoder runs a real test encode. Only the ones that pass are used. Auto picks {hw ? Object.entries(hw.auto).map(([c, b]) => `${backendLabel(b)} for ${c.toUpperCase()}`).join(", ") : "…"}.</p>
+      <p className="dim small">Each encoder runs a real test encode. Only the ones that pass are used. Auto picks {hw ? Object.entries(hw.auto).map(([c, b]) => {
+        const dev = hw.active[c];
+        const on = dev && dev.backend === b && b !== "sw" ? ` on ${dev.name}` : "";
+        return `${backendLabel(b)}${on} for ${c.toUpperCase()}`;
+      }).join(", ") : "…"}.</p>
       {rep && (
         <div className="hw-grid">
           {nodes.map((n) => (
             <div key={n} className="hw-dev">
-              <div className="hw-dev-name mono">{n === "cpu" ? "CPU (software)" : n.replace("/dev/dri/", "")}</div>
+              <div className="hw-dev-name">
+                {n === "cpu" ? "CPU (software)" : hw?.devices[n] || n.replace("/dev/dri/", "")}
+                {n !== "cpu" && <span className="mono dim small"> · {n.replace("/dev/dri/", "")}</span>}
+              </div>
               {rep.results.filter((r) => (r.node || "cpu") === n).map((r) => (
                 <div key={`${r.backend}${r.codec}`} className={`hw-cell ${r.ok ? "ok" : "no"}`} title={r.error || `${r.ms} ms`}>
                   <span>{backendLabel(r.backend)} {r.codec.toUpperCase()}</span>

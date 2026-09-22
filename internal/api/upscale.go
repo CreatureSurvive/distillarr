@@ -78,6 +78,7 @@ func (s *Server) upscaleInfo(w http.ResponseWriter, r *http.Request) {
 		"presets":          presets,
 		"vulkan":           devs,
 		"available":        hwprobe.BestVulkan(rep, "") != nil,
+		"device":           rep.UpscaleDevice(),
 		"neural":           upscale.NeuralAvailable(),
 		"ref_pixels":       upscale.RefPixels,
 		"max_neural_hours": upscale.MaxNeuralHours,

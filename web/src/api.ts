@@ -182,6 +182,7 @@ export type UpscaleInfo = {
   presets: UpscalePreset[];
   vulkan: { index: number; name: string; ok: boolean; discrete: boolean; error?: string }[];
   available: boolean;
+  device: string; // Vulkan GPU upscales run on
   neural: boolean;
   ref_pixels: number;
   max_neural_hours: number;
@@ -381,6 +382,18 @@ export type HwReport = {
   results: HwResult[];
 };
 
+// HwDevice is the device an encode runs on, named from the hardware probe
+// (the driver's model name), never hardcoded.
+export type HwDevice = { backend: string; node?: string; name: string };
+export type HwInfo = {
+  report: HwReport | null;
+  health: Record<string, boolean>;
+  auto: Record<string, string>;
+  devices: Record<string, string>; // render node → display name
+  active: Record<string, HwDevice>; // codec → device an encode would use now
+  upscale_device: string; // Vulkan GPU upscales run on ("" = none)
+};
+
 export type Schedule = {
   id: number;
   label?: string;
@@ -517,7 +530,7 @@ export const api = {
   saveConfig: (c: Partial<Config>) => req<Config>("/api/v1/config", { method: "PUT", body: JSON.stringify(c) }),
 
   hw: () =>
-    req<{ report: HwReport | null; health: Record<string, boolean>; auto: Record<string, string> }>("/api/v1/hw"),
+    req<HwInfo>("/api/v1/hw"),
   reprobe: () => post<{ started: boolean }>("/api/v1/hw"),
   resetBackend: (b: string) => post<{ ok: boolean }>(`/api/v1/hw/${b}/reset`),
   calibration: () => req<Record<string, { samples: number; factor: number }>>("/api/v1/calibration"),

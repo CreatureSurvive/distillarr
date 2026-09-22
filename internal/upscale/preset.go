@@ -237,7 +237,7 @@ var presets = []Preset{
 	},
 	{
 		ID: "neural-anime", Label: "Real-ESRGAN Anime Video", Tier: TierNeural, Content: Anime,
-		Desc: "Neural super-resolution trained on anime video. Far better line art and texture than any shader, but only ~2.4 fps on an Arc A380 (about 4 hours per 24-minute episode): an overnight job.",
+		Desc: "Neural super-resolution trained on anime video. Far better line art and texture than any shader, but slow: a few frames per second even on a discrete GPU, so hours per episode. An overnight job.",
 		SPF:  0.40, model: "realesr-animevideov3", scales: []int{2, 3, 4},
 	},
 	{

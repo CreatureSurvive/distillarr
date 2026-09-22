@@ -287,7 +287,10 @@ export default function UpscaleView() {
               {info.presets.map((p, i, all) => (
                 <Fragment key={p.id}>
                   {p.tier === "neural" && all[i - 1]?.tier !== "neural" && (
-                    <div className="up-group dim small">Neural: far more detail, but hours per file. Runs overnight.</div>
+                    <div className="up-group dim small">
+                      Neural: far more detail, but hours per file. Runs overnight{info.device ? ` on ${info.device}` : ""}.
+                      Time estimates come from benchmarks on an Intel Arc A380; other GPUs will be faster or slower.
+                    </div>
                   )}
                 <button className={`up-preset${p.id === presetId ? " on" : ""}`}
                   onClick={() => { setPresetId(p.id); setParams({}); }}>

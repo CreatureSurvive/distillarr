@@ -14,19 +14,24 @@ export default function PreviewView({ live }: { live: LiveState }) {
   const srcRef = useRef<HTMLVideoElement>(null);
   const encRef = useRef<HTMLVideoElement>(null);
   const [swapping, setSwapping] = useState(false);
+  const [devices, setDevices] = useState<Record<string, string>>({});
 
   useEffect(() => {
     if (id) api.preview(id).then(setP).catch(() => setP(null));
   }, [id, live.previewVersion]);
+  useEffect(() => { api.hw().then((h) => setDevices(h.devices || {})).catch(() => {}); }, []);
 
   if (!p) {
     return (
       <div className="empty">
         <div className="big">Cutting samples…</div>
-        <div className="dim">Encoding short A/B clips with the proposed settings. This takes under a minute on QSV.</div>
+        <div className="dim">Encoding short A/B clips with the proposed settings. This usually takes under a minute with a hardware encoder.</div>
       </div>
     );
   }
+  // The device the samples are encoded on, named by the hardware probe.
+  const node = p.settings.render_node;
+  const device = p.settings.backend === "sw" ? "the CPU (software)" : node ? devices[node] || node.split("/").pop() : "";
   if (p.status === "failed") {
     return (
       <div className="empty">
@@ -94,7 +99,7 @@ export default function PreviewView({ live }: { live: LiveState }) {
           {p.settings.vmaf_target ? (
             <div className="dim small" style={{ marginTop: 8 }}>
               Encoding three 15-second samples at a few quality levels and scoring each against the original.
-              About a minute on the Arc.
+              {device ? <>Running on {device}. </> : null}Usually a minute or two with a hardware encoder; much longer in software.
             </div>
           ) : null}
         </div>

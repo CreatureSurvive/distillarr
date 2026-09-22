@@ -14,6 +14,7 @@ export default function FileDetail({ live }: { live: LiveState }) {
   const [err, setErr] = useState("");
   const [hw, setHw] = useState<HwReport | null>(null);
   const [auto, setAuto] = useState<Record<string, string>>({});
+  const [devices, setDevices] = useState<Record<string, string>>({});
   const [plan, setPlan] = useState<Plan | null>(null);
   const [settings, setSettings] = useState<Settings | null>(null);
   const [custom, setCustom] = useState(false);
@@ -25,7 +26,7 @@ export default function FileDetail({ live }: { live: LiveState }) {
     setSettings(null);
     setCustom(false);
     api.file(id).then((r) => { setFile(r.file); setStreams(r.streams); }).catch((e) => setErr(e.message));
-    api.hw().then((h) => { setHw(h.report); setAuto(h.auto); }).catch(() => {});
+    api.hw().then((h) => { setHw(h.report); setAuto(h.auto); setDevices(h.devices || {}); }).catch(() => {});
   }, [id]);
 
   useEffect(() => {
@@ -195,7 +196,7 @@ export default function FileDetail({ live }: { live: LiveState }) {
           <details className="panel cmd-panel">
             <summary>
               ffmpeg command <span className="dim small">· {backendLabel(plan?.backend || "")}
-              {plan?.render_node ? ` on ${plan.render_node.split("/").pop()}` : ""} · {plan?.container?.toUpperCase()}</span>
+              {plan?.render_node ? ` on ${devices[plan.render_node] ? `${devices[plan.render_node]} (${plan.render_node.split("/").pop()})` : plan.render_node.split("/").pop()}` : ""} · {plan?.container?.toUpperCase()}</span>
             </summary>
             {plan?.command ? <Copyable text={plan.command} /> : <div className="dim">{plan?.command_error || "…"}</div>}
             {plan?.fallback_command && (
