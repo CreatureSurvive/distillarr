@@ -523,15 +523,29 @@ details.panel[open] > summary { margin-bottom: 12px; }
 
 /* ---- upscale tuning ---- */
 .up-layout { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 18px; align-items: start; }
-@media (max-width: 1000px) { .up-layout { grid-template-columns: 1fr; } }
+/* minmax(0, ...) here too: a plain 1fr track takes a grid item's automatic
+   (content-based) minimum width, which a fixed-width zoomed-in image (up to
+   3840px at 2:1) blows straight through, widening the whole page instead of
+   just scrolling inside .up-viewport. */
+@media (max-width: 1000px) { .up-layout { grid-template-columns: minmax(0, 1fr); } }
 .up-stage { position: relative; background: #000; border: 1px solid var(--line); border-radius: var(--r-md); overflow: hidden; min-height: 200px; }
 .up-stage.busy .up-viewport { opacity: 0.72; transition: opacity 0.15s; }
 .up-viewport { display: block; }
 .up-wrap { position: relative; line-height: 0; cursor: ew-resize; touch-action: none; user-select: none; }
+/* Zoomed (1:1/2:1): the box is wider than the viewport, so the body needs
+   native pan/scroll (touch-action back to auto); only the handle strip below
+   captures the drag. At "fit" there's nothing to scroll, so the whole image
+   stays directly draggable (touch-action: none, above, is what makes that
+   reliable on touch). */
+.up-wrap.up-wrap-zoomed { cursor: default; touch-action: pan-x pan-y; }
 .up-img { display: block; width: 100%; height: auto; }
 .up-b { position: absolute; inset: 0; }
 .up-handle { position: absolute; top: 0; bottom: 0; width: 2px; margin-left: -1px; background: var(--teal); box-shadow: 0 0 0 1px rgba(0,0,0,0.5); pointer-events: none; }
 .up-handle::after { content: "\2194"; position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 30px; height: 30px; border-radius: 50%; background: var(--teal); color: #06231f; font: 700 15px/30px var(--font-mono); text-align: center; }
+/* The draggable hit target when zoomed: wider than the visible handle line so
+   a finger can grab it, with its own touch-action so grabbing it doesn't also
+   try to scroll the page underneath. */
+.up-handle-hit { position: absolute; top: 0; bottom: 0; width: 48px; cursor: ew-resize; touch-action: none; }
 .up-tag { position: absolute; top: 8px; padding: 3px 8px; border-radius: 4px; background: rgba(0,0,0,0.65); font: 700 11px/1.4 var(--font-mono); letter-spacing: 0.04em; pointer-events: none; }
 .up-tag-a { left: 8px; color: var(--text-dim); }
 .up-tag-b { right: 8px; color: var(--teal); }

@@ -30,7 +30,11 @@ export default function UpscaleView() {
   const [stillErr, setStillErr] = useState("");
   const [split, setSplit] = useState(0.5);
   const [view, setView] = useState<View>("split");
-  const [zoom, setZoom] = useState<Zoom>("fit");
+  // 1:1 by default: "Fit" scales a 1920px frame down to whatever the screen is
+  // (on a phone, often 5x+), which flattens exactly the fine-detail differences
+  // this page exists to show. Panning at 1:1 needs a real handle to drag (see
+  // wrap below) rather than the whole image, or a touch swipe can't scroll.
+  const [zoom, setZoom] = useState<Zoom>(1);
   const [clipBusy, setClipBusy] = useState(false);
   const [base, setBase] = useState<Settings | null>(null);      // the file's own recommended settings
   const [output, setOutput] = useState<"copy" | "replace">("copy");
@@ -39,6 +43,7 @@ export default function UpscaleView() {
   const [window_, setWindow] = useState("");                    // the neural window, as text
   const seq = useRef(0);
   const wrap = useRef<HTMLDivElement>(null);
+  const viewport = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     Promise.all([api.file(id), api.upscaleInfo(id), api.plan(id), api.config()])
@@ -92,6 +97,14 @@ export default function UpscaleView() {
     return () => clearTimeout(t);
   }, [id, info, settings, at, to, presetId]);
 
+  // At 1:1/2:1 the frame is wider than the screen; start centred rather than
+  // showing the left edge, since detail worth comparing is usually mid-frame.
+  useEffect(() => {
+    const el = viewport.current;
+    if (!el || zoom === "fit") return;
+    el.scrollLeft = (el.scrollWidth - el.clientWidth) / 2;
+  }, [zoom, still?.key]);
+
   if (loadErr) return <Empty title="Couldn't load this file">{loadErr}</Empty>;
   if (!file || !info) return <div className="dim">Loading…</div>;
 
@@ -124,10 +137,22 @@ export default function UpscaleView() {
   const tooLong = isNeural && estHours(preset) > info.max_neural_hours;
 
   const setParam = (k: string, v: number) => setParams((p) => ({ ...p, [k]: v }));
+  // Always measured against the outer wrap (the full-image-width box), not
+  // whichever element captured the pointer, so the hit-strip below still maps
+  // to the right 0..1 position across the whole picture.
   const pick = (e: React.PointerEvent) => {
     const r = wrap.current?.getBoundingClientRect();
     if (r && r.width > 0) setSplit(Math.min(1, Math.max(0, (e.clientX - r.left) / r.width)));
   };
+  // setPointerCapture can throw if the browser doesn't consider the pointer
+  // active (seen with synthetic/automated touch input; real touches are fine).
+  // It's just an optimization that keeps drag events flowing outside the
+  // element's bounds, so a failure here must never block the tap-to-jump below.
+  const grab = (e: React.PointerEvent) => {
+    try { e.currentTarget.setPointerCapture(e.pointerId); } catch { /* see above */ }
+    pick(e);
+  };
+  const drag = (e: React.PointerEvent) => { if (e.buttons) pick(e); };
 
   const enqueue = async (kind: "queue" | "now") => {
     setQBusy(kind);
@@ -185,13 +210,18 @@ export default function UpscaleView() {
 
           <div className={`up-stage${busy ? " busy" : ""}`}>
             {still ? (
-              <div className="up-viewport" style={zoom === "fit" ? undefined : { overflow: "auto", maxHeight: "72vh" }}>
+              <div ref={viewport} className="up-viewport" style={zoom === "fit" ? undefined : { overflow: "auto", maxHeight: "72vh" }}>
                 <div
                   ref={wrap}
-                  className="up-wrap"
+                  className={`up-wrap${zoom !== "fit" ? " up-wrap-zoomed" : ""}`}
                   style={dim}
-                  onPointerDown={(e) => { e.currentTarget.setPointerCapture(e.pointerId); pick(e); }}
-                  onPointerMove={(e) => { if (e.buttons) pick(e); }}
+                  // At "fit" the image is never wider than its box, so dragging
+                  // anywhere is unambiguous. Zoomed, the box is wider than the
+                  // screen and a touch swipe has to scroll it — dragging there is
+                  // handled by the narrow .up-handle-hit strip below instead, so
+                  // this whole area keeps native pan/scroll (see .up-wrap-zoomed).
+                  onPointerDown={zoom === "fit" ? grab : undefined}
+                  onPointerMove={zoom === "fit" ? drag : undefined}
                 >
                   <img className="up-img" style={sharp} src={still.a_url} alt="Standard Lanczos resize" draggable={false} />
                   {view !== "a" && (
@@ -204,6 +234,10 @@ export default function UpscaleView() {
                     />
                   )}
                   {view === "split" && <div className="up-handle" style={{ left: `${split * 100}%` }} />}
+                  {view === "split" && zoom !== "fit" && (
+                    <div className="up-handle-hit" style={{ left: `calc(${split * 100}% - 24px)` }}
+                      onPointerDown={grab} onPointerMove={drag} />
+                  )}
                   {view !== "b" && <span className="up-tag up-tag-a">A · standard Lanczos</span>}
                   {view !== "a" && <span className="up-tag up-tag-b">B · {preset?.label}</span>}
                 </div>
@@ -228,8 +262,11 @@ export default function UpscaleView() {
             ))}
           </div>
           <p className="dim small" style={{ marginTop: 12 }}>
-            Compare fine detail, edges and dark areas at 1:1. Stills are 8-bit SDR frames: they judge sharpness and
-            artefacts, not colour grading.
+            Showing real pixels (1:1) — scroll or swipe to see the rest of the frame, and drag the {"↔"} handle to
+            compare. Switch to Fit for the whole picture at once, though small differences disappear at that size.
+            Lanczos (EWA), Jinc and Spline64 are deliberately close to a plain resize; for an obvious difference try
+            FSR, NIS or RAVU with sharpening, Anime4K on animation, or a neural method. Stills are 8-bit SDR: they
+            judge sharpness and artefacts, not colour grading.
           </p>
         </div>
 
