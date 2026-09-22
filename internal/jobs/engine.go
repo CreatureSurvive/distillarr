@@ -48,12 +48,8 @@ type Engine struct {
 	// Notify broadcasts an SSE event; set by main wiring (may be nil).
 	Notify func(event string, payload any)
 
-	// OnReplaced runs after a successful in-place replace (Jellyfin
-	// refresh + DateCreated patch); set by main wiring.
-	OnReplaced func(path string, oldStat *replace.SrcStat)
-	// OnCopied runs after an upscale was added beside its source (copy mode).
-	// The file is new to Jellyfin, so there is no item to refresh, only a path to announce.
-	OnCopied func(path string)
+	finishedMu   sync.Mutex
+	finishedSubs []func(ReplacedEvent)
 
 	windowOpen atomic.Bool
 	neuralOpen atomic.Bool // the neural upscale window (see config UpscaleSchedules)
@@ -153,6 +149,51 @@ func (e *Engine) Reprobe() (*hwprobe.Report, error) {
 func (e *Engine) notify(event string, payload any) {
 	if e.Notify != nil {
 		e.Notify(event, payload)
+	}
+}
+
+// ReplacedEvent describes one finished job that changed (or added) a file
+// on disk, for anything that wants to react: Jellyfin/Plex refresh,
+// Sonarr/Radarr rescan, notifications. Kind distinguishes a plain re-encode
+// from a video-copy remux and from the two upscale outcomes.
+type ReplacedEvent struct {
+	JobID, FileID int64
+	Kind          string // "encode" | "remux" | "upscale-replace" | "upscale-copy"
+	// OldPath and NewPath are equal unless the container extension changed.
+	// For upscale-copy, OldPath is the source (untouched) and NewPath is
+	// the new copy beside it.
+	OldPath, NewPath      string
+	OldStat               *replace.SrcStat
+	SizeBefore, SizeAfter int64
+}
+
+// OnFinished registers a subscriber that runs after every successful
+// replace or upscale copy. Safe to call before Start; subscribers persist
+// for the engine's lifetime (there is no Unsubscribe — main wiring adds
+// them once at boot).
+func (e *Engine) OnFinished(fn func(ReplacedEvent)) {
+	e.finishedMu.Lock()
+	defer e.finishedMu.Unlock()
+	e.finishedSubs = append(e.finishedSubs, fn)
+}
+
+// fireFinished runs every subscriber in its own goroutine so one slow or
+// failing integration can't block another, and recovers panics so a bad
+// subscriber can't take down the job runner.
+func (e *Engine) fireFinished(ev ReplacedEvent) {
+	e.finishedMu.Lock()
+	subs := append([]func(ReplacedEvent){}, e.finishedSubs...)
+	e.finishedMu.Unlock()
+	for _, fn := range subs {
+		fn := fn
+		go func() {
+			defer func() {
+				if r := recover(); r != nil {
+					log.Printf("jobs: OnFinished subscriber panicked: %v", r)
+				}
+			}()
+			fn(ev)
+		}()
 	}
 }
 
@@ -495,12 +536,22 @@ func (e *Engine) runJob(j *store.Job, resume bool) {
 		}
 		e.scan.RefreshRecsSoon()
 	}
-	if e.OnCopied != nil && copyMode {
-		go e.OnCopied(destPath)
+	kind := "encode"
+	switch {
+	case copyMode:
+		kind = "upscale-copy"
+	case upscaling:
+		kind = "upscale-replace"
+	case settings.VideoCopy:
+		kind = "remux"
 	}
-	if e.OnReplaced != nil && !copyMode {
-		go e.OnReplaced(destPath, st)
-	}
+	// For upscale-copy, OldPath is the untouched source and NewPath is the
+	// new copy beside it (not "replaced by", but the pair a subscriber needs).
+	e.fireFinished(ReplacedEvent{
+		JobID: j.ID, FileID: j.FileID, Kind: kind,
+		OldPath: j.SrcPath, NewPath: destPath, OldStat: st,
+		SizeBefore: st.Size, SizeAfter: newSize,
+	})
 }
 
 // upscaleDest is where an upscale in copy mode lands: beside the source,

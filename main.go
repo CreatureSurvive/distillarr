@@ -22,7 +22,6 @@ import (
 	"mediatrans/internal/jobs"
 	"mediatrans/internal/preview"
 	"mediatrans/internal/recs"
-	"mediatrans/internal/replace"
 	"mediatrans/internal/scan"
 	"mediatrans/internal/still"
 	"mediatrans/internal/store"
@@ -100,44 +99,40 @@ func main() {
 		}
 	}
 
-	// Jellyfin post-replace hook: refresh the item and restore its
+	// Jellyfin post-job subscriber: refresh the item and restore its
 	// DateCreated from the original file's birth time (Linux can't
-	// rewrite crtime, so this keeps Jellyfin's "date added" intact).
-	eng.OnReplaced = func(path string, oldStat *replace.SrcStat) {
+	// rewrite crtime, so this keeps Jellyfin's "date added" intact). A
+	// copy-mode upscale is a new file instead: tell Jellyfin where to look.
+	eng.OnFinished(func(ev jobs.ReplacedEvent) {
 		c := cfg.Get()
 		if c.JellyfinURL == "" || c.JellyfinAPIKey == "" {
-			return
-		}
-		row, err := st.JellyfinByPath(path)
-		if err != nil || row == nil {
 			return
 		}
 		cl := jellyfin.New(c.JellyfinURL, c.JellyfinAPIKey)
+		if ev.Kind == "upscale-copy" {
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+			if err := cl.MediaUpdated(ctx, c.ToJellyfinPath(ev.NewPath), "Created"); err != nil {
+				log.Printf("jellyfin: announce %s: %v", ev.NewPath, err)
+			}
+			return
+		}
+		row, err := st.JellyfinByPath(ev.NewPath)
+		if err != nil || row == nil {
+			return
+		}
 		ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 		defer cancel()
 		if err := cl.Refresh(ctx, row.ItemID); err != nil {
-			log.Printf("jellyfin refresh %s: %v", path, err)
+			log.Printf("jellyfin refresh %s: %v", ev.NewPath, err)
 		}
-		if oldStat != nil && oldStat.BtimeSec > 0 {
-			bt := time.Unix(oldStat.BtimeSec, oldStat.BtimeNsec)
+		if ev.OldStat != nil && ev.OldStat.BtimeSec > 0 {
+			bt := time.Unix(ev.OldStat.BtimeSec, ev.OldStat.BtimeNsec)
 			if err := cl.PatchDateCreated(ctx, row.ItemID, bt); err != nil {
-				log.Printf("jellyfin DateCreated patch %s: %v", path, err)
+				log.Printf("jellyfin DateCreated patch %s: %v", ev.NewPath, err)
 			}
 		}
-	}
-
-	// A copy-mode upscale is a new file: tell Jellyfin where to look.
-	eng.OnCopied = func(path string) {
-		c := cfg.Get()
-		if c.JellyfinURL == "" || c.JellyfinAPIKey == "" {
-			return
-		}
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-		defer cancel()
-		if err := jellyfin.New(c.JellyfinURL, c.JellyfinAPIKey).MediaUpdated(ctx, c.ToJellyfinPath(path), "Created"); err != nil {
-			log.Printf("jellyfin: announce %s: %v", path, err)
-		}
-	}
+	})
 
 	eng.Start()
 	defer eng.Stop()
