@@ -181,7 +181,8 @@ func Run(st *store.Store) (*Report, error) {
 	for _, c := range codecs {
 		r.Results = append(r.Results, runOne(encode.SW, c, ""))
 	}
-	// Intel: every render node (A380 + iGPU differ in AV1 support).
+	// VA-API/QSV: every render node, since GPUs in one machine can differ
+	// (e.g. a discrete card encodes AV1 where the iGPU can't).
 	for _, node := range r.RenderNodes {
 		for _, c := range codecs {
 			for _, b := range []encode.Backend{encode.QSV, encode.VAAPI} {
@@ -303,5 +304,5 @@ func NodeFor(rep *Report, b encode.Backend, c encode.Codec) string {
 	if best != nil {
 		return best.Node
 	}
-	return encode.DefaultRenderNode
+	return encode.DefaultRenderNode()
 }

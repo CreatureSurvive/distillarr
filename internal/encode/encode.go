@@ -7,6 +7,8 @@ package encode
 import (
 	"fmt"
 	"math"
+	"path/filepath"
+	"sort"
 	"strings"
 
 	"mediatrans/internal/media"
@@ -95,9 +97,17 @@ type Settings struct {
 	VulkanDevice int `json:"vulkan_device,omitempty"`
 }
 
-// DefaultRenderNode is a last-resort fallback; node choice comes from
-// hwprobe (on this host the Arc A380 is renderD129).
-const DefaultRenderNode = "/dev/dri/renderD129"
+// DefaultRenderNode is a last-resort fallback for when no probe has chosen a
+// node: the first render node present (renderD128 on most single-GPU
+// systems). Real node choice is probe-driven (hwprobe.NodeFor), because
+// numbering says nothing about which GPU is which.
+func DefaultRenderNode() string {
+	if m, _ := filepath.Glob("/dev/dri/renderD*"); len(m) > 0 {
+		sort.Strings(m)
+		return m[0]
+	}
+	return "/dev/dri/renderD128"
+}
 
 // CmdSpec is a complete ffmpeg invocation plus what it will produce.
 type CmdSpec struct {
@@ -145,7 +155,7 @@ func (s Settings) node() string {
 	if s.RenderNode != "" {
 		return s.RenderNode
 	}
-	return DefaultRenderNode
+	return DefaultRenderNode()
 }
 
 func (s Settings) tenBit() bool { return s.BitDepth != 8 }
