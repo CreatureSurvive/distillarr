@@ -148,9 +148,17 @@ func srcFamily(c string) string {
 	return "legacy"
 }
 
-// CalibKey identifies a calibration bucket.
-func CalibKey(b encode.Backend, c encode.Codec, srcCodec string, h int) string {
-	return fmt.Sprintf("%s|%s|%s|%s", b, c, srcFamily(srcCodec), resBucket(h))
+// CalibKey identifies a calibration bucket. Animation gets its own
+// bucket: VMAF-target encodes of flat, clean-edged content don't
+// follow the same output/input ratio as live action (grain and detail
+// mask artifacts that animation has none of), so blending the two
+// skews the bucket the bulk of the library votes into.
+func CalibKey(b encode.Backend, c encode.Codec, srcCodec string, h int, anim bool) string {
+	content := "live"
+	if anim {
+		content = "anim"
+	}
+	return fmt.Sprintf("%s|%s|%s|%s|%s", b, c, srcFamily(srcCodec), resBucket(h), content)
 }
 
 // ModelRatio predicts output/input VIDEO bitrate before calibration.
@@ -203,7 +211,7 @@ func RecordObservation(f *store.File, s encode.Settings, observed float64) {
 		return
 	}
 	pred := ModelRatio(f, s)
-	key := CalibKey(s.Backend, s.Codec, f.VideoCodec, res.Class(f.Width, f.Height))
+	key := CalibKey(s.Backend, s.Codec, f.VideoCodec, res.Class(f.Width, f.Height), isAnimation(f))
 	cal.Lock()
 	b := cal.m[key]
 	if b == nil {
@@ -423,7 +431,7 @@ func Estimate(f *store.File, s encode.Settings, cfg config.Config) Recommendatio
 }
 
 func fillEstimate(r *Recommendation, f *store.File, s encode.Settings, cfg config.Config) {
-	factor, n := calFactor(CalibKey(s.Backend, s.Codec, f.VideoCodec, res.Class(f.Width, f.Height)))
+	factor, n := calFactor(CalibKey(s.Backend, s.Codec, f.VideoCodec, res.Class(f.Width, f.Height), isAnimation(f)))
 	ratio := math.Max(0.06, math.Min(1.3, ModelRatio(f, s)*factor))
 	if t := TunedFor(f, s); t != nil && t.Quality == s.Quality && t.Ratio > 0 {
 		// Measured on this file's own samples: far better than any model.

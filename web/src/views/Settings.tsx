@@ -390,10 +390,10 @@ function Calibration() {
       ) : (
         <ul className="calib">
           {entries.map(([k, v]) => {
-            const [b, codec, src, res] = k.split("|");
+            const [b, codec, src, res, content] = k.split("|");
             return (
               <li key={k} className="mono small">
-                {backendLabel(b)} {codec.toUpperCase()} from {src} {res}: {v.samples} sample{v.samples === 1 ? "" : "s"}, files come out {v.factor >= 1 ? `${Math.round((v.factor - 1) * 100)}% larger` : `${Math.round((1 - v.factor) * 100)}% smaller`} than the base model
+                {backendLabel(b)} {codec.toUpperCase()} from {src} {res}{content === "anim" ? " animation" : ""}: {v.samples} sample{v.samples === 1 ? "" : "s"}, files come out {v.factor >= 1 ? `${Math.round((v.factor - 1) * 100)}% larger` : `${Math.round((1 - v.factor) * 100)}% smaller`} than the base model
               </li>
             );
           })}
