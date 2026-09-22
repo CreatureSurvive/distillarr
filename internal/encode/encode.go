@@ -284,6 +284,16 @@ func Build(s Settings, src *media.Probe, outPath string, clip *Clip) (primary, f
 			Container: container, ExpectAudio: streams.nAudio, ExpectSubs: streams.nSubs}
 	}
 
+	// An upscale's own denoise param (see upscale.DenoiseFilter): cleaning grain
+	// at the source's resolution, before crop/tonemap are done and the picture
+	// is handed to the upscaler.
+	var denoise float64
+	if up {
+		if p, ok := upscale.Get(s.UpscalePreset); ok && p.Tier == upscale.TierShader {
+			denoise = p.Resolve(s.UpscaleParams)["denoise"]
+		}
+	}
+
 	// Software pre-filters shared by every sw-decode path.
 	swPre := []string{}
 	if clip != nil && clip.RGBInput {
@@ -298,6 +308,9 @@ func Build(s Settings, src *media.Probe, outPath string, clip *Clip) (primary, f
 	if deint && (s.Backend == SW || up) {
 		swPre = append(swPre, "bwdif=mode=send_frame") // upscaling always filters on the CPU side
 	}
+	if f := upscale.DenoiseFilter(denoise); f != "" {
+		swPre = append(swPre, f)
+	}
 	if tonemap {
 		swPre = append(swPre,
 			"zscale=t=linear:npl=100", "format=gbrpf32le", "zscale=p=bt709",
@@ -306,7 +319,7 @@ func Build(s Settings, src *media.Probe, outPath string, clip *Clip) (primary, f
 
 	if up {
 		return buildUpscale(s, upscale.Spec{W: upW, H: upH, Preset: s.UpscalePreset, Params: s.UpscaleParams},
-			assemble, swPre, srcTen || tonemap, crop || tonemap || deint)
+			assemble, swPre, srcTen || tonemap, crop || tonemap || deint || denoise > 0)
 	}
 
 	switch s.Backend {
@@ -424,17 +437,25 @@ func StillFilters(s Settings, v *media.Stream) (a, b []string, w, h int, err err
 	if s.Deinterlace == "on" || (s.Deinterlace == "auto" && v.Interlaced()) {
 		pre = append(pre, "bwdif=mode=send_frame")
 	}
+	// A is the plain, un-denoised baseline throughout — like every other B-only
+	// tuning knob (sigmoid, deband, sharpness), denoise only ever affects B.
 	a = append(append([]string{}, pre...),
 		fmt.Sprintf("scale=%d:%d:flags=lanczos:in_color_matrix=%s", w, h, srcMatrix(v)), "format=rgb24")
 	if s.UpscaleTier == upscale.TierNeural {
 		return a, nil, w, h, nil // b comes from the neural upscaler (see NeuralStill)
+	}
+	bPre := pre
+	if p, ok := upscale.Get(s.UpscalePreset); ok {
+		if f := upscale.DenoiseFilter(p.Resolve(s.UpscaleParams)["denoise"]); f != "" {
+			bPre = append(append([]string{}, pre...), f)
+		}
 	}
 	// Both sides stay RGB into the PNG, skipping a lossy YUV round trip.
 	chain, err := upscale.Spec{W: w, H: h, Preset: s.UpscalePreset, Params: s.UpscaleParams}.RGBChain("nv12", "rgba")
 	if err != nil {
 		return nil, nil, 0, 0, err
 	}
-	b = append(append(append([]string{}, pre...), chain...), "format=rgb24")
+	b = append(append(append([]string{}, bPre...), chain...), "format=rgb24")
 	return a, b, w, h, nil
 }
 

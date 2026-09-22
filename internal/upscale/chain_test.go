@@ -289,3 +289,46 @@ func TestNISSharpness(t *testing.T) {
 		}
 	}
 }
+
+func TestDenoiseFilter(t *testing.T) {
+	if got := DenoiseFilter(0); got != "" {
+		t.Errorf("0 (the default for every preset) must be off: %q", got)
+	}
+	if got := DenoiseFilter(-1); got != "" {
+		t.Errorf("negative must be treated as off, not a negative hqdn3d arg: %q", got)
+	}
+	// Spatial-only: a still preview decodes a single frame, so if the real job
+	// used a temporal term the preview would understate what actually happens.
+	for v, want := range map[float64]string{1: "hqdn3d=4.0:3.0:0:0", 2: "hqdn3d=8.0:6.0:0:0", 3: "hqdn3d=12.0:9.0:0:0"} {
+		if got := DenoiseFilter(v); got != want {
+			t.Errorf("DenoiseFilter(%v) = %q, want %q", v, got, want)
+		}
+	}
+}
+
+// The whole point: it's a shared param, so every existing preset (not just a
+// hand-picked few) gets it, off by default.
+func TestDenoiseIsUniversal(t *testing.T) {
+	for _, p := range All() {
+		if p.Neural() {
+			continue
+		}
+		d, ok := findParam(p, "denoise")
+		if !ok {
+			t.Errorf("%s: no denoise param", p.ID)
+			continue
+		}
+		if d.Def != 0 {
+			t.Errorf("%s: denoise must default to off, got %v", p.ID, d.Def)
+		}
+	}
+}
+
+func findParam(p Preset, key string) (Param, bool) {
+	for _, d := range p.Params {
+		if d.Key == key {
+			return d, true
+		}
+	}
+	return Param{}, false
+}

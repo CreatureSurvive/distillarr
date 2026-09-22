@@ -262,6 +262,69 @@ func TestUpscaleStillFilters(t *testing.T) {
 	}
 }
 
+func TestUpscaleDenoise(t *testing.T) {
+	sd := probe("/m/a.mkv", "h264", "yuv420p", "", []string{"ac3"}, nil)
+	sd.Streams[0].Width, sd.Streams[0].Height = 854, 480
+
+	// Off by default: identical to a build with no denoise param at all.
+	off, _, err := Build(Settings{Codec: HEVC, Backend: QSV, UpscaleTo: 1080, UpscalePreset: "film-lanczos",
+		RenderNode: "/dev/dri/renderD129", VulkanDevice: 0}, sd, "/o.tmp", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(strings.Join(off.Args, " "), "hqdn3d") {
+		t.Errorf("denoise must be off by default: %s", strings.Join(off.Args, " "))
+	}
+
+	on := Settings{Codec: HEVC, Backend: QSV, UpscaleTo: 1080, UpscalePreset: "film-lanczos",
+		UpscaleParams: map[string]float64{"denoise": 2}, RenderNode: "/dev/dri/renderD129", VulkanDevice: 0}
+	prim, fb, err := Build(on, sd, "/o.tmp", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// swPre (and hence hqdn3d) never reaches the hw-decode primary (encode.go:
+	// buildUpscale only applies it via the sw-decode path), so requesting
+	// denoise must force sw-decode-only, same as crop/tonemap/deinterlace do.
+	if fb != nil || prim.HWDecode || strings.Contains(strings.Join(prim.Args, " "), "-hwaccel") {
+		t.Errorf("denoise must force the sw-decode-only path: fb=%v prim=%+v", fb, prim)
+	}
+	a := strings.Join(prim.Args, " ")
+	if !strings.Contains(a, "-vf hqdn3d=8.0:6.0:0:0,format=nv12,hwupload,libplacebo=") {
+		t.Errorf("hqdn3d must run before the upscaler, with no temporal component: %s", a)
+	}
+
+	// Neural presets aren't shader presets (isn't resolved via upscale.Get's
+	// Tier check), so a denoise param alongside one must not change Build's
+	// existing "not built by Build" refusal into some other error.
+	_, _, err = Build(Settings{Codec: HEVC, Backend: QSV, UpscaleTo: 1080, UpscalePreset: "neural-anime",
+		UpscaleParams: map[string]float64{"denoise": 2}}, sd, "/o.tmp", nil)
+	if err == nil || !strings.Contains(err.Error(), "not built by encode.Build") {
+		t.Errorf("want the usual neural-tier refusal, got: %v", err)
+	}
+}
+
+func TestUpscaleStillDenoise(t *testing.T) {
+	sd := probe("/m/a.mkv", "h264", "yuv420p", "", nil, nil)
+	sd.Streams[0].Width, sd.Streams[0].Height = 854, 480
+
+	a0, b0, _, _, err := StillFilters(Settings{UpscaleTo: 1080, UpscalePreset: "film-lanczos"}, &sd.Streams[0])
+	if err != nil || strings.Contains(strings.Join(b0, ","), "hqdn3d") {
+		t.Fatalf("denoise off by default: %v %v", b0, err)
+	}
+	a1, b1, _, _, err := StillFilters(Settings{UpscaleTo: 1080, UpscalePreset: "film-lanczos",
+		UpscaleParams: map[string]float64{"denoise": 1}}, &sd.Streams[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(a0, ",") != strings.Join(a1, ",") {
+		t.Errorf("A is the honest baseline: denoise must never touch it: %v vs %v", a0, a1)
+	}
+	bj := strings.Join(b1, ",")
+	if !strings.HasPrefix(bj, "hqdn3d=4.0:3.0:0:0,format=nv12,hwupload,") {
+		t.Errorf("B must denoise before the upscale chain: %s", bj)
+	}
+}
+
 func TestUpscaleRejectsHDR(t *testing.T) {
 	hdr := probe("/m/h.mkv", "hevc", "yuv420p10le", "smpte2084", []string{"eac3"}, nil)
 	hdr.Streams[0].Width, hdr.Streams[0].Height = 1280, 720

@@ -72,6 +72,31 @@ type optShader struct{ param, file string }
 var commonParams = []Param{
 	{Key: "sigmoid", Label: "Sigmoid light", Min: 0, Max: 1, Step: 1, Def: 1},
 	{Key: "deband", Label: "Deband", Min: 0, Max: 1, Step: 1, Def: 0},
+	// Every scaler and shader here sharpens or reconstructs edges; none of them
+	// tell grain apart from real detail, so without this a noisy source gets its
+	// noise upscaled and sharpened right along with the picture. Off by default:
+	// it trades some fine detail for a cleaner result, which isn't free.
+	{Key: "denoise", Label: "Denoise (before upscaling)", Min: 0, Max: 3, Step: 0.5, Def: 0},
+}
+
+// DenoiseFilter returns the ffmpeg pre-filter for a resolved "denoise" strength
+// (0 = off), applied to the source BEFORE the upscaler: cleaning grain at the
+// source's own resolution is cheaper and more effective than trying to remove
+// it after the upscaler has already spread it across more pixels — the same
+// reason Real-ESRGAN's training bakes denoising into the upscale itself rather
+// than doing it as a separate pass afterwards.
+//
+// It maps to hqdn3d, spatial-only (temporal terms fixed at 0): a still preview
+// decodes a single frame with no neighbours to average against, so keeping the
+// real per-file job spatial-only too means the preview never undersells what
+// the job actually does.
+func DenoiseFilter(strength float64) string {
+	if strength <= 0 {
+		return ""
+	}
+	luma := strength * 4
+	chroma := luma * 0.75 // hqdn3d's own default spatial ratio (4:3)
+	return fmt.Sprintf("hqdn3d=%.1f:%.1f:0:0", luma, chroma)
 }
 
 // refineParam turns on SSimSuperRes after a prescaler: it removes the ringing and
