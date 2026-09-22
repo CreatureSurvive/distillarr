@@ -890,6 +890,13 @@ func (e *Engine) RestoreTrash(id int64) error {
 	}
 	pruneEmptyDirs(filepath.Dir(t.TrashPath), e.cfg.Get().TrashDir)
 	_ = e.st.DeleteTrash(id)
+	if t.CurrentPath != t.OrigPath {
+		// Same reasoning as the replace path in runJob: Jellyfin won't
+		// report the reverted path until its own next scan, so re-key the
+		// cached row now instead of leaving posters/genres stale until a
+		// sync happens to run after Jellyfin catches up.
+		_ = e.st.RenamePath(t.CurrentPath, t.OrigPath)
+	}
 	if e.scan != nil {
 		_ = e.scan.ProbeSingle(t.OrigPath)
 		if t.CurrentPath != t.OrigPath {
