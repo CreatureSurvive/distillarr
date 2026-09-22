@@ -8,6 +8,7 @@ package tune
 import (
 	"context"
 	"fmt"
+	"math"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -98,20 +99,92 @@ func CutSamples(ctx context.Context, src *media.Probe, starts []float64, length 
 	return out, nil
 }
 
-// Spans returns the sample start times for a duration.
-func Spans(dur float64) []float64 {
-	var out []float64
+// spanRadius bounds how much of the file scene detection actually
+// decodes around each target, in each direction: wide enough that
+// typical scene-cut spacing (seconds to a couple of minutes) reliably
+// finds something nearby, narrow enough that "middle" can't snap all
+// the way toward "beginning" or "climax", and - critically - bounded
+// regardless of the file's own length, since a whole-file decode just
+// for cut points measured over 2 minutes on a single 43-minute episode.
+func spanRadius(dur float64) float64 { return math.Min(dur*0.08, 240) }
+
+// Spans returns len(sampleAt) sample start times for a duration. Fixed
+// fractions alone can land squarely on an unrepresentative 15s window -
+// e.g. an episode where the beginning/middle/climax points all happen
+// to fall on easy dialogue, or all happen to fall on the one grainy
+// night scene - which is exactly the kind of noise that makes the
+// quality search fit to 45 seconds instead of the whole file (seen
+// live: sibling episodes of the same show landing on VMAF-target
+// quality anywhere from 25 to 70). Each sample is snapped to the
+// nearest real scene cut near its traditional position (only a small
+// window around that position is decoded, not the whole file), so it
+// starts on stable, representative content instead of an arbitrary
+// timestamp that might sit mid-scene or on a transition. A target with
+// no cut nearby, or whose detection fails outright, keeps its
+// fixed-fraction position.
+func Spans(ctx context.Context, path string, dur float64) []float64 {
+	if dur <= sampleLen*4 {
+		return fixedSpans(dur)
+	}
+	radius := spanRadius(dur)
+	chosen := make([]float64, 0, len(sampleAt))
 	for _, f := range sampleAt {
-		st := dur*f - sampleLen/2
-		if st < 0 {
-			st = 0
+		target := dur*f - sampleLen/2
+		st := target
+		if cuts, err := media.DetectScenesNear(ctx, path, target+sampleLen/2, radius); err == nil {
+			if snapped, ok := nearestCut(cuts, target, dur, radius, chosen); ok {
+				st = snapped
+			}
 		}
-		if st+sampleLen > dur {
-			st = max(0, dur-sampleLen)
-		}
-		out = append(out, st)
+		chosen = append(chosen, clampSpan(st, dur))
+	}
+	sort.Float64s(chosen)
+	return chosen
+}
+
+func fixedSpans(dur float64) []float64 {
+	out := make([]float64, 0, len(sampleAt))
+	for _, f := range sampleAt {
+		out = append(out, clampSpan(dur*f-sampleLen/2, dur))
 	}
 	return out
+}
+
+// nearestCut finds the cut closest to target, skipping just past it
+// (the first moments of a hard cut are a transition, not the scene the
+// sample is meant to represent). Cuts too near the file's edges or too
+// near an already-chosen sample are excluded.
+func nearestCut(cuts []float64, target, dur, tol float64, chosen []float64) (float64, bool) {
+	best, bestDist := math.NaN(), tol
+	for _, c := range cuts {
+		st := c + 0.5
+		if st < sampleLen*0.5 || st > dur-sampleLen*1.5 || tooClose(st, chosen) {
+			continue
+		}
+		if d := math.Abs(st - target); d < bestDist {
+			best, bestDist = st, d
+		}
+	}
+	return best, !math.IsNaN(best)
+}
+
+func tooClose(t float64, chosen []float64) bool {
+	for _, c := range chosen {
+		if math.Abs(t-c) < sampleLen*1.1 {
+			return true
+		}
+	}
+	return false
+}
+
+func clampSpan(st, dur float64) float64 {
+	if st < 0 {
+		st = 0
+	}
+	if st+sampleLen > dur {
+		st = max(0, dur-sampleLen)
+	}
+	return st
 }
 
 func qualityForCRF(crf int) int { return 50 + (23-crf)*5 }
@@ -148,7 +221,7 @@ func Search(ctx context.Context, o Options) (Result, []string, error) {
 	cuts, starts := o.Cuts, o.Starts
 	if cuts == nil {
 		var err error
-		starts = Spans(dur)
+		starts = Spans(ctx, p.Format.Filename, dur)
 		if cuts, err = CutSamples(ctx, p, starts, sampleLen, o.WorkDir, o.KeepFinal); err != nil {
 			return Result{}, nil, err
 		}
