@@ -107,6 +107,9 @@ export default function PreviewView({ live }: { live: LiveState }) {
             {p.tune.met
               ? <>Quality <b>{p.tune.quality}</b> is the smallest setting that reaches the target: VMAF <b>{p.tune.vmaf.mean.toFixed(1)}</b> (worst moments {p.tune.vmaf.p5.toFixed(1)}), video at <b>{Math.round(p.tune.ratio * 100)}%</b> of the source's size.</>
               : <>No tested setting reached VMAF {p.tune.target}; the best was {p.tune.vmaf.mean.toFixed(1)} at quality {p.tune.quality}. The source's own compression limits how close a re-encode can get. This file may not be worth re-encoding.</>}
+            {p.tune.vmaf.cambi !== undefined && (
+              <> Banding (CAMBI): <b className={p.tune.vmaf.cambi > 5 ? "warm" : ""}>{p.tune.vmaf.cambi.toFixed(1)}</b>{p.tune.vmaf.cambi > 5 ? " — visible gradient banding" : " — no visible banding"}.</>
+            )}
           </p>
           <ul className="tune-steps">
             {p.tune.steps.map((st) => (
@@ -115,6 +118,7 @@ export default function PreviewView({ live }: { live: LiveState }) {
                 <span className={`mono ${st.pass ? "teal" : "warm"}`}>VMAF {st.vmaf.mean.toFixed(1)}</span>
                 <span className="mono dim">low {st.vmaf.p5.toFixed(1)}</span>
                 <span className="mono dim">{Math.round(st.ratio * 100)}% size</span>
+                {st.vmaf.cambi !== undefined && <span className={`mono dim ${st.vmaf.cambi > 5 ? "warm" : ""}`}>cambi {st.vmaf.cambi.toFixed(1)}</span>}
                 {st.quality === p.tune!.quality && <span className="tag tag-save">chosen</span>}
               </li>
             ))}
@@ -154,6 +158,7 @@ export default function PreviewView({ live }: { live: LiveState }) {
               <figcaption>
                 <span className="ab-tag teal">B · {up > 0 ? `${upLabel} upscale` : `${codecLabel(p.settings.codec)} q${p.settings.quality}`}</span>
                 {!up && seg.vmaf && <span className={`mono ${seg.vmaf.mean >= 93 ? "teal" : seg.vmaf.mean >= 90 ? "" : "warm"}`}>VMAF {seg.vmaf.mean.toFixed(1)}</span>}
+                {!up && seg.vmaf?.cambi !== undefined && <span className={`mono dim ${seg.vmaf.cambi > 5 ? "warm" : ""}`}>cambi {seg.vmaf.cambi.toFixed(1)}</span>}
                 <span className="mono dim">
                   {bytes(seg.enc_size)}
                   {seg.src_size > 0 && (up > 0

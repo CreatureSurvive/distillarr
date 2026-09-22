@@ -351,6 +351,13 @@ func Recommend(f *store.File, cfg config.Config) Recommendation {
 			r.Measured = true
 			msg := fmt.Sprintf("Measured on 3 samples: quality %d scores VMAF %.1f against the original (worst moments %.1f), for your target of %.0f.",
 				t.Quality, t.VMAF.Mean, t.VMAF.P5, t.Target)
+			if t.VMAF.Cambi > 0 {
+				note := ""
+				if t.VMAF.Cambi > 5 {
+					note = " — visible gradient banding"
+				}
+				msg += fmt.Sprintf(" Banding (CAMBI): %.1f%s.", t.VMAF.Cambi, note)
+			}
 			if !t.Met {
 				r.Limited = true
 				msg = fmt.Sprintf("Measured on 3 samples: even quality %d only reaches VMAF %.1f (target %.0f); the source's own artifacts limit it.",

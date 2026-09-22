@@ -533,7 +533,8 @@ func (s *Server) createPreview(w http.ResponseWriter, r *http.Request) {
 			manual = append(manual, f.Duration*float64(i)/float64(req.Segments+1)-10)
 		}
 	}
-	p, err := s.prev.Create(f.ID, f.Path, f.Duration, st, manual)
+	cambi := recs.IsAnimation(f) || st.TonemapHDR
+	p, err := s.prev.Create(f.ID, f.Path, f.Duration, st, manual, cambi)
 	if err != nil {
 		fail(w, 500, err)
 		return

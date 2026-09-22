@@ -68,6 +68,10 @@ type Options struct {
 	// Cuts are pre-cut samples (from CutSamples) at Starts; nil = cut here.
 	Cuts   []string
 	Starts []float64
+	// Cambi also scores banding severity (~50% more CPU per sample):
+	// worth it on flat, gradient-heavy content where VMAF is known to
+	// under-penalize banding, not worth it on everything.
+	Cambi bool
 }
 
 // CutSamples decodes each span of the original once, accurately, into a
@@ -366,7 +370,7 @@ func Search(ctx context.Context, o Options) (Result, []string, error) {
 					encBytes = n
 				}
 				vr, err := media.VMAF(ctx, out, media.VMAFRef{Path: cut, Start: 0, Dur: sampleLen + 1,
-					Crop: crop, W: refW, H: refH, Deinterlace: deint, Threads: vmafThreads})
+					Crop: crop, W: refW, H: refH, Deinterlace: deint, Threads: vmafThreads, Cambi: o.Cambi})
 				if err != nil {
 					errs[i] = err
 					return
@@ -382,17 +386,21 @@ func Search(ctx context.Context, o Options) (Result, []string, error) {
 		}
 
 		var encBytes int64
-		minP5, sumMean := 100.0, 0.0
+		minP5, sumMean, sumCambi := 100.0, 0.0, 0.0
 		paths := make([]string, len(cuts))
 		for i, r := range results {
 			encBytes += r.encBytes
 			sumMean += r.vmaf.Mean
+			sumCambi += r.vmaf.Cambi
 			minP5 = min(minP5, r.vmaf.P5)
 			step.VMAF.Min = min(step.VMAF.Min, r.vmaf.Min)
 			paths[i] = r.path
 		}
 		step.VMAF.Mean = sumMean / float64(len(cuts))
 		step.VMAF.P5 = minP5
+		if o.Cambi {
+			step.VMAF.Cambi = sumCambi / float64(len(cuts))
+		}
 		if srcBytes > 0 {
 			step.Ratio = float64(encBytes) / float64(srcBytes)
 		}

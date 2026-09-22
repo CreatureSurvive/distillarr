@@ -54,6 +54,9 @@ type Preview struct {
 	// initial broadcast; run() replaces them with packet-scanned spans
 	// once it has a context to read the file's own index on.
 	deferSpans bool
+	// cambi: also score banding severity (set by the caller, who knows
+	// whether this file is animation or HDR-tonemap content).
+	cambi bool
 }
 
 // Manager tracks previews; clips live under rootDir.
@@ -113,15 +116,17 @@ func (m *Manager) persist(p *Preview) {
 }
 
 // Create spawns a preview job. manual timestamps override automatic
-// segment placement.
-func (m *Manager) Create(fileID int64, path string, dur float64, s encode.Settings, manual []float64) (*Preview, error) {
+// segment placement. cambi also scores banding severity - pass true for
+// animation or HDR-tonemap content, where VMAF is known to under-
+// penalize banding.
+func (m *Manager) Create(fileID int64, path string, dur float64, s encode.Settings, manual []float64, cambi bool) (*Preview, error) {
 	if dur <= 0 {
 		return nil, fmt.Errorf("unknown duration")
 	}
 	id := fmt.Sprintf("%d-%d", fileID, time.Now().Unix())
 	p := &Preview{
 		ID: id, FileID: fileID, Path: path, CreatedAt: time.Now(),
-		Status: "running", Settings: s, Duration: dur,
+		Status: "running", Settings: s, Duration: dur, cambi: cambi,
 	}
 	dir := filepath.Join(m.root, id)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -262,7 +267,7 @@ func (m *Manager) run(p *Preview) {
 		m.setStage(p, "measuring quality")
 		res, keep, err := tune.Search(ctx, tune.Options{
 			Settings: p.Settings, Probe: src, Target: p.Settings.VMAFTarget, WorkDir: dir,
-			Acquire: m.acquire, KeepFinal: true, Cuts: cuts, Starts: starts,
+			Acquire: m.acquire, KeepFinal: true, Cuts: cuts, Starts: starts, Cambi: p.cambi,
 			Progress: func(msg string) { m.setStage(p, msg) },
 		})
 		if err != nil {
@@ -336,7 +341,7 @@ func (m *Manager) run(p *Preview) {
 		}
 		if canScore {
 			if vr, err := media.VMAF(ctx, encPath, media.VMAFRef{Path: cuts[i], Start: 0, Dur: seg.Len + 1,
-				Crop: crop, W: refW, H: refH, Deinterlace: deint}); err == nil {
+				Crop: crop, W: refW, H: refH, Deinterlace: deint, Cambi: p.cambi}); err == nil {
 				seg.VMAF = &vr
 			} else {
 				log.Printf("preview: vmaf: %v", err)

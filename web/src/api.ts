@@ -188,7 +188,9 @@ export type UpscaleInfo = {
 };
 export type Still = { key: string; w: number; h: number; at: number; ms: number; cached: boolean; a_url: string; b_url: string };
 
-export type VMAF = { mean: number; p5: number; min: number };
+// cambi: banding severity (0 = none), only present when the sample was
+// animation or HDR-tonemap content - not scored on everything.
+export type VMAF = { mean: number; p5: number; min: number; cambi?: number };
 
 export type TuneResult = {
   target: number;

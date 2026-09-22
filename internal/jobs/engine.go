@@ -530,6 +530,7 @@ func (e *Engine) tuneQuality(ctx context.Context, j *store.Job, s encode.Setting
 		Settings: s, Probe: src, Target: s.VMAFTarget,
 		WorkDir: filepath.Join("/config/tune", fmt.Sprintf("job-%d", j.ID)),
 		Acquire: e.AcquireSem,
+		Cambi:   f != nil && (recs.IsAnimation(f) || s.TonemapHDR),
 		Progress: func(msg string) {
 			e.notify(EvJob, map[string]any{"id": j.ID, "status": "running", "note": msg})
 		},

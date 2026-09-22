@@ -175,6 +175,7 @@ func (e *Engine) measureOne(f *store.File) {
 	res, _, err := tune.Search(ctx, tune.Options{
 		Settings: s, Probe: src, Target: s.VMAFTarget, WorkDir: dir,
 		Acquire:  e.AcquireSem,
+		Cambi:    recs.IsAnimation(f) || s.TonemapHDR,
 		Progress: func(msg string) { e.setMeasure(func(m *MeasureStatus) { m.Note = msg }) },
 	})
 	if err != nil {
