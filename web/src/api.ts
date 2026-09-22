@@ -344,6 +344,8 @@ export type Job = {
   file_title?: string;
   cmd?: string;
   dest_path?: string;
+  origin?: string; // "manual" | "issue-fix" | "upscale" | (later) "webhook" | "autopilot" | "playback"
+  reason?: string;
 };
 
 export type Progress = {

@@ -204,6 +204,11 @@ var alters = []string{
 	// stats exclude it (the work wasn't kept), while status stays 'done'
 	// since the job itself did complete.
 	`ALTER TABLE jobs ADD COLUMN reverted_at TEXT NOT NULL DEFAULT ''`,
+	// Why a job exists: manual (user queued it), issue-fix (a quick-fix
+	// button), upscale, or (later phases) webhook / autopilot / playback.
+	// reason is a short free-text note shown in the UI.
+	`ALTER TABLE jobs ADD COLUMN origin TEXT NOT NULL DEFAULT 'manual'`,
+	`ALTER TABLE jobs ADD COLUMN reason TEXT NOT NULL DEFAULT ''`,
 }
 
 func (s *Store) migrate() error {

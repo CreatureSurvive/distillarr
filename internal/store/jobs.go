@@ -44,13 +44,20 @@ type Job struct {
 	Cmd       string `json:"cmd,omitempty"`
 	DestPath  string `json:"dest_path,omitempty"`
 
+	// Origin is why this job exists ("manual", "issue-fix", "upscale", and
+	// later "webhook" / "autopilot" / "playback"); Reason is a short
+	// free-text note shown in the UI ("Autopilot: rule 'Old H.264'").
+	Origin string `json:"origin,omitempty"`
+	Reason string `json:"reason,omitempty"`
+
 	// Joined for API convenience:
 	FileTitle string `json:"file_title,omitempty"`
 }
 
 const jobCols = `id, file_id, src_path, temp_path, status, priority, run_now, backend, codec,
 	quality, settings_json, attempts, max_attempts, error, error_tail, progress_json,
-	src_stat_json, src_size, output_size, started_at, finished_at, created_at, cmd, dest_path`
+	src_stat_json, src_size, output_size, started_at, finished_at, created_at, cmd, dest_path,
+	origin, reason`
 
 func scanJob(row interface{ Scan(...any) error }) (*Job, error) {
 	j := &Job{}
@@ -59,7 +66,7 @@ func scanJob(row interface{ Scan(...any) error }) (*Job, error) {
 	err := row.Scan(&j.ID, &fileID, &j.SrcPath, &j.TempPath, &j.Status, &j.Priority, &runNow,
 		&j.Backend, &j.Codec, &j.Quality, &j.SettingsJSON, &j.Attempts, &j.MaxAttempts,
 		&j.Error, &j.ErrorTail, &j.ProgressJSON, &j.SrcStatJSON, &j.SrcSize, &j.OutputSize,
-		&j.StartedAt, &j.FinishedAt, &j.CreatedAt, &j.Cmd, &j.DestPath)
+		&j.StartedAt, &j.FinishedAt, &j.CreatedAt, &j.Cmd, &j.DestPath, &j.Origin, &j.Reason)
 	if err != nil {
 		return nil, err
 	}
@@ -72,15 +79,20 @@ func scanJob(row interface{ Scan(...any) error }) (*Job, error) {
 
 // CreateJob enqueues a job.
 func (s *Store) CreateJob(j *Job) error {
+	origin := j.Origin
+	if origin == "" {
+		origin = "manual"
+	}
 	res, err := s.dbW.Exec(`INSERT INTO jobs(file_id, src_path, status, priority, run_now,
-		backend, codec, quality, settings_json, attempts, max_attempts, src_size)
-		VALUES(?,?,?,?,?,?,?,?,?,0,?,?)`,
+		backend, codec, quality, settings_json, attempts, max_attempts, src_size, origin, reason)
+		VALUES(?,?,?,?,?,?,?,?,?,0,?,?,?,?)`,
 		nullID(j.FileID), j.SrcPath, StatusQueued, j.Priority, b2i(j.RunNow),
-		j.Backend, j.Codec, j.Quality, j.SettingsJSON, j.MaxAttempts, j.SrcSize)
+		j.Backend, j.Codec, j.Quality, j.SettingsJSON, j.MaxAttempts, j.SrcSize, origin, j.Reason)
 	if err != nil {
 		return err
 	}
 	j.ID, err = res.LastInsertId()
+	j.Origin = origin
 	return err
 }
 
@@ -277,7 +289,8 @@ func (s *Store) ListJobs(statuses []string, beforeID int64, limit int) ([]*Job, 
 		if err := rows.Scan(&j.ID, &fileID, &j.SrcPath, &j.TempPath, &j.Status, &j.Priority, &runNow,
 			&j.Backend, &j.Codec, &j.Quality, &j.SettingsJSON, &j.Attempts, &j.MaxAttempts,
 			&j.Error, &j.ErrorTail, &j.ProgressJSON, &j.SrcStatJSON, &j.SrcSize, &j.OutputSize,
-			&j.StartedAt, &j.FinishedAt, &j.CreatedAt, &j.Cmd, &j.DestPath, &j.FileTitle); err != nil {
+			&j.StartedAt, &j.FinishedAt, &j.CreatedAt, &j.Cmd, &j.DestPath, &j.Origin, &j.Reason,
+			&j.FileTitle); err != nil {
 			return nil, err
 		}
 		if fileID.Valid {

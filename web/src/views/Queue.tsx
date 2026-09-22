@@ -102,6 +102,9 @@ export default function Queue({ live }: { live: LiveState }) {
                     {tab === "pending" && <span className="job-pos mono">{i + 1}</span>}
                     <a href={`#/file/${j.file_id}`} onClick={(e) => e.stopPropagation()}>{j.file_title || j.src_path.split("/").pop()}</a>
                     {j.run_now && <span className="tag tag-save">run now</span>}
+                    {j.origin && j.origin !== "manual" && (
+                      <span className="tag" title={j.reason || j.origin}>{j.origin}</span>
+                    )}
                   </div>
                   <div className="job-meta mono dim">
                     <span className={`badge b-${j.status}`}>{j.status}</span>

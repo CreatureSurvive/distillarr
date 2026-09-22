@@ -345,7 +345,7 @@ func (s *Server) queueShow(w http.ResponseWriter, r *http.Request) {
 			skipped++
 			continue
 		}
-		if _, err := s.enqueue(f, p.Setting, req.RunNow); err == nil {
+		if _, err := s.enqueue(f, p.Setting, req.RunNow, "manual", "Queued from the show page"); err == nil {
 			created++
 		}
 	}
@@ -453,7 +453,10 @@ func (s *Server) filePlan(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, out)
 }
 
-func (s *Server) enqueue(f *store.File, st encode.Settings, runNow bool) (*store.Job, error) {
+// enqueue creates a job. origin records why it exists ("manual",
+// "issue-fix", "upscale", and later "webhook" / "autopilot" / "playback");
+// reason is a short free-text note shown in the UI and may be "".
+func (s *Server) enqueue(f *store.File, st encode.Settings, runNow bool, origin, reason string) (*store.Job, error) {
 	cfg := s.cfg.Get()
 	sj, _ := json.Marshal(st)
 	priority := 100000
@@ -464,6 +467,7 @@ func (s *Server) enqueue(f *store.File, st encode.Settings, runNow bool) (*store
 		FileID: f.ID, SrcPath: f.Path, Priority: priority, RunNow: runNow,
 		Backend: string(st.Backend), Codec: string(st.Codec), Quality: st.Quality,
 		SettingsJSON: string(sj), MaxAttempts: max(1, cfg.MaxAttempts), SrcSize: f.Size,
+		Origin: origin, Reason: reason,
 	}
 	if st.VideoCopy {
 		j.Backend, j.Codec, j.Quality = "remux", f.VideoCodec, 0
@@ -495,7 +499,11 @@ func (s *Server) queueFile(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusConflict, err)
 		return
 	}
-	j, err := s.enqueue(f, st, req.RunNow)
+	origin, reason := "manual", ""
+	if st.UpscaleTo > 0 {
+		origin = "upscale"
+	}
+	j, err := s.enqueue(f, st, req.RunNow, origin, reason)
 	if err != nil {
 		fail(w, 500, err)
 		return

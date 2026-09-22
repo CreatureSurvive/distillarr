@@ -76,7 +76,7 @@ func (s *Server) quickJob(f *store.File, runNow bool) (*store.Job, error) {
 		return nil, fmt.Errorf("nothing a quick fix can solve")
 	}
 	st := issues.QuickFix(f, s.cfg.Get())
-	return s.enqueue(f, st, runNow)
+	return s.enqueue(f, st, runNow, "issue-fix", "Quick fix")
 }
 
 // POST /api/v1/files/{id}/fix {run_now} — quick fix one file.
@@ -138,7 +138,7 @@ func (s *Server) fixIssue(w http.ResponseWriter, r *http.Request) {
 			if key == "interlaced" {
 				st.Deinterlace = "on"
 			}
-			_, err = s.enqueue(f, st, req.RunNow)
+			_, err = s.enqueue(f, st, req.RunNow, "issue-fix", "Issue: "+key)
 		}
 		if err != nil {
 			skipped++
