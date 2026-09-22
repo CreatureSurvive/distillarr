@@ -96,6 +96,37 @@ func (s *Store) JellyfinByPath(path string) (*JellyfinRow, error) {
 	return &r, nil
 }
 
+// RenamePath re-keys a cached row after a local replace moves the file
+// (a container/extension change): Jellyfin itself won't report the new
+// path until its own next scan, so without this the row goes stale -
+// season/series joins on path, genre lookups and the post-replace
+// refresh all miss until the next full sync. Any row already sitting at
+// newPath (Jellyfin got there first) is dropped so the rename can't
+// collide with the path PRIMARY KEY.
+func (s *Store) RenamePath(oldPath, newPath string) error {
+	if oldPath == "" || newPath == "" || oldPath == newPath {
+		return nil
+	}
+	tx, err := s.dbW.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := tx.Exec(`DELETE FROM jellyfin WHERE path=?`, newPath); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`UPDATE jellyfin SET path=? WHERE path=?`, newPath, oldPath); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	genreCache.Lock()
+	genreCache.m = nil
+	genreCache.Unlock()
+	return nil
+}
+
 // JellyfinCount returns how many items are cached.
 func (s *Store) JellyfinCount() int {
 	var n int

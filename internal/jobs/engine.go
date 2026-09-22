@@ -483,6 +483,11 @@ func (e *Engine) runJob(j *store.Job, resume bool) {
 	e.st.FinishJob(j.ID, store.StatusDone, newSize, "", "")
 	e.notify(EvJob, map[string]any{"id": j.ID, "status": store.StatusDone, "output_size": newSize})
 
+	if destPath != j.SrcPath && !copyMode {
+		// Re-key the cached Jellyfin row before OnReplaced looks it up by
+		// destPath, and before anything joins on files.path for posters.
+		_ = e.st.RenamePath(j.SrcPath, destPath)
+	}
 	if e.scan != nil {
 		_ = e.scan.ProbeSingle(destPath)
 		if destPath != j.SrcPath && !copyMode {
