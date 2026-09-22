@@ -20,6 +20,8 @@ export type RecSummary = {
   reason: string;
 };
 
+export type UpscaledInfo = { to: number; preset: string; tier: string; at: string };
+
 export type FileItem = {
   id: number;
   path: string;
@@ -62,6 +64,7 @@ export type FileItem = {
   video_tag?: string;
   faststart?: number;
   issues?: string; // ",no_hvc1,pcm_audio,"
+  upscaled?: UpscaledInfo; // set when this file is the output of a finished upscale job
 };
 
 export type IssueType = {

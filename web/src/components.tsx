@@ -52,6 +52,11 @@ export function FileChips({ f }: { f: FileItem }) {
       <CodecChip codec={f.video_codec} />
       {f.height > 0 && <span className="chip" title={`${f.width}×${f.height}`}>{resLabel(f.width, f.height)}</span>}
       {f.hdr && <span className="chip c-hdr">{hdrLabel(f.hdr)}</span>}
+      {f.upscaled && (
+        <span className="chip c-up" title={`Upscaled to ${f.upscaled.to === 2160 ? "4K" : f.upscaled.to + "p"} with ${f.upscaled.preset}${f.upscaled.at ? " on " + f.upscaled.at.slice(0, 10) : ""}`}>
+          upscaled
+        </span>
+      )}
     </div>
   );
 }

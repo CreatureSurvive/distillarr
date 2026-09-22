@@ -115,3 +115,75 @@ func TestPauseJobDoesNotSpendAnAttempt(t *testing.T) {
 		t.Errorf("pausing a missing job is harmless: %v", err)
 	}
 }
+
+func TestUpscaledFilesAndFilter(t *testing.T) {
+	st, err := Open(filepath.Join(t.TempDir(), "t.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	file := func(path string, w, h int) {
+		f := &File{Path: path, Library: "movies", Title: path, Size: 1000, MtimeNS: 1, Container: "mp4", Width: w, Height: h, VideoCodec: "hevc"}
+		if err := st.UpsertFile(f, nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	done := func(src, dest, settings string) {
+		j := &Job{SrcPath: src, Backend: "qsv", Codec: "hevc", SettingsJSON: settings, MaxAttempts: 1, SrcSize: 1}
+		st.CreateJob(j)
+		st.SetJobDest(j.ID, dest)
+		st.FinishJob(j.ID, StatusDone, 2000, "", "")
+	}
+	file("/m/copy.mp4", 854, 480)               // the original a copy-mode upscale left behind
+	file("/m/copy - 1080p upscale.mp4", 1920, 1080) // ...and the copy it made
+	file("/m/replaced.mp4", 1920, 1080)         // replace mode: same path, now upscaled
+	file("/m/plain.mp4", 1280, 720)             // never upscaled, below 4K
+	file("/m/uhd.mp4", 3840, 2160)              // already 4K: nothing to upscale to
+	done("/m/copy.mp4", "/m/copy - 1080p upscale.mp4", `{"upscale_to":1080,"upscale_preset":"film-lanczos","upscale_tier":"shader"}`)
+	done("/m/replaced.mp4", "/m/replaced.mp4", `{"upscale_to":720,"upscale_preset":"fsr","upscale_tier":"shader"}`)
+	done("/m/replaced.mp4", "/m/replaced.mp4", `{"upscale_to":1080,"upscale_preset":"neural-anime","upscale_tier":"neural"}`) // a later one
+	done("/m/plain.mp4", "/m/plain.mp4", `{"codec":"hevc","quality":60}`)                                                   // an ordinary re-encode
+
+	recs, err := st.UpscaledFiles([]string{"/m/copy.mp4", "/m/copy - 1080p upscale.mp4", "/m/replaced.mp4", "/m/plain.mp4", "/m/uhd.mp4"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(recs) != 2 {
+		t.Fatalf("only the two upscale outputs are flagged, got %v", recs)
+	}
+	if r := recs["/m/copy - 1080p upscale.mp4"]; r.To != 1080 || r.Preset != "film-lanczos" || r.Tier != "shader" {
+		t.Errorf("copy-mode record: %+v", r)
+	}
+	if r := recs["/m/replaced.mp4"]; r.To != 1080 || r.Tier != "neural" {
+		t.Errorf("the latest upscale of a path wins: %+v", r)
+	}
+	if _, ok := recs["/m/copy.mp4"]; ok {
+		t.Error("the original a copy was made from is not itself an upscale")
+	}
+	if got, _ := st.UpscaledFiles(nil); len(got) != 0 {
+		t.Error("no paths, no records")
+	}
+
+	names := func(up string) []string {
+		fs, _, err := st.ListFiles(FileFilter{Library: "movies", Upscale: up}, "title", 0, 50)
+		if err != nil {
+			t.Fatalf("filter %q: %v", up, err)
+		}
+		var out []string
+		for _, f := range fs {
+			out = append(out, f.Path)
+		}
+		return out
+	}
+	if got := names("upscaled"); len(got) != 2 || got[0] != "/m/copy - 1080p upscale.mp4" || got[1] != "/m/replaced.mp4" {
+		t.Errorf("upscaled: %v", got)
+	}
+	// Upscalable: below 4K and not already an upscale's output. The 4K file has
+	// nothing to go to, and the outputs are already done.
+	if got := names("upscalable"); len(got) != 2 || got[0] != "/m/copy.mp4" || got[1] != "/m/plain.mp4" {
+		t.Errorf("upscalable: %v", got)
+	}
+	if got := names(""); len(got) != 5 {
+		t.Errorf("no filter lists everything: %v", got)
+	}
+}

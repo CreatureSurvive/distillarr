@@ -356,6 +356,7 @@ type FileFilter struct {
 	AudioCodec string // any audio track: pcm, aac, ac3, eac3, dts, truehd, flac, opus ...
 	Issue      string // issue key (see internal/issues)
 	ResClass   int    // nominal class (res.Class): 480, 576, 720, 1080, 2160
+	Upscale    string // "upscaled": made by an upscale job; "upscalable": below 4K and not one
 }
 
 // resClassSQL mirrors res.Class in SQL.
@@ -559,6 +560,12 @@ func (f FileFilter) where() (string, []any) {
 	if f.ResClass > 0 {
 		w = append(w, resClassSQL+"=?")
 		a = append(a, f.ResClass)
+	}
+	switch f.Upscale {
+	case "upscaled":
+		w = append(w, "path IN ("+upscaleOutputs+")")
+	case "upscalable":
+		w = append(w, "path NOT IN ("+upscaleOutputs+")", resClassSQL+"<2160", "height>0")
 	}
 	if f.HDR != "" {
 		w = append(w, "hdr=?")

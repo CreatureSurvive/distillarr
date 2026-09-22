@@ -33,6 +33,8 @@ type fileOut struct {
 	Overview string      `json:"overview,omitempty"`
 	Genres   string      `json:"genres,omitempty"`
 	Queued   bool        `json:"queued,omitempty"`
+	// Upscaled is set when this file is the output of a finished upscale job.
+	Upscaled *store.UpscaleRecord `json:"upscaled,omitempty"`
 }
 
 func imgURL(itemID, kind string, w int) string {
@@ -48,6 +50,7 @@ func (s *Server) decorate(files []*store.File) []fileOut {
 		paths[i] = f.Path
 	}
 	jf, _ := s.st.JellyfinMap(paths)
+	ups, _ := s.st.UpscaledFiles(paths)
 	out := make([]fileOut, 0, len(files))
 	for _, f := range files {
 		fo := fileOut{File: f}
@@ -69,6 +72,9 @@ func (s *Server) decorate(files []*store.File) []fileOut {
 			}
 		}
 		fo.Queued, _ = s.st.HasQueuedForFile(f.Path)
+		if u, ok := ups[f.Path]; ok {
+			fo.Upscaled = &u
+		}
 		out = append(out, fo)
 	}
 	return out
@@ -89,6 +95,7 @@ func (s *Server) listFiles(w http.ResponseWriter, r *http.Request) {
 		AudioCodec: q.Get("audio"),
 		Issue:      q.Get("issue"),
 		ResClass:   atoi(q.Get("res")),
+		Upscale:    q.Get("upscale"),
 		Show:       q.Get("show"),
 	}
 	f.Candidates = q.Get("candidates") == "1"

@@ -5,8 +5,8 @@ import { useEffect, useState } from "react";
 import { api, type Composition, type Facet, type IssueType } from "./api";
 import { codecLabel, resLabel } from "./format";
 
-export type Facets = { container: string; video: string; audio: string; res: string; issue: string };
-export const NO_FACETS: Facets = { container: "", video: "", audio: "", res: "", issue: "" };
+export type Facets = { container: string; video: string; audio: string; res: string; issue: string; upscale?: string };
+export const NO_FACETS: Facets = { container: "", video: "", audio: "", res: "", issue: "", upscale: "" };
 
 const LEGACY_CONTAINERS = new Set(["avi", "wmv", "asf", "flv", "mpg", "mpeg", "ts", "m2ts", "vob", "divx", "ogm", "rm", "rmvb", "3gp"]);
 const LEGACY_CODECS = new Set(["mpeg1video", "mpeg2video", "mpeg4", "msmpeg4v1", "msmpeg4v2", "msmpeg4v3", "wmv1", "wmv2", "wmv3", "vc1", "h263", "vp8", "theora", "flv1"]);
@@ -63,8 +63,9 @@ export function FacetFilters({
   const count = (n: number) => ` · ${n.toLocaleString()}`;
   const libCount = (t: IssueType) => (library === "movies" ? t.movies : library === "tvshows" ? t.episodes : t.movies + t.episodes);
 
+  // Saved sessions predate some facets: a missing key reads as "any".
   const sel = (k: keyof Facets, label: string, opts: { value: string; label: string }[]) => (
-    <select className={`input facet${value[k] ? " facet-on" : ""}`} value={value[k]} aria-label={label}
+    <select className={`input facet${value[k] ? " facet-on" : ""}`} value={value[k] ?? ""} aria-label={label}
       onChange={(e) => set(k, e.target.value)}>
       <option value="">{label}: any</option>
       {opts.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
@@ -87,6 +88,10 @@ export function FacetFilters({
       {sel("res", "Resolution", comp ? comp.res.filter((f) => f.value !== "0").map((f) => ({
         value: f.value, label: resLabel(Number(f.value)) + count(f.files),
       })) : [])}
+      {sel("upscale", "Upscaling", [
+        { value: "upscalable", label: "Could be upscaled (below 4K)" },
+        { value: "upscaled", label: "Already upscaled" },
+      ])}
       {issues && sel("issue", "Issue", types.filter((t) => t.scope === "file" && libCount(t) > 0).map((t) => ({
         value: t.key, label: t.label + count(libCount(t)),
       })))}
@@ -97,5 +102,5 @@ export function FacetFilters({
 
 // Query params for api.files.
 export function facetParams(f: Facets) {
-  return { container: f.container, codec: f.video, audio: f.audio, res: f.res, issue: f.issue };
+  return { container: f.container, codec: f.video, audio: f.audio, res: f.res, issue: f.issue, upscale: f.upscale ?? "" };
 }

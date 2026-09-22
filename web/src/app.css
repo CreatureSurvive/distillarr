@@ -548,3 +548,4 @@ details.panel[open] > summary { margin-bottom: 12px; }
 .up-params { display: flex; flex-direction: column; gap: 12px; }
 .up-params .field { margin-bottom: 0; }
 .up-group { margin-top: 6px; padding-top: 10px; border-top: 1px solid var(--line-soft); }
+.chip.c-up { color: var(--violet); border-color: color-mix(in srgb, var(--violet) 45%, transparent); }
