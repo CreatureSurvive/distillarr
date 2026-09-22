@@ -50,10 +50,10 @@ type Preview struct {
 	// Tune is the quality search, when the settings had a VMAF target.
 	Tune  *tune.Result `json:"tune,omitempty"`
 	Stage string       `json:"stage,omitempty"` // what it is doing right now
-	// sceneAware: segment starts are the autoStarts placeholder for the
-	// initial broadcast; run() replaces them with scene-snapped spans
-	// once it has a context to run detection on.
-	sceneAware bool
+	// deferSpans: segment starts are the autoStarts placeholder for the
+	// initial broadcast; run() replaces them with packet-scanned spans
+	// once it has a context to read the file's own index on.
+	deferSpans bool
 }
 
 // Manager tracks previews; clips live under rootDir.
@@ -135,11 +135,11 @@ func (m *Manager) Create(fileID int64, path string, dur float64, s encode.Settin
 		if s.VMAFTarget > 0 && media.VMAFAvailable() {
 			// Same spans the quality search samples, so B is its output.
 			// autoStarts above is just the placeholder for the initial
-			// broadcast below - run() swaps in the scene-snapped starts
-			// once it has a context to run detection on (this method
-			// must return immediately; detection can take up to 90s).
+			// broadcast below - run() swaps in the packet-scanned starts
+			// once it has a context to read the file's own index on
+			// (this method must return immediately).
 			length = tune.SampleLen
-			p.sceneAware = true
+			p.deferSpans = true
 		}
 	}
 	if len(starts) > maxSegs {
@@ -227,8 +227,8 @@ func (m *Manager) run(p *Preview) {
 	}
 	deint := p.Settings.Deinterlace == "on" || (p.Settings.Deinterlace == "auto" && v.Interlaced())
 
-	if p.sceneAware {
-		m.setStage(p, "finding scenes")
+	if p.deferSpans {
+		m.setStage(p, "scanning for sample spots")
 		starts := tune.Spans(ctx, p.Path, p.Duration)
 		for i := range p.Segments {
 			if i < len(starts) {

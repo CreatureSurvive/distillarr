@@ -12,8 +12,10 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
+	"sync"
 
 	"mediatrans/internal/encode"
 	"mediatrans/internal/media"
@@ -99,14 +101,15 @@ func CutSamples(ctx context.Context, src *media.Probe, starts []float64, length 
 	return out, nil
 }
 
-// spanRadius bounds how much of the file scene detection actually
-// decodes around each target, in each direction: wide enough that
-// typical scene-cut spacing (seconds to a couple of minutes) reliably
-// finds something nearby, narrow enough that "middle" can't snap all
-// the way toward "beginning" or "climax", and - critically - bounded
-// regardless of the file's own length, since a whole-file decode just
-// for cut points measured over 2 minutes on a single 43-minute episode.
-func spanRadius(dur float64) float64 { return math.Min(dur*0.08, 240) }
+// nearBlackPct excludes the bottom slice of the file's own byte-density
+// distribution from window selection: a fade, a static title card or a
+// logo bumper spends almost no bits and tells a quality search nothing
+// about real content - worse, VMAF scores near-black spans oddly rather
+// than easily (confirmed live: a 10th-percentile-by-bytes window scored
+// the WORST VMAF of three candidates at a fixed CRF on a real file, not
+// the best, despite having the lowest byte density). 20% gives a safer
+// margin than the 10% a naive version of this idea starts from.
+const nearBlackPct = 0.20
 
 // Spans returns len(sampleAt) sample start times for a duration. Fixed
 // fractions alone can land squarely on an unrepresentative 15s window -
@@ -115,31 +118,24 @@ func spanRadius(dur float64) float64 { return math.Min(dur*0.08, 240) }
 // night scene - which is exactly the kind of noise that makes the
 // quality search fit to 45 seconds instead of the whole file (seen
 // live: sibling episodes of the same show landing on VMAF-target
-// quality anywhere from 25 to 70). Each sample is snapped to the
-// nearest real scene cut near its traditional position (only a small
-// window around that position is decoded, not the whole file), so it
-// starts on stable, representative content instead of an arbitrary
-// timestamp that might sit mid-scene or on a transition. A target with
-// no cut nearby, or whose detection fails outright, keeps its
-// fixed-fraction position.
+// quality anywhere from 25 to 70). Each sample is chosen from the
+// file's own packet-size index (no decode: the container's index
+// alone, ~9s for a 2.5-hour Bluray remux in testing) as the
+// keyframe-starting window whose byte density is closest to the file's
+// own median, within an equal time slice of the runtime - typical
+// complexity for that part of the film, not an accidental outlier in
+// either direction, landing cleanly on a keyframe for free. A file
+// whose index can't be read, or too short to have a keyframe in every
+// slice, falls back to plain fixed fractions.
 func Spans(ctx context.Context, path string, dur float64) []float64 {
-	if dur <= sampleLen*4 {
-		return fixedSpans(dur)
-	}
-	radius := spanRadius(dur)
-	chosen := make([]float64, 0, len(sampleAt))
-	for _, f := range sampleAt {
-		target := dur*f - sampleLen/2
-		st := target
-		if cuts, err := media.DetectScenesNear(ctx, path, target+sampleLen/2, radius); err == nil {
-			if snapped, ok := nearestCut(cuts, target, dur, radius, chosen); ok {
-				st = snapped
+	if dur > sampleLen*4 {
+		if pkts, err := media.PacketSizes(ctx, path); err == nil {
+			if spans := windowScan(pkts, dur); len(spans) == len(sampleAt) {
+				return spans
 			}
 		}
-		chosen = append(chosen, clampSpan(st, dur))
 	}
-	sort.Float64s(chosen)
-	return chosen
+	return fixedSpans(dur)
 }
 
 func fixedSpans(dur float64) []float64 {
@@ -150,22 +146,59 @@ func fixedSpans(dur float64) []float64 {
 	return out
 }
 
-// nearestCut finds the cut closest to target, skipping just past it
-// (the first moments of a hard cut are a transition, not the scene the
-// sample is meant to represent). Cuts too near the file's edges or too
-// near an already-chosen sample are excluded.
-func nearestCut(cuts []float64, target, dur, tol float64, chosen []float64) (float64, bool) {
-	best, bestDist := math.NaN(), tol
-	for _, c := range cuts {
-		st := c + 0.5
-		if st < sampleLen*0.5 || st > dur-sampleLen*1.5 || tooClose(st, chosen) {
+type window struct {
+	start float64
+	bytes int64
+}
+
+// windowScan finds len(sampleAt) candidate windows and picks one per
+// equal time slice of the runtime. Each keyframe packet seeds one
+// candidate window summing every packet's bytes within sampleLen of it
+// (bounded work: real keyframe spacing is seconds, and each inner scan
+// stops as soon as it passes sampleLen, so this is nowhere near the
+// O(n²) it might look like). Returns nil if any slice has nothing
+// usable, so the caller falls back to fixed fractions for all of them
+// rather than mixing strategies.
+func windowScan(pkts []media.Packet, dur float64) []float64 {
+	var all []window
+	n := len(pkts)
+	for i, p := range pkts {
+		if !p.Key || p.PTS < 0 || p.PTS+sampleLen > dur {
 			continue
 		}
-		if d := math.Abs(st - target); d < bestDist {
-			best, bestDist = st, d
+		var sum int64
+		for j := i; j < n && pkts[j].PTS-p.PTS < sampleLen; j++ {
+			sum += pkts[j].Size
 		}
+		all = append(all, window{p.PTS, sum})
 	}
-	return best, !math.IsNaN(best)
+	if len(all) < len(sampleAt) {
+		return nil
+	}
+	bySize := append([]window(nil), all...)
+	sort.Slice(bySize, func(i, j int) bool { return bySize[i].bytes < bySize[j].bytes })
+	floor := bySize[int(float64(len(bySize))*nearBlackPct)].bytes
+	median := bySize[len(bySize)/2].bytes
+
+	out := make([]float64, 0, len(sampleAt))
+	slice := dur / float64(len(sampleAt))
+	for i := range sampleAt {
+		lo, hi := slice*float64(i), slice*float64(i+1)
+		best, bestDist := -1, math.MaxFloat64
+		for k, w := range all {
+			if w.start < lo || w.start >= hi || w.bytes < floor || tooClose(w.start, out) {
+				continue
+			}
+			if d := math.Abs(float64(w.bytes - median)); d < bestDist {
+				best, bestDist = k, d
+			}
+		}
+		if best < 0 {
+			return nil
+		}
+		out = append(out, all[best].start)
+	}
+	return out
 }
 
 func tooClose(t float64, chosen []float64) bool {
@@ -188,6 +221,34 @@ func clampSpan(st, dur float64) float64 {
 }
 
 func qualityForCRF(crf int) int { return 50 + (23-crf)*5 }
+
+// vmafPerCRF is the standard rule of thumb for x264/x265 in the 88-96
+// VMAF range: about 2 VMAF points per CRF step. It doesn't need to be
+// exact - crfStep re-derives the step from a fresh measurement every
+// try, so an imprecise slope on real content only costs an extra try
+// or two, never a wrong answer.
+const vmafPerCRF = 2.0
+
+// crfStep sizes the next CRF probe from how far the last try's mean
+// VMAF sat from target, clamped so one step can never leap further
+// than a handful of quality levels. Lower CRF is higher quality, so a
+// positive gap (below target) must lower CRF: callers do crf-step.
+func crfStep(gapToTarget float64) int {
+	step := int(math.Round(gapToTarget / vmafPerCRF))
+	switch {
+	case step > 4:
+		step = 4
+	case step < -4:
+		step = -4
+	case step == 0:
+		if gapToTarget >= 0 {
+			step = 1
+		} else {
+			step = -1
+		}
+	}
+	return step
+}
 
 // Search runs the quality search. It returns the result plus, when
 // KeepFinal, the paths of the final level's samples in span order.
@@ -251,6 +312,12 @@ func Search(ctx context.Context, o Options) (Result, []string, error) {
 	tried := map[int]*Step{}
 	files := map[int][]string{}
 
+	// Each sample's VMAF pass wants nearly every core by default (see
+	// media.VMAF); running len(cuts) of them at once needs the cores
+	// split between them; or they just fight each other for the same
+	// ones instead of finishing any faster.
+	vmafThreads := max(2, runtime.NumCPU()/max(1, len(cuts)))
+
 	try := func(crf int) (*Step, error) {
 		if st, ok := tried[crf]; ok {
 			return st, nil
@@ -262,39 +329,67 @@ func Search(ctx context.Context, o Options) (Result, []string, error) {
 		ss := s
 		ss.Quality = q
 		step := &Step{Quality: q, CRF: crf, VMAF: media.VMAFResult{Min: 100}}
+
+		type sample struct {
+			encBytes int64
+			vmaf     media.VMAFResult
+			path     string
+		}
+		results := make([]sample, len(cuts))
+		errs := make([]error, len(cuts))
+		var wg sync.WaitGroup
+		for i, cut := range cuts {
+			wg.Add(1)
+			go func(i int, cut string) {
+				defer wg.Done()
+				out := filepath.Join(o.WorkDir, fmt.Sprintf("c%d-s%d.mp4", crf, i))
+				prim, fb, err := encode.Build(ss, cutProbes[i], out, &encode.Clip{Start: 0, Dur: sampleLen + 1, NoAudio: !o.KeepFinal})
+				if err != nil {
+					errs[i] = err
+					return
+				}
+				// The lossless intermediate isn't hardware-decodable; decode it
+				// on the CPU and encode with the job's real encoder.
+				spec := prim
+				if fb != nil {
+					spec = fb
+				}
+				release := o.Acquire(prim.SemKey)
+				_, err = encode.Runner(ctx, *spec, 0, nil)
+				release()
+				if err != nil {
+					errs[i] = fmt.Errorf("sample encode: %w", err)
+					return
+				}
+				var encBytes int64
+				if n, err := media.SpanVideoBytes(ctx, out, 0, sampleLen+1); err == nil {
+					encBytes = n
+				}
+				vr, err := media.VMAF(ctx, out, media.VMAFRef{Path: cut, Start: 0, Dur: sampleLen + 1,
+					Crop: crop, W: refW, H: refH, Deinterlace: deint, Threads: vmafThreads})
+				if err != nil {
+					errs[i] = err
+					return
+				}
+				results[i] = sample{encBytes: encBytes, vmaf: vr, path: out}
+			}(i, cut)
+		}
+		wg.Wait()
+		for _, err := range errs {
+			if err != nil {
+				return nil, err
+			}
+		}
+
 		var encBytes int64
 		minP5, sumMean := 100.0, 0.0
-		var paths []string
-		for i, cut := range cuts {
-			out := filepath.Join(o.WorkDir, fmt.Sprintf("c%d-s%d.mp4", crf, i))
-			prim, fb, err := encode.Build(ss, cutProbes[i], out, &encode.Clip{Start: 0, Dur: sampleLen + 1, NoAudio: !o.KeepFinal})
-			if err != nil {
-				return nil, err
-			}
-			// The lossless intermediate isn't hardware-decodable; decode it on
-			// the CPU and encode with the job's real encoder.
-			spec := prim
-			if fb != nil {
-				spec = fb
-			}
-			release := o.Acquire(prim.SemKey)
-			_, err = encode.Runner(ctx, *spec, 0, nil)
-			release()
-			if err != nil {
-				return nil, fmt.Errorf("sample encode: %w", err)
-			}
-			if n, err := media.SpanVideoBytes(ctx, out, 0, sampleLen+1); err == nil {
-				encBytes += n
-			}
-			vr, err := media.VMAF(ctx, out, media.VMAFRef{Path: cut, Start: 0, Dur: sampleLen + 1,
-				Crop: crop, W: refW, H: refH, Deinterlace: deint})
-			if err != nil {
-				return nil, err
-			}
-			sumMean += vr.Mean
-			minP5 = min(minP5, vr.P5)
-			step.VMAF.Min = min(step.VMAF.Min, vr.Min)
-			paths = append(paths, out)
+		paths := make([]string, len(cuts))
+		for i, r := range results {
+			encBytes += r.encBytes
+			sumMean += r.vmaf.Mean
+			minP5 = min(minP5, r.vmaf.P5)
+			step.VMAF.Min = min(step.VMAF.Min, r.vmaf.Min)
+			paths[i] = r.path
 		}
 		step.VMAF.Mean = sumMean / float64(len(cuts))
 		step.VMAF.P5 = minP5
@@ -308,43 +403,62 @@ func Search(ctx context.Context, o Options) (Result, []string, error) {
 		return step, nil
 	}
 
-	// Start from the settings' own quality; walk toward the boundary,
-	// then stop at the highest CRF (smallest file) that passes.
+	// Start from the settings' own quality and walk toward the boundary,
+	// sizing each step from how far the last try's VMAF sat from target
+	// instead of a blind fixed step - a source that's passing by 10
+	// points can jump straight for a much higher CRF instead of
+	// spending tries crossing the gap one point at a time.
 	crf := encode.CRFForQuality(s.Quality)
 	lo, hi := 14, 32
-	first, err := try(crf)
+	cur, err := try(crf)
 	if err != nil {
 		return res, nil, err
 	}
-	best := -1
-	if first.Pass {
-		best = crf
-		for c := crf + 2; c <= hi && len(tried) < 6; c += 2 {
-			st, err := try(c)
-			if err != nil {
-				return res, nil, err
-			}
-			if !st.Pass {
-				if st2, err := try(c - 1); err == nil && st2.Pass {
-					best = c - 1
-				}
-				break
-			}
-			best = c
+	for len(tried) < 6 {
+		next := crf - crfStep(o.Target-cur.VMAF.Mean)
+		if next == crf || next < lo || next > hi {
+			break
 		}
-	} else {
-		for c := crf - 2; c >= lo && len(tried) < 6; c -= 2 {
-			st, err := try(c)
-			if err != nil {
-				return res, nil, err
+		st, err := try(next)
+		if err != nil {
+			return res, nil, err
+		}
+		if st.Pass != cur.Pass {
+			// Crossed the pass/fail boundary. A bigger adaptive step can
+			// leave a wider gap than the old fixed step of 2 ever could,
+			// so narrow it for real instead of only checking one CRF back.
+			passSide, otherSide := crf, next
+			if !cur.Pass {
+				passSide, otherSide = next, crf
 			}
-			if st.Pass {
-				best = c
-				if st2, err := try(c + 1); err == nil && st2.Pass {
-					best = c + 1
+			for len(tried) < 6 {
+				lo2, hi2 := passSide, otherSide
+				if lo2 > hi2 {
+					lo2, hi2 = hi2, lo2
 				}
-				break
+				if hi2-lo2 <= 1 {
+					break
+				}
+				mid := (lo2 + hi2) / 2
+				mst, err := try(mid)
+				if err != nil {
+					return res, nil, err
+				}
+				if mst.Pass {
+					passSide = mid
+				} else {
+					otherSide = mid
+				}
 			}
+			break
+		}
+		crf, cur = next, st
+	}
+
+	best := -1
+	for c, st := range tried {
+		if st.Pass && c > best {
+			best = c
 		}
 	}
 	res.Met = best >= 0

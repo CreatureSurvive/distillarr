@@ -36,6 +36,11 @@ type VMAFRef struct {
 	Crop        string // "w:h:x:y" applied to the reference too ("" = none)
 	W, H        int    // reference picture size after crop
 	Deinterlace bool   // the encode deinterlaced: do the same to the reference
+	// Threads caps libvmaf's thread count (0 = the default, nearly every
+	// core). Callers running several VMAF passes at once should divide
+	// the core count between them, or each call fights the others for
+	// the same cores instead of finishing any faster.
+	Threads int
 }
 
 // VMAF scores an encoded sample (starting at t=0) against the same span
@@ -62,7 +67,10 @@ func VMAF(ctx context.Context, distorted string, ref VMAFRef) (VMAFResult, error
 		refChain += ",bwdif=mode=send_frame"
 	}
 	refChain += "," + byIndex
-	threads := max(2, runtime.NumCPU()-2)
+	threads := ref.Threads
+	if threads <= 0 {
+		threads = max(2, runtime.NumCPU()-2)
+	}
 	graph := fmt.Sprintf(
 		"[0:v]scale=%d:%d:flags=bicubic,format=yuv420p,"+byIndex+"[d];"+
 			"[1:v]%s,format=yuv420p[r];"+
