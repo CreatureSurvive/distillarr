@@ -54,6 +54,10 @@ type Preset struct {
 
 	scaler  string   // libplacebo upscaler for the residual scale
 	shaders []string // embedded .glsl files, concatenated in order
+	// opt are extra shader files a preset adds when its param is on. They are
+	// put BEFORE the base shaders: RAVU keeps its weight tables at the end of its
+	// file, and libplacebo reads a table until a blank line or end of input.
+	opt    []optShader
 	model  string // neural: Real-ESRGAN model name
 	scales []int  // neural: the model's native scale factors
 	// tune rewrites the shader source for the resolved params (nil = as shipped),
@@ -61,17 +65,31 @@ type Preset struct {
 	tune func(src string, v map[string]float64) string
 }
 
+// optShader is a shader file enabled by a boolean param.
+type optShader struct{ param, file string }
+
 // Params shared by every shader-tier preset.
 var commonParams = []Param{
 	{Key: "sigmoid", Label: "Sigmoid light", Min: 0, Max: 1, Step: 1, Def: 1},
 	{Key: "deband", Label: "Deband", Min: 0, Max: 1, Step: 1, Def: 0},
 }
 
-// sharpnessRe matches FSR's RCAS strength define (see fsrTune).
+// refineParam turns on SSimSuperRes after a prescaler: it removes the ringing and
+// line bloat a sharp scaler leaves, the usual mpv recipe (FSRCNNX/RAVU + SSim).
+var refineParam = Param{Key: "ssim", Label: "SSimSuperRes refine (less ringing)", Min: 0, Max: 1, Step: 1, Def: 0}
+
+var refineOpt = []optShader{{param: "ssim", file: "SSimSuperRes.glsl"}}
+
+// sharpnessRe matches the strength #define in FSR (RCAS) and NIS.
 var sharpnessRe = regexp.MustCompile(`(?m)^#define SHARPNESS [0-9.]+`)
 
 // fsrTune sets RCAS sharpening. The shader's SHARPNESS counts stops of
 // *reduction* (0 = strongest), so the slider is inverted: higher = sharper.
+// nisTune sets NIS sharpening (0..1, higher = sharper: no inversion needed).
+func nisTune(src string, v map[string]float64) string {
+	return sharpnessRe.ReplaceAllString(src, fmt.Sprintf("#define SHARPNESS %.2f", v["sharpness"]))
+}
+
 func fsrTune(src string, v map[string]float64) string {
 	return sharpnessRe.ReplaceAllString(src, fmt.Sprintf("#define SHARPNESS %.2f", 2-v["sharpness"]))
 }
@@ -142,9 +160,43 @@ var presets = []Preset{
 	},
 	{
 		ID: "fsr", Label: "FSR 1.0 (EASU + RCAS)", Tier: TierShader, Content: Any,
-		Desc: "AMD FidelityFX Super Resolution: edge-directed upscale plus contrast-adaptive sharpening. Crisp on any content, cheap to run.",
+		Desc:   "AMD FidelityFX Super Resolution: edge-directed upscale plus contrast-adaptive sharpening. Crisp on any content, cheap to run.",
 		Params: append([]Param{{Key: "sharpness", Label: "Sharpening", Min: 0, Max: 2, Step: 0.1, Def: 1.8}}, commonParams...),
 		scaler: "ewa_lanczos", shaders: []string{"FSR.glsl"}, tune: fsrTune,
+	},
+	{
+		ID: "film-jinc", Label: "Jinc (EWA)", Tier: TierShader, Content: Film,
+		Desc:   "Jinc-windowed elliptical scaler: avoids diagonal stair-stepping. Between Lanczos and Ginseng in sharpness.",
+		Params: commonParams, scaler: "ewa_jinc",
+	},
+	{
+		ID: "film-spline64", Label: "Spline64", Tier: TierShader, Content: Film,
+		Desc:   "Separable spline: the safe, universally predictable choice. Sharper than bicubic, little ringing.",
+		Params: commonParams, scaler: "spline64",
+	},
+	{
+		ID: "ravu-lite", Label: "RAVU Lite (r3)", Tier: TierShader, Content: Film,
+		Desc:   "Edge-directed prescaler with trained filter weights: sharp, natural edges without the painterly look of heavy networks. ~3x realtime to 1080p.",
+		Params: append(append([]Param{}, commonParams...), refineParam), scaler: "ewa_lanczos",
+		shaders: []string{"ravu-lite-r3.glsl"}, opt: refineOpt,
+	},
+	{
+		ID: "fsrcnnx-fast", Label: "FSRCNNX 8-0-4-1", Tier: TierShader, Content: Film,
+		Desc:   "A small convolutional network trained on live-action video: natural detail recovery. ~3x realtime to 1080p.",
+		Params: append(append([]Param{}, commonParams...), refineParam), scaler: "ewa_lanczos",
+		shaders: []string{"FSRCNNX_x2_8-0-4-1.glsl"}, opt: refineOpt,
+	},
+	{
+		ID: "fsrcnnx-hq", Label: "FSRCNNX 16-0-4-1", Tier: TierShader, Content: Film,
+		Desc:   "The larger FSRCNNX network: a little more detail, about 25% slower (~2.5x realtime to 1080p).",
+		Params: append(append([]Param{}, commonParams...), refineParam), scaler: "ewa_lanczos",
+		shaders: []string{"FSRCNNX_x2_16-0-4-1.glsl"}, opt: refineOpt,
+	},
+	{
+		ID: "nis", Label: "NVIDIA Image Scaling", Tier: TierShader, Content: Any,
+		Desc:   "NVIDIA's directional scaler and sharpener, a cross-vendor alternative to FSR. Very cheap; noticeably sharper than Lanczos.",
+		Params: append([]Param{{Key: "sharpness", Label: "Sharpening", Min: 0, Max: 1, Step: 0.05, Def: 0.25}}, commonParams...),
+		scaler: "ewa_lanczos", shaders: []string{"NVScaler.glsl"}, tune: nisTune,
 	},
 	{
 		ID: "anime-fast", Label: "Anime4K Fast", Tier: TierShader, Content: Anime,

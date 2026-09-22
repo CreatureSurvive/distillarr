@@ -27,15 +27,25 @@ func (p Preset) shaderPath(v map[string]float64) (string, error) {
 	if len(p.shaders) == 0 {
 		return "", nil
 	}
+	var names []string
+	for _, o := range p.opt { // optional passes first (see Preset.opt)
+		if v[o.param] >= 1 {
+			names = append(names, o.file)
+		}
+	}
+	names = append(names, p.shaders...)
 	var buf strings.Builder
-	for _, name := range p.shaders {
+	for i, name := range names {
 		b, err := shaderFS.ReadFile("shaders/" + name)
 		if err != nil {
 			return "", fmt.Errorf("upscale preset %s: %w", p.ID, err)
 		}
+		if i > 0 {
+			buf.WriteString("\n\n") // a blank line ends a shader's data table
+		}
 		buf.Write(b)
-		buf.WriteByte('\n')
 	}
+	buf.WriteByte('\n')
 	src := buf.String()
 	if p.tune != nil {
 		src = p.tune(src, v)

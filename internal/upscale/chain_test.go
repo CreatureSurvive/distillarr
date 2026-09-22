@@ -39,7 +39,7 @@ func TestFilterShaderPreset(t *testing.T) {
 	if i < 0 || !strings.HasSuffix(f, ":format=p010le") {
 		t.Fatalf("anime preset needs a shader path and the output format: %s", f)
 	}
-	path := f[i+len("custom_shader_path="):strings.Index(f, ":format=")]
+	path := f[i+len("custom_shader_path=") : strings.Index(f, ":format=")]
 	b, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("shader not materialised: %v", err)
@@ -116,7 +116,7 @@ func TestFSRSharpnessParam(t *testing.T) {
 			t.Fatal(err)
 		}
 		i := strings.Index(f, "custom_shader_path=") + len("custom_shader_path=")
-		b, err := os.ReadFile(f[i:strings.Index(f[i:], ":")+i])
+		b, err := os.ReadFile(f[i : strings.Index(f[i:], ":")+i])
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -217,5 +217,75 @@ func TestPresetParamsAreNeverNull(t *testing.T) {
 	}
 	if strings.Contains(string(b), `"params":null`) {
 		t.Errorf("a preset serialised params as null: %s", b)
+	}
+}
+
+// Every shader-tier preset must resolve to embedded files: a typo in a filename
+// would otherwise only surface when someone picked that preset.
+func TestEveryShaderPresetResolves(t *testing.T) {
+	ShaderDir = t.TempDir()
+	for _, p := range All() {
+		if p.Neural() {
+			continue
+		}
+		f, err := Spec{W: 1920, H: 1080, Preset: p.ID, Params: map[string]float64{"ssim": 1}}.Filter("rgba")
+		if err != nil {
+			t.Errorf("%s: %v", p.ID, err)
+			continue
+		}
+		if !strings.Contains(f, "upscaler=") || !strings.HasSuffix(f, ":format=rgba") {
+			t.Errorf("%s: odd filter %s", p.ID, f)
+		}
+	}
+}
+
+func filterSource(t *testing.T, preset string, params map[string]float64) string {
+	t.Helper()
+	f, err := Spec{W: 1920, H: 1080, Preset: preset, Params: params}.Filter("rgba")
+	if err != nil {
+		t.Fatal(err)
+	}
+	i := strings.Index(f, "custom_shader_path=")
+	if i < 0 {
+		t.Fatalf("%s has no shader: %s", preset, f)
+	}
+	i += len("custom_shader_path=")
+	b, err := os.ReadFile(f[i : i+strings.Index(f[i:], ":")])
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(b)
+}
+
+// RAVU keeps its weight table at the end of its file and libplacebo reads a table
+// to a blank line or end of input, so anything appended after it fails to parse
+// ("must be a valid hexadecimal sequence"). The refine pass therefore goes first.
+func TestRefinePassComesFirstAndIsOptional(t *testing.T) {
+	ShaderDir = t.TempDir()
+	on := filterSource(t, "ravu-lite", map[string]float64{"ssim": 1})
+	ssim, ravu := strings.Index(on, "SSimSuperRes"), strings.Index(on, "RAVU-Lite")
+	if ssim < 0 || ravu < 0 || ssim > ravu {
+		t.Errorf("SSimSuperRes must precede RAVU: ssim@%d ravu@%d", ssim, ravu)
+	}
+	if !strings.Contains(on, "\n\n//!") && !strings.Contains(on, "\n\n//") {
+		t.Error("files must be separated by a blank line")
+	}
+	if off := filterSource(t, "ravu-lite", nil); strings.Contains(off, "SSimSuperRes") {
+		t.Error("refine is off by default")
+	}
+	// The same holds for the other prescaler.
+	if fs := filterSource(t, "fsrcnnx-fast", map[string]float64{"ssim": 1}); !strings.Contains(fs, "SSimSuperRes") || !strings.Contains(fs, "feature map 1") {
+		t.Error("FSRCNNX + refine must contain both shaders")
+	}
+}
+
+func TestNISSharpness(t *testing.T) {
+	ShaderDir = t.TempDir()
+	// Unlike FSR's inverted knob, NIS's SHARPNESS is already "higher = sharper".
+	for v, want := range map[float64]string{0.25: "#define SHARPNESS 0.25", 0.8: "#define SHARPNESS 0.80", 0: "#define SHARPNESS 0.00"} {
+		got := filterSource(t, "nis", map[string]float64{"sharpness": v})
+		if !strings.Contains(got, want) {
+			t.Errorf("sharpness %v: want %q", v, want)
+		}
 	}
 }
