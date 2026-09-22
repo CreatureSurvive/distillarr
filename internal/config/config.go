@@ -5,10 +5,10 @@ package config
 
 import (
 	"log"
-	"strings"
 	"sync"
 	"time"
 
+	"mediatrans/internal/pathmap"
 	"mediatrans/internal/store"
 )
 
@@ -267,30 +267,18 @@ func (c Config) VMAF() float64 {
 func (c Config) MP4() bool { return c.PreferMP4 == nil || *c.PreferMP4 }
 
 // MapJellyfinPath rewrites a Jellyfin-side path to the local view.
+// JellyfinPathMap is "from=to" where from is Jellyfin's path, i.e. pathmap's
+// "remote=local", so this is ToLocal.
 func (c Config) MapJellyfinPath(p string) string {
-	from, to, ok := strings.Cut(c.JellyfinPathMap, "=")
-	from, to = strings.TrimRight(from, "/"), strings.TrimRight(to, "/")
-	if !ok || from == "" {
-		return p
-	}
-	if p == from || strings.HasPrefix(p, from+"/") {
-		return to + strings.TrimPrefix(p, from)
-	}
-	return p
+	m, _ := pathmap.Parse(c.JellyfinPathMap)
+	return m.ToLocal(p)
 }
 
 // ToJellyfinPath is MapJellyfinPath's inverse: our path as Jellyfin sees it
 // (/srv/media/movies/x.mp4 becomes /data/movies/x.mp4).
 func (c Config) ToJellyfinPath(p string) string {
-	from, to, ok := strings.Cut(c.JellyfinPathMap, "=")
-	from, to = strings.TrimRight(from, "/"), strings.TrimRight(to, "/")
-	if !ok || to == "" {
-		return p
-	}
-	if p == to || strings.HasPrefix(p, to+"/") {
-		return from + strings.TrimPrefix(p, to)
-	}
-	return p
+	m, _ := pathmap.Parse(c.JellyfinPathMap)
+	return m.ToRemote(p)
 }
 
 // WindowOpen reports whether the queue may start new jobs right now.
