@@ -711,6 +711,11 @@ var seriesSort = map[string]string{
 	"reclaimable": "11 DESC, f.title COLLATE NOCASE",
 	"size":        "6 DESC, f.title COLLATE NOCASE",
 	"episodes":    "4 DESC, f.title COLLATE NOCASE",
+	// Raw signal, independent of the size model's estimate: a show
+	// re-encoded at a high average bitrate for its resolution is
+	// usually a strong candidate, worth finding even before it shows
+	// up as "reclaimable" (which depends on rec_json's own estimate).
+	"bitrate": "7 DESC, f.title COLLATE NOCASE",
 }
 
 // ListSeries returns per-show aggregates for the tvshows library.

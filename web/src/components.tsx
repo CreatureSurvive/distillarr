@@ -1,6 +1,6 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { type FileItem, type Series } from "./api";
-import { bytes, codecLabel, hdrLabel, resLabel, se, titleHue } from "./format";
+import { bitrate, bytes, codecLabel, hdrLabel, resLabel, se, titleHue } from "./format";
 
 // Artwork with a deterministic typographic fallback (no Jellyfin, or no art).
 export function Art({
@@ -141,6 +141,7 @@ export function ShowCard({ s }: { s: Series }) {
         <div className="pcard-meta mono">
           <span>{s.seasons} season{s.seasons === 1 ? "" : "s"}</span>
           <span>{bytes(s.total_size)}</span>
+          {s.avg_bitrate > 0 && <span>{bitrate(s.avg_bitrate)}</span>}
         </div>
       </div>
     </a>

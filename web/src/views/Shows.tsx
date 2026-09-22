@@ -45,6 +45,7 @@ export default function Shows({ live }: { live: LiveState }) {
         <select className="input" value={sort} onChange={(e) => setSort(e.target.value)} aria-label="Sort">
           <option value="reclaimable">Most space to save</option>
           <option value="size">Largest</option>
+          <option value="bitrate">Highest bitrate</option>
           <option value="episodes">Most episodes</option>
           <option value="title">Title</option>
         </select>
