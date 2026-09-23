@@ -222,7 +222,7 @@ export default function EncodeOptions({ value: s, onChange, file, streams, hw, a
         {audioStreams.length === 0 && <div className="dim">No audio tracks.</div>}
         {audioStreams.map((a) => {
           const t = trackOf(a.stream_index, a.codec);
-          const lossy = t.action === "convert" && t.codec !== "flac";
+          const lossy = t.action === "convert" && t.codec !== "flac" && t.codec !== "alac";
           return (
             <div key={a.stream_index} className="track">
               <div className="track-name">
@@ -240,9 +240,11 @@ export default function EncodeOptions({ value: s, onChange, file, streams, hw, a
                   <>
                     <select className="input input-sm" value={t.codec || "aac"} onChange={(e) => setTrack({ ...t, codec: e.target.value })}>
                       <option value="flac">FLAC (lossless)</option>
+                      <option value="alac">ALAC (lossless)</option>
                       <option value="opus">Opus</option>
                       <option value="aac">AAC</option>
                       <option value="eac3">E-AC-3</option>
+                      <option value="ac3">AC-3 (5.1 cap)</option>
                     </select>
                     {lossy && (
                       <select className="input input-sm" value={t.bitrate || 0} onChange={(e) => setTrack({ ...t, bitrate: Number(e.target.value) || undefined })}>

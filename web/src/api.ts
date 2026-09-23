@@ -147,6 +147,17 @@ export type AudioTrack = {
 
 export type SubTrack = { index: number; action: "keep" | "drop" };
 
+// AudioRule is per-source-codec audio policy, keyed by ffprobe
+// codec_name ("truehd", "dts", "opus", "vorbis", "flac", ...) plus the
+// virtual key "pcm" covering every PCM variant. bitrate_by_channels' keys
+// are channel counts as strings (JSON object keys), e.g. {"6": 640, "8": 1024}.
+export type AudioRule = {
+  action: "copy" | "convert_if_needed" | "convert" | "remove";
+  target?: string;
+  bitrate_by_channels?: Record<string, number>;
+  max_channels?: number;
+};
+
 export type Settings = {
   codec: string;
   backend?: string;
@@ -249,6 +260,9 @@ export type Plan = {
   container?: string;
   backend: string;
   render_node?: string;
+  // Per-track audio cautions: object-metadata loss (Atmos/DTS:X),
+  // lossless→lossy, lossy→lossy.
+  warnings?: string[];
 };
 
 export type Series = {
@@ -397,6 +411,9 @@ export type RuleAction = {
   kind: "queue" | "queue_override" | "quick_fix" | "ignore";
   codec?: string;
   quality?: number;
+  // Per-rule audio policy override, same shape as Config.audio_rules.
+  // Only applies with kind === "queue_override"; unset uses the global policy.
+  audio_rules?: Record<string, AudioRule>;
 };
 export type AutoRule = {
   id: string;
@@ -499,6 +516,8 @@ export type Config = {
   max_height: number;
   tonemap_hdr: boolean;
   container_goal: string; // prefer_mp4 | mp4_required | keep
+  audio_rules?: Record<string, AudioRule>; // keyed by codec_name, plus the virtual "pcm" key
+  add_stereo_compat: boolean;
   crop_bars: boolean;
   vmaf_target: number;
   upscale_output: string;

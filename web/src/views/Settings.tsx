@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactNode } from "react";
-import { api, subscribe, type ArrInfo, type ArrInstance, type ArrTestResult, type AutopilotPreviewGroup, type AutoRule, type Config, type HwInfo, type JfStatus, type JfTest, type PlexStatus, type PlexTest, type RuleAction, type RuleMatch, type TrashItem } from "../api";
+import { api, subscribe, type ArrInfo, type ArrInstance, type ArrTestResult, type AudioRule, type AutopilotPreviewGroup, type AutoRule, type Config, type HwInfo, type JfStatus, type JfTest, type PlexStatus, type PlexTest, type RuleAction, type RuleMatch, type TrashItem } from "../api";
 import { Copyable, ISSUE_SHORT, Seg, Toggle, toast } from "../components";
 import { ago, backendLabel, bytes, codecLabel } from "../format";
 import { qualityWord } from "../options";
@@ -100,9 +100,9 @@ export default function SettingsView({ live, onJellyfin, onPlex }: { live: LiveS
             <Seg value={cfg.min_savings_pct} onChange={(v) => save({ min_savings_pct: v })}
               options={[15, 20, 30, 40, 50].map((v) => ({ value: v, label: `${v}%` }))} />
           </Field>
-          <Field label="Uncompressed PCM audio">
-            <Seg value={cfg.audio_pcm_target} onChange={(v) => save({ audio_pcm_target: v })}
-              options={[{ value: "flac", label: "FLAC (lossless)" }, { value: "eac3", label: "E-AC-3" }, { value: "aac", label: "AAC" }, { value: "copy", label: "Leave as PCM" }]} />
+          <Field label="Container" hint="Prefer MP4: MP4 whenever every kept track fits (per the audio rules below), else MKV. MP4 required: always MP4, converting whatever wouldn't fit. Keep: MP4 stays MP4 if it still fits; anything else is left as-is.">
+            <Seg value={cfg.container_goal} onChange={(v) => save({ container_goal: v })}
+              options={[{ value: "prefer_mp4", label: "Prefer MP4" }, { value: "mp4_required", label: "MP4 required" }, { value: "keep", label: "Keep as-is" }]} />
           </Field>
           <Field label="Resolution cap">
             <Seg value={cfg.max_height} onChange={(v) => save({ max_height: v })}
@@ -117,8 +117,8 @@ export default function SettingsView({ live, onJellyfin, onPlex }: { live: LiveS
         </div>
         <div className="toggles">
           <Toggle on={cfg.recompress_hevc} onChange={(v) => save({ recompress_hevc: v })} label="Re-encode existing HEVC" hint="Only when its bitrate is unusually high" />
-          <Toggle on={cfg.container_goal !== "keep"} onChange={(v) => save({ container_goal: v ? "prefer_mp4" : "keep" })} label="Prefer MP4 for Apple devices"
-            hint="HEVC tagged hvc1 with the index at the start. MKV is kept only for image subtitles, styled ASS, or TrueHD/DTS/FLAC audio. Changing an extension makes Sonarr/Radarr rescan the file." />
+          <Toggle on={cfg.add_stereo_compat} onChange={(v) => save({ add_stereo_compat: v })} label="Add a stereo compatibility track"
+            hint="When a file would otherwise keep no stereo/mono track at all, add an AAC 2.0 192k track downmixed from the first kept multichannel track (dialogue kept at full level, not attenuated like a typical downmix)." />
           <Toggle on={cfg.crop_bars} onChange={(v) => save({ crop_bars: v })} label="Crop black bars by default"
             hint="Bars are always left out of size estimates. Cropping them from the output is off by default: a film that switches aspect ratio could lose picture in scenes the detector didn't sample." />
           <CropProgress />
@@ -130,6 +130,7 @@ export default function SettingsView({ live, onJellyfin, onPlex }: { live: LiveS
             label="Don't swap a file in while it's being watched"
             hint="Holds the finished encode and waits for playback to stop (up to a few hours) before replacing it." />
         </div>
+        <AudioRulesSection cfg={cfg} save={save} />
         <Calibration />
       </section>
 
@@ -1257,6 +1258,108 @@ function CropProgress() {
       Black-bar check: {c.checked.toLocaleString()} of {c.total.toLocaleString()} files done
       {c.with_bars > 0 && `, ${c.with_bars.toLocaleString()} have bars`}
       {c.checked < c.total && " (re-encode candidates first)"}.
+    </div>
+  );
+}
+
+// one row per source codec Distillarr has opinions about. "pcm"
+// covers every PCM variant (the old "Uncompressed PCM audio" control's
+// replacement — its saved value seeds this row's default until it's
+// edited here, since audio_rules always takes priority once set).
+const AUDIO_RULE_CODECS: { key: string; label: string }[] = [
+  { key: "truehd", label: "TrueHD / Atmos" },
+  { key: "dts", label: "DTS / DTS-HD MA / DTS:X" },
+  { key: "flac", label: "FLAC" },
+  { key: "pcm", label: "PCM (uncompressed)" },
+  { key: "opus", label: "Opus" },
+  { key: "vorbis", label: "Vorbis" },
+];
+const AUDIO_RULE_TARGETS = [
+  { value: "eac3", label: "E-AC-3" },
+  { value: "ac3", label: "AC-3 (5.1 cap)" },
+  { value: "aac", label: "AAC" },
+  { value: "alac", label: "ALAC (lossless)" },
+  { value: "flac", label: "FLAC (lossless)" },
+  { value: "opus", label: "Opus" },
+];
+const AUDIO_RULE_ACTIONS = [
+  { value: "copy", label: "Copy" },
+  { value: "convert_if_needed", label: "Convert if needed" },
+  { value: "convert", label: "Always convert" },
+  { value: "remove", label: "Remove" },
+];
+
+function AudioRulesSection({ cfg, save }: { cfg: Config; save: (p: Partial<Config>, m?: string) => void }) {
+  const rules = cfg.audio_rules || {};
+  const ruleFor = (key: string): AudioRule => {
+    if (rules[key]) return rules[key];
+    if (key === "pcm" && cfg.audio_pcm_target && cfg.audio_pcm_target !== "copy") {
+      return { action: "convert", target: cfg.audio_pcm_target };
+    }
+    return { action: "copy" };
+  };
+  const setRule = (key: string, patch: Partial<AudioRule>) => {
+    save({ audio_rules: { ...rules, [key]: { ...ruleFor(key), ...patch } } });
+  };
+  const setBitrate = (key: string, ch: 6 | 8, kbps: number) => {
+    const r = ruleFor(key);
+    const bbc = { ...(r.bitrate_by_channels || {}) };
+    if (kbps > 0) bbc[ch] = kbps;
+    else delete bbc[ch];
+    setRule(key, { bitrate_by_channels: bbc });
+  };
+  return (
+    <div className="opt-row" style={{ alignItems: "flex-start", marginTop: 12 }}>
+      <div className="opt-label">
+        Audio formats
+        <div className="opt-hint">
+          What to do with each source codec. "Convert if needed" only converts when the container being written
+          can't carry it as-is — e.g. TrueHD stays copied in MKV but converts for MP4.
+        </div>
+      </div>
+      <div className="opt-ctl" style={{ display: "block" }}>
+        <table className="audio-rules-table">
+          <thead>
+            <tr><th>Codec</th><th>Action</th><th>Target</th><th>5.1 kb/s</th><th>7.1 kb/s</th><th>Max ch.</th></tr>
+          </thead>
+          <tbody>
+            {AUDIO_RULE_CODECS.map(({ key, label }) => {
+              const r = ruleFor(key);
+              const editable = r.action === "convert" || r.action === "convert_if_needed";
+              const bbc = r.bitrate_by_channels || {};
+              return (
+                <tr key={key}>
+                  <td>{label}</td>
+                  <td>
+                    <select className="input" value={r.action} onChange={(e) => setRule(key, { action: e.target.value as AudioRule["action"] })}>
+                      {AUDIO_RULE_ACTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+                    </select>
+                  </td>
+                  <td>
+                    <select className="input" value={r.target || ""} disabled={!editable}
+                      onChange={(e) => setRule(key, { target: e.target.value })}>
+                      <option value="">—</option>
+                      {AUDIO_RULE_TARGETS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+                    </select>
+                  </td>
+                  <td>
+                    <input className="input" type="number" min={0} placeholder="auto" style={{ width: 72 }} disabled={!editable}
+                      value={bbc[6] ?? ""} onChange={(e) => setBitrate(key, 6, parseInt(e.target.value) || 0)} />
+                  </td>
+                  <td>
+                    <input className="input" type="number" min={0} placeholder="auto" style={{ width: 72 }} disabled={!editable}
+                      value={bbc[8] ?? ""} onChange={(e) => setBitrate(key, 8, parseInt(e.target.value) || 0)} />
+                  </td>
+                  <td>
+                    <input className="input" type="number" min={0} placeholder="none" style={{ width: 60 }}
+                      value={r.max_channels || ""} onChange={(e) => setRule(key, { max_channels: parseInt(e.target.value) || undefined })} />
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }

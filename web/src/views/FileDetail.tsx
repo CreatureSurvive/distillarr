@@ -250,6 +250,12 @@ export default function FileDetail({ live }: { live: LiveState }) {
             {custom && <button className="btn mini linkish" onClick={reset}>Reset to recommended</button>}
           </section>
 
+          {plan?.warnings && plan.warnings.length > 0 && (
+            <div className="alert">
+              {plan.warnings.map((w, i) => <div key={i} className="small">{w}</div>)}
+            </div>
+          )}
+
           <details className="panel cmd-panel">
             <summary>
               ffmpeg command <span className="dim small">· {backendLabel(plan?.backend || "")}

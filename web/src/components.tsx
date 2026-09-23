@@ -87,6 +87,7 @@ export const ISSUE_SHORT: Record<string, { label: string; fix: "quick" | "reenco
   no_faststart: { label: "no faststart", fix: "quick" },
   pcm_audio: { label: "PCM audio", fix: "quick" },
   legacy_container: { label: "legacy container", fix: "quick" },
+  audio_blocks_mp4: { label: "audio blocks MP4", fix: "quick" },
   legacy_codec: { label: "legacy codec", fix: "reencode" },
   interlaced: { label: "interlaced", fix: "reencode" },
   worth_reencoding: { label: "worth re-encoding", fix: "reencode" },

@@ -365,6 +365,11 @@ details.panel[open] > summary { margin-bottom: 12px; }
 @media (min-width: 700px) {
   .opt-row { display: grid; grid-template-columns: 200px 1fr; gap: 16px; align-items: center; }
 }
+.audio-rules-table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+.audio-rules-table th { text-align: left; font-weight: 600; color: var(--text-faint); padding: 4px 8px 6px 0; border-bottom: 1px solid var(--line-soft); }
+.audio-rules-table td { padding: 6px 8px 6px 0; vertical-align: middle; border-bottom: 1px solid var(--line-soft); }
+.audio-rules-table td:first-child { white-space: nowrap; }
+.audio-rules-table select.input, .audio-rules-table input.input { min-height: 30px; padding: 4px 6px; font-size: 12.5px; }
 .quality { display: flex; align-items: center; gap: 12px; }
 .quality input[type="range"] { flex: 1; max-width: 340px; accent-color: var(--teal); min-height: 28px; }
 .quality-val { font-size: 13px; white-space: nowrap; }
