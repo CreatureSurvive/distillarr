@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
-import { api, type FileItem, type HwReport, type ShowDetail, type ShowOverrides, type ShowPlan } from "../api";
-import { Art, CodecChip, Empty, SavingsGauge, Seg, toast } from "../components";
+import { api, hardlinkedFiles, type FileItem, type HwReport, type ShowDetail, type ShowOverrides, type ShowPlan } from "../api";
+import { Art, CodecChip, Empty, SavingsGauge, Seg, toast, useHardlinkedConfirm } from "../components";
 import { backendLabel, bitrate, bytes, codecLabel, hdrLabel, resLabel, se, seasonName } from "../format";
 import { workingBackends } from "../options";
 import type { LiveState } from "../App";
@@ -19,6 +19,7 @@ export default function ShowView({ live }: { live: LiveState }) {
   const [plan, setPlan] = useState<ShowPlan | null>(null);
   const [sel, setSel] = useState<Set<number>>(new Set());
   const [busy, setBusy] = useState(false);
+  const { ask: askHardlinked, dialog: hardlinkedDialog } = useHardlinkedConfirm();
 
   useEffect(() => {
     api.show(title).then((s) => {
@@ -60,7 +61,17 @@ export default function ShowView({ live }: { live: LiveState }) {
   const queue = async (runNow: boolean) => {
     setBusy(true);
     try {
-      const r = await api.queueShow({ title, season: season ?? undefined, overrides: ov, file_ids: fileIds, run_now: runNow, only_worth: !fileIds });
+      const body = { title, season: season ?? undefined, overrides: ov, file_ids: fileIds, run_now: runNow, only_worth: !fileIds };
+      let r;
+      try {
+        r = await api.queueShow(body);
+      } catch (e) {
+        const linked = hardlinkedFiles(e);
+        if (!linked) throw e;
+        const choice = await askHardlinked(linked, true);
+        if (choice === "cancel") return;
+        r = await api.queueShow({ ...body, confirm_hardlinked: choice === "confirm", skip_hardlinked: choice === "skip" });
+      }
       toast(r.created > 0 ? `${runNow ? "Encoding" : "Queued"} ${r.created} episode${r.created === 1 ? "" : "s"}${r.skipped ? ` · ${r.skipped} skipped` : ""}` : "Nothing new to queue: episodes are already queued or not worth it.", r.created > 0 ? "ok" : "err");
       setSel(new Set());
     } catch (e: any) {
@@ -78,6 +89,7 @@ export default function ShowView({ live }: { live: LiveState }) {
 
   return (
     <div>
+      {hardlinkedDialog}
       <div className="crumbs"><Link to="/shows">Shows</Link> / <span>{title}</span></div>
 
       <section className="hero" style={show.backdrop ? { ["--bd" as any]: `url(${show.backdrop})` } : undefined}>

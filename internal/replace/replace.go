@@ -17,6 +17,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 
 	"golang.org/x/sys/unix"
@@ -35,6 +36,12 @@ type SrcStat struct {
 	Size      int64  `json:"size"`
 	Ino       uint64 `json:"ino"`
 	Mode      uint32 `json:"mode"` // permission bits, restored on the output
+	// Nlink is the hardlink count at snapshot time (see store.File.Nlink).
+	// Checked again right before the replace: a link that appears during
+	// the encode (0 on the statx fallback path, where it's simply unknown)
+	// stops the job unless the settings already confirmed a hardlinked
+	// source.
+	Nlink uint32 `json:"nlink"`
 }
 
 // Snapshot captures statx info including birth time when available.
@@ -48,13 +55,17 @@ func Snapshot(path string) (*SrcStat, error) {
 			return nil, fmt.Errorf("stat %s: %w (statx: %v)", path, err2, err)
 		}
 		mt := fi.ModTime()
-		return &SrcStat{
+		out := &SrcStat{
 			MtimeSec: mt.Unix(), MtimeNsec: int64(mt.Nanosecond()),
 			AtimeSec: mt.Unix(), AtimeNsec: int64(mt.Nanosecond()),
 			Size: fi.Size(),
-		}, nil
+		}
+		if sy, ok := fi.Sys().(*syscall.Stat_t); ok {
+			out.Nlink = uint32(sy.Nlink)
+		}
+		return out, nil
 	}
-	s := &SrcStat{Size: int64(st.Size), Ino: st.Ino, Mode: uint32(st.Mode)}
+	s := &SrcStat{Size: int64(st.Size), Ino: st.Ino, Mode: uint32(st.Mode), Nlink: st.Nlink}
 	s.MtimeSec, s.MtimeNsec = int64(st.Mtime.Sec), int64(st.Mtime.Nsec)
 	s.AtimeSec, s.AtimeNsec = int64(st.Atime.Sec), int64(st.Atime.Nsec)
 	s.BtimeSec, s.BtimeNsec = int64(st.Btime.Sec), int64(st.Btime.Nsec)

@@ -76,6 +76,11 @@ func (s *Server) quickJob(f *store.File, runNow bool) (*store.Job, error) {
 		return nil, fmt.Errorf("nothing a quick fix can solve")
 	}
 	st := issues.QuickFix(f, s.cfg.Get())
+	// The caller (fixFile, fixIssue) already checked HasQueuedForFile and
+	// the hardlinked confirmation before reaching here.
+	if f.Nlink > 1 {
+		st.ConfirmedHardlinked = true
+	}
 	return s.enqueue(f, st, runNow, "issue-fix", "Quick fix")
 }
 
@@ -91,9 +96,14 @@ func (s *Server) fixFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req struct {
-		RunNow bool `json:"run_now"`
+		RunNow            bool `json:"run_now"`
+		ConfirmHardlinked bool `json:"confirm_hardlinked,omitempty"`
 	}
 	_ = readJSON(r, &req)
+	if f.Nlink > 1 && !req.ConfirmHardlinked {
+		writeHardlinkedConflict(w, []*store.File{f})
+		return
+	}
 	j, err := s.quickJob(f, req.RunNow)
 	if err != nil {
 		fail(w, 400, err)
@@ -114,9 +124,11 @@ func (s *Server) fixIssue(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req struct {
-		Library string `json:"library"`
-		Show    string `json:"show"`
-		RunNow  bool   `json:"run_now"`
+		Library           string `json:"library"`
+		Show              string `json:"show"`
+		RunNow            bool   `json:"run_now"`
+		ConfirmHardlinked bool   `json:"confirm_hardlinked,omitempty"`
+		SkipHardlinked    bool   `json:"skip_hardlinked,omitempty"`
 	}
 	_ = readJSON(r, &req)
 	files, _, err := s.st.ListFiles(store.FileFilter{Issue: key, Library: req.Library, Show: req.Show, Season: -1}, "size", 0, 2000)
@@ -124,9 +136,25 @@ func (s *Server) fixIssue(w http.ResponseWriter, r *http.Request) {
 		fail(w, 500, err)
 		return
 	}
+	if !req.ConfirmHardlinked && !req.SkipHardlinked {
+		var linked []*store.File
+		for _, f := range files {
+			if ok, _ := s.st.HasQueuedForFile(f.Path); !ok && f.Nlink > 1 {
+				linked = append(linked, f)
+			}
+		}
+		if len(linked) > 0 {
+			writeHardlinkedConflict(w, linked)
+			return
+		}
+	}
 	queued, skipped := 0, 0
 	for _, f := range files {
 		if ok, _ := s.st.HasQueuedForFile(f.Path); ok {
+			skipped++
+			continue
+		}
+		if req.SkipHardlinked && f.Nlink > 1 {
 			skipped++
 			continue
 		}
@@ -137,6 +165,9 @@ func (s *Server) fixIssue(w http.ResponseWriter, r *http.Request) {
 			st, _ := s.resolve(f, nil)
 			if key == "interlaced" {
 				st.Deinterlace = "on"
+			}
+			if f.Nlink > 1 {
+				st.ConfirmedHardlinked = true
 			}
 			_, err = s.enqueue(f, st, req.RunNow, "issue-fix", "Issue: "+key)
 		}

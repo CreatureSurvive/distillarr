@@ -1,8 +1,8 @@
 // Issues: what's wrong across the library, grouped by type, with quick
 // fixes (remux, video untouched) and bulk re-encode queuing.
 import { useCallback, useEffect, useRef, useState } from "react";
-import { api, type FileItem, type IssueType, type MixedSeason } from "../api";
-import { CodecChip, Empty, EpisodeLabel, IssueChips, Seg, hasQuickFix, toast } from "../components";
+import { api, hardlinkedFiles, type FileItem, type IssueType, type MixedSeason } from "../api";
+import { CodecChip, Empty, EpisodeLabel, IssueChips, Seg, hasQuickFix, toast, useHardlinkedConfirm } from "../components";
 import { FacetFilters, NO_FACETS, facetParams, type Facets } from "../filters";
 import { bytes, codecLabel, resLabel, seasonName } from "../format";
 import { useSessionState } from "./Library";
@@ -24,6 +24,7 @@ export default function Issues({ live }: { live: LiveState }) {
   const [busy, setBusy] = useState(false);
   const sentinel = useRef<HTMLDivElement>(null);
   const reqId = useRef(0);
+  const { ask: askHardlinked, dialog: hardlinkedDialog } = useHardlinkedConfirm();
 
   const loadTypes = () => api.issues().then((r) => setTypes(r.types)).catch(() => {});
   useEffect(() => { loadTypes(); }, [live.queueVersion, live.scan?.running]);
@@ -76,7 +77,14 @@ export default function Issues({ live }: { live: LiveState }) {
 
   const fixOne = async (f: FileItem, runNow: boolean) => {
     try {
-      await api.fixFile(f.id, runNow);
+      try {
+        await api.fixFile(f.id, runNow);
+      } catch (e) {
+        const linked = hardlinkedFiles(e);
+        if (!linked) throw e;
+        if ((await askHardlinked(linked)) !== "confirm") return;
+        await api.fixFile(f.id, runNow, true);
+      }
       toast(runNow ? "Quick fix starting" : "Quick fix queued");
       setFiles((l) => l.map((x) => (x.id === f.id ? { ...x, queued: true } : x)));
     } catch (e: any) {
@@ -92,7 +100,17 @@ export default function Issues({ live }: { live: LiveState }) {
     if (!confirm(what + (n > 2000 ? "\n\nOnly the 2,000 largest are queued per click." : ""))) return;
     setBusy(true);
     try {
-      const r = await api.fixIssue(t.key, { library: lib || undefined });
+      const body = { library: lib || undefined };
+      let r;
+      try {
+        r = await api.fixIssue(t.key, body);
+      } catch (e) {
+        const linked = hardlinkedFiles(e);
+        if (!linked) throw e;
+        const choice = await askHardlinked(linked, true);
+        if (choice === "cancel") return;
+        r = await api.fixIssue(t.key, { ...body, confirm_hardlinked: choice === "confirm", skip_hardlinked: choice === "skip" });
+      }
       toast(`${r.queued} queued${r.skipped ? `, ${r.skipped} skipped (already queued)` : ""}`);
       loadTypes();
     } catch (e: any) {
@@ -107,6 +125,7 @@ export default function Issues({ live }: { live: LiveState }) {
 
   return (
     <div>
+      {hardlinkedDialog}
       <header className="page-head">
         <div>
           <h1 className="page-title">Issues</h1>

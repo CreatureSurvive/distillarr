@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactNode } from "react";
-import { type FileItem, type Series } from "./api";
+import { type FileItem, type HardlinkedFile, type Series } from "./api";
 import { bitrate, bytes, codecLabel, hdrLabel, resLabel, se, titleHue } from "./format";
 
 // Artwork with a deterministic typographic fallback (no Jellyfin, or no art).
@@ -216,6 +216,47 @@ export function Toaster() {
       {t.m}
     </div>
   );
+}
+
+// Shared confirmation for queueing a hardlinked file (one that shares its
+// data with another link, usually a seeding torrent): replacing it frees
+// no space until the other link is removed. ask() resolves to "confirm"
+// (queue it anyway), "skip" (bulk only: drop just these and continue), or
+// "cancel". Render {dialog} once near the top of the view that calls ask().
+export function useHardlinkedConfirm() {
+  const [pending, setPending] = useState<{ files: HardlinkedFile[]; allowSkip: boolean; resolve: (v: "confirm" | "skip" | "cancel") => void } | null>(null);
+
+  const ask = (files: HardlinkedFile[], allowSkip = false) =>
+    new Promise<"confirm" | "skip" | "cancel">((resolve) => setPending({ files, allowSkip, resolve }));
+
+  const settle = (v: "confirm" | "skip" | "cancel") => {
+    pending?.resolve(v);
+    setPending(null);
+  };
+
+  const dialog = pending && (
+    <div className="modal-backdrop" onClick={(e) => e.target === e.currentTarget && settle("cancel")}>
+      <div className="modal" role="dialog" aria-label="Shares data with another file">
+        <h2 className="panel-title">{pending.files.length === 1 ? "Shares data with another file" : `${pending.files.length} files share data with another file`}</h2>
+        <p className="dim small">
+          {pending.files.length === 1 ? "This file" : "These files"} still {pending.files.length === 1 ? "has" : "have"} another
+          hardlink somewhere — usually a torrent still seeding it. Replacing {pending.files.length === 1 ? "it" : "them"} frees no
+          disk space until that other link is removed.
+        </p>
+        <ul className="mono small" style={{ maxHeight: 180, overflowY: "auto", margin: "10px 0" }}>
+          {pending.files.slice(0, 12).map((f) => <li key={f.id}>{f.path.split("/").pop()}</li>)}
+          {pending.files.length > 12 && <li className="dim">…and {pending.files.length - 12} more</li>}
+        </ul>
+        <div className="toolbar" style={{ marginTop: 14 }}>
+          <button className="btn btn-primary" onClick={() => settle("confirm")}>Queue anyway</button>
+          {pending.allowSkip && <button className="btn" onClick={() => settle("skip")}>Skip these</button>}
+          <button className="btn" onClick={() => settle("cancel")}>Cancel</button>
+        </div>
+      </div>
+    </div>
+  );
+
+  return { ask, dialog };
 }
 
 export function Empty({ title, children }: { title: string; children?: ReactNode }) {

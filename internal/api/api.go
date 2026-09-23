@@ -359,7 +359,17 @@ func (s *Server) jobCancel(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) jobRetry(w http.ResponseWriter, r *http.Request) {
-	if err := s.eng.Retry(pathID(r)); err != nil {
+	var req struct {
+		ConfirmHardlinked bool `json:"confirm_hardlinked,omitempty"`
+	}
+	_ = readJSON(r, &req)
+	var err error
+	if req.ConfirmHardlinked {
+		err = s.eng.RetryConfirmHardlinked(pathID(r))
+	} else {
+		err = s.eng.Retry(pathID(r))
+	}
+	if err != nil {
 		fail(w, 400, err)
 		return
 	}

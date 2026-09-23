@@ -136,7 +136,12 @@ export default function Queue({ live }: { live: LiveState }) {
                     <button className="btn mini btn-danger" onClick={() => act(() => api.cancelJob(j.id), "Job canceled")}>Cancel</button>
                   )}
                   {tab === "history" && (j.status === "failed" || j.status === "canceled") && (
-                    <button className="btn mini" onClick={() => act(() => api.retryJob(j.id), "Queued again")}>Retry</button>
+                    j.error?.startsWith("hardlinked:") ? (
+                      <button className="btn mini btn-danger" title="This file still shares its data with another link (usually a seeding torrent). Replacing it frees no space until that link is removed."
+                        onClick={() => act(() => api.retryJob(j.id, true), "Queued again")}>Retry and replace anyway</button>
+                    ) : (
+                      <button className="btn mini" onClick={() => act(() => api.retryJob(j.id), "Queued again")}>Retry</button>
+                    )
                   )}
                 </div>
                 {open === j.id && (

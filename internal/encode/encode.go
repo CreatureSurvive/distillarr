@@ -95,6 +95,13 @@ type Settings struct {
 	// VulkanDevice is the Vulkan index the upscaler runs on, resolved from
 	// hwprobe (Vulkan picks by index, not render node). Index 0 is valid.
 	VulkanDevice int `json:"vulkan_device,omitempty"`
+
+	// ConfirmedHardlinked records that the user acknowledged, at queue
+	// time, that the source shares its data with another link (usually a
+	// seeding torrent) and wants it replaced anyway. Checked again right
+	// before the replace: a link that appears during the encode is not
+	// covered by this and still stops the job.
+	ConfirmedHardlinked bool `json:"confirmed_hardlinked,omitempty"`
 }
 
 // DefaultRenderNode is a last-resort fallback for when no probe has chosen a

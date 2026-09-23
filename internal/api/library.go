@@ -199,12 +199,14 @@ type ShowOverrides struct {
 }
 
 type showReq struct {
-	Title     string        `json:"title"`
-	Season    *int          `json:"season,omitempty"` // nil = whole show
-	FileIDs   []int64       `json:"file_ids,omitempty"`
-	Overrides ShowOverrides `json:"overrides"`
-	RunNow    bool          `json:"run_now,omitempty"`
-	OnlyWorth bool          `json:"only_worth,omitempty"`
+	Title             string        `json:"title"`
+	Season            *int          `json:"season,omitempty"` // nil = whole show
+	FileIDs           []int64       `json:"file_ids,omitempty"`
+	Overrides         ShowOverrides `json:"overrides"`
+	RunNow            bool          `json:"run_now,omitempty"`
+	OnlyWorth         bool          `json:"only_worth,omitempty"`
+	ConfirmHardlinked bool          `json:"confirm_hardlinked,omitempty"`
+	SkipHardlinked    bool          `json:"skip_hardlinked,omitempty"`
 }
 
 func (o ShowOverrides) apply(st encode.Settings) encode.Settings {
@@ -335,18 +337,46 @@ func (s *Server) queueShow(w http.ResponseWriter, r *http.Request) {
 		fail(w, 500, err)
 		return
 	}
-	created, skipped := 0, 0
-	for i, f := range files {
+	// Which of these would actually be queued (same conditions as the
+	// second pass below), for the hardlinked pre-check: refusing must
+	// queue nothing, so it has to happen before any job is created.
+	wouldQueue := func(i int, f *store.File) bool {
 		p := plans[i]
 		if (req.OnlyWorth && !p.Worth) || p.Action == "caution" && len(req.FileIDs) == 0 {
-			skipped++
-			continue
+			return false
 		}
 		if ok, _ := s.st.HasQueuedForFile(f.Path); ok {
+			return false
+		}
+		return true
+	}
+	if !req.ConfirmHardlinked && !req.SkipHardlinked {
+		var linked []*store.File
+		for i, f := range files {
+			if wouldQueue(i, f) && f.Nlink > 1 {
+				linked = append(linked, f)
+			}
+		}
+		if len(linked) > 0 {
+			writeHardlinkedConflict(w, linked)
+			return
+		}
+	}
+	created, skipped := 0, 0
+	for i, f := range files {
+		if !wouldQueue(i, f) {
 			skipped++
 			continue
 		}
-		if _, err := s.enqueue(f, p.Setting, req.RunNow, "manual", "Queued from the show page"); err == nil {
+		if req.SkipHardlinked && f.Nlink > 1 {
+			skipped++
+			continue
+		}
+		st := plans[i].Setting
+		if f.Nlink > 1 {
+			st.ConfirmedHardlinked = true
+		}
+		if _, err := s.enqueue(f, st, req.RunNow, "manual", "Queued from the show page"); err == nil {
 			created++
 		}
 	}
@@ -377,10 +407,30 @@ func (s *Server) fileDetail(w http.ResponseWriter, r *http.Request) {
 
 // planReq is used by plan/queue/preview: nil settings = recommendation.
 type planReq struct {
-	Settings *encode.Settings `json:"settings,omitempty"`
-	RunNow   bool             `json:"run_now,omitempty"`
-	Segments int              `json:"segments,omitempty"`
-	Starts   []float64        `json:"starts,omitempty"`
+	Settings          *encode.Settings `json:"settings,omitempty"`
+	RunNow            bool             `json:"run_now,omitempty"`
+	Segments          int              `json:"segments,omitempty"`
+	Starts            []float64        `json:"starts,omitempty"`
+	ConfirmHardlinked bool             `json:"confirm_hardlinked,omitempty"`
+}
+
+// hardlinkedOut is one file reported in a "hardlinked" 409 response.
+type hardlinkedOut struct {
+	ID    int64  `json:"id"`
+	Path  string `json:"path"`
+	Nlink int    `json:"nlink"`
+}
+
+// writeHardlinkedConflict refuses to queue files that share their data
+// with another link (usually a seeding torrent): replacing them frees no
+// space until the other link is gone, so queueing needs an explicit
+// confirmation. Nothing is queued when this is written.
+func writeHardlinkedConflict(w http.ResponseWriter, files []*store.File) {
+	out := make([]hardlinkedOut, len(files))
+	for i, f := range files {
+		out[i] = hardlinkedOut{ID: f.ID, Path: f.Path, Nlink: f.Nlink}
+	}
+	writeJSON(w, http.StatusConflict, map[string]any{"error": "hardlinked", "files": out})
 }
 
 // resolve returns the settings to use for f and the matching estimate.
@@ -495,7 +545,14 @@ func (s *Server) queueFile(w http.ResponseWriter, r *http.Request) {
 		fail(w, 400, err)
 		return
 	}
+	if f.Nlink > 1 && !req.ConfirmHardlinked {
+		writeHardlinkedConflict(w, []*store.File{f})
+		return
+	}
 	st, _ := s.resolve(f, req.Settings)
+	if f.Nlink > 1 {
+		st.ConfirmedHardlinked = true
+	}
 	if err := s.checkUpscale(r, f, &st); err != nil {
 		fail(w, http.StatusConflict, err)
 		return

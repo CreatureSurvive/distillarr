@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { api, type FileItem, type HwReport, type Plan, type Settings, type Stream } from "../api";
-import { Art, Copyable, Empty, FileChips, IssueChips, SavingsGauge, hasQuickFix, toast } from "../components";
+import { api, hardlinkedFiles, type FileItem, type HwReport, type Plan, type Settings, type Stream } from "../api";
+import { Art, Copyable, Empty, FileChips, IssueChips, SavingsGauge, hasQuickFix, toast, useHardlinkedConfirm } from "../components";
 import EncodeOptions, { hasBars } from "../options";
 import { backendLabel, bitrate, bytes, channelsLabel, codecLabel, dur, resClass, se } from "../format";
 import type { LiveState } from "../App";
@@ -19,6 +19,7 @@ export default function FileDetail({ live }: { live: LiveState }) {
   const [settings, setSettings] = useState<Settings | null>(null);
   const [custom, setCustom] = useState(false);
   const [busy, setBusy] = useState("");
+  const { ask: askHardlinked, dialog: hardlinkedDialog } = useHardlinkedConfirm();
   const planReq = useRef(0);
 
   useEffect(() => {
@@ -74,7 +75,14 @@ export default function FileDetail({ live }: { live: LiveState }) {
         nav(`/preview/${p.id}`);
         return;
       }
-      await api.queueFile(file.id, { ...body, run_now: kind === "now" });
+      try {
+        await api.queueFile(file.id, { ...body, run_now: kind === "now" });
+      } catch (e) {
+        const linked = hardlinkedFiles(e);
+        if (!linked) throw e;
+        if ((await askHardlinked(linked)) !== "confirm") return;
+        await api.queueFile(file.id, { ...body, run_now: kind === "now", confirm_hardlinked: true });
+      }
       toast(kind === "now" ? "Encoding started. Progress shows at the bottom." : "Added to the queue.");
       setFile({ ...file, queued: true });
     } catch (e: any) {
@@ -88,6 +96,7 @@ export default function FileDetail({ live }: { live: LiveState }) {
 
   return (
     <div className="detail">
+      {hardlinkedDialog}
       <div className="crumbs">
         {isTV ? (
           <><Link to="/shows">Shows</Link> / <Link to={`/show/${encodeURIComponent(file.title)}`}>{file.title}</Link> / <span>{se(file.season, file.episode)}</span></>
@@ -121,7 +130,14 @@ export default function FileDetail({ live }: { live: LiveState }) {
                   onClick={async () => {
                     setBusy("fix");
                     try {
-                      await api.fixFile(file.id, true);
+                      try {
+                        await api.fixFile(file.id, true);
+                      } catch (e) {
+                        const linked = hardlinkedFiles(e);
+                        if (!linked) throw e;
+                        if ((await askHardlinked(linked)) !== "confirm") return;
+                        await api.fixFile(file.id, true, true);
+                      }
                       toast("Quick fix started. Video is copied, not re-encoded.");
                       setFile({ ...file, queued: true });
                     } catch (e: any) {

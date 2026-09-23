@@ -1,7 +1,7 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { api, type Config, type FileItem, type Plan, type Settings, type Still, type UpscaleInfo } from "../api";
-import { Empty, Seg, Toggle, toast } from "../components";
+import { api, hardlinkedFiles, type Config, type FileItem, type Plan, type Settings, type Still, type UpscaleInfo } from "../api";
+import { Empty, Seg, Toggle, toast, useHardlinkedConfirm } from "../components";
 import { dur, minutesToHM, resLabel } from "../format";
 
 type View = "split" | "a" | "b";
@@ -41,6 +41,7 @@ export default function UpscaleView() {
   const [qBusy, setQBusy] = useState<"" | "queue" | "now">("");
   const [queued, setQueued] = useState(false);
   const [window_, setWindow] = useState("");                    // the neural window, as text
+  const { ask: askHardlinked, dialog: hardlinkedDialog } = useHardlinkedConfirm();
   const seq = useRef(0);
   const wrap = useRef<HTMLDivElement>(null);
   const viewport = useRef<HTMLDivElement>(null);
@@ -157,7 +158,14 @@ export default function UpscaleView() {
   const enqueue = async (kind: "queue" | "now") => {
     setQBusy(kind);
     try {
-      await api.queueFile(id, { settings, run_now: kind === "now" });
+      try {
+        await api.queueFile(id, { settings, run_now: kind === "now" });
+      } catch (e) {
+        const linked = hardlinkedFiles(e);
+        if (!linked) throw e;
+        if ((await askHardlinked(linked)) !== "confirm") return;
+        await api.queueFile(id, { settings, run_now: kind === "now", confirm_hardlinked: true });
+      }
       setQueued(true);
       toast(kind === "now" ? "Upscaling started. Progress shows at the bottom." : "Added to the queue.");
     } catch (e: any) {
@@ -186,6 +194,7 @@ export default function UpscaleView() {
 
   return (
     <div>
+      {hardlinkedDialog}
       {back}
       <div className="page-head">
         <div>

@@ -492,17 +492,43 @@ export type Preview = {
   }[];
 };
 
+// ApiError carries the parsed JSON error body, when there was one, so
+// callers that need structured data (e.g. the "hardlinked" conflict's
+// file list) don't have to re-parse the message string.
+export class ApiError extends Error {
+  data?: any;
+  constructor(message: string, data?: any) {
+    super(message);
+    this.data = data;
+  }
+}
+
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(path, { headers: { "Content-Type": "application/json" }, ...init });
   if (!res.ok) {
     let msg = `${res.status} ${res.statusText}`;
+    let data: any;
     try {
-      const j = await res.json();
-      if (j.error) msg = j.error;
+      data = await res.json();
+      if (data.error) msg = data.error;
     } catch {}
-    throw new Error(msg);
+    throw new ApiError(msg, data);
   }
   return res.json();
+}
+
+// One file in a "hardlinked" 409 conflict: it shares its data with
+// another link (usually a seeding torrent), so replacing it frees no
+// space until that link is removed.
+export type HardlinkedFile = { id: number; path: string; nlink: number };
+
+// hardlinkedFiles reads the file list out of a caught error, if it was a
+// "hardlinked" conflict; otherwise returns null so the caller re-throws.
+export function hardlinkedFiles(err: unknown): HardlinkedFile[] | null {
+  if (err instanceof ApiError && err.data?.error === "hardlinked" && Array.isArray(err.data.files)) {
+    return err.data.files;
+  }
+  return null;
 }
 
 const post = <T,>(path: string, body?: unknown) =>
@@ -557,11 +583,13 @@ export const api = {
     file_ids?: number[];
     run_now?: boolean;
     only_worth?: boolean;
+    confirm_hardlinked?: boolean;
+    skip_hardlinked?: boolean;
   }) => post<{ created: number; skipped: number }>("/api/v1/show/queue", body),
 
   file: (id: number) => req<{ file: FileItem; streams: Stream[] }>(`/api/v1/files/${id}`),
   plan: (id: number, settings?: Settings) => post<Plan>(`/api/v1/files/${id}/plan`, { settings }),
-  queueFile: (id: number, body: { settings?: Settings; run_now?: boolean }) =>
+  queueFile: (id: number, body: { settings?: Settings; run_now?: boolean; confirm_hardlinked?: boolean }) =>
     post<Job>(`/api/v1/files/${id}/queue`, body),
   previewFile: (id: number, body: { settings?: Settings; segments?: number; starts?: number[] }) =>
     post<Preview>(`/api/v1/files/${id}/preview`, body),
@@ -569,10 +597,11 @@ export const api = {
   still: (id: number, settings: Settings, at: number) =>
     post<Still>(`/api/v1/files/${id}/still`, { settings, at }),
 
-  fixFile: (id: number, run_now = false) => post<Job>(`/api/v1/files/${id}/fix`, { run_now }),
+  fixFile: (id: number, run_now = false, confirm_hardlinked = false) =>
+    post<Job>(`/api/v1/files/${id}/fix`, { run_now, confirm_hardlinked }),
   issues: () => req<{ types: IssueType[] }>("/api/v1/issues"),
   mixedSeasons: (show?: string) => req<{ seasons: MixedSeason[] }>(`/api/v1/issues/mixed?${qs({ show })}`),
-  fixIssue: (key: string, body: { library?: string; show?: string; run_now?: boolean }) =>
+  fixIssue: (key: string, body: { library?: string; show?: string; run_now?: boolean; confirm_hardlinked?: boolean; skip_hardlinked?: boolean }) =>
     post<{ queued: number; skipped: number }>(`/api/v1/issues/${key}/fix`, body),
   composition: (library?: string) => req<Composition>(`/api/v1/libraries/composition?${qs({ library })}`),
   measure: () => req<MeasureStatus>("/api/v1/measure"),
@@ -581,7 +610,8 @@ export const api = {
   jobs: (status?: string, limit = 100) => req<{ jobs: Job[] }>(`/api/v1/jobs?${qs({ status, limit })}`),
   job: (id: number) => req<{ job: Job; progress: Progress | null }>(`/api/v1/jobs/${id}`),
   cancelJob: (id: number) => post<{ ok: boolean }>(`/api/v1/jobs/${id}/cancel`),
-  retryJob: (id: number) => post<{ ok: boolean }>(`/api/v1/jobs/${id}/retry`),
+  retryJob: (id: number, confirm_hardlinked = false) =>
+    post<{ ok: boolean }>(`/api/v1/jobs/${id}/retry`, confirm_hardlinked ? { confirm_hardlinked } : undefined),
   runNowJob: (id: number) => post<{ ok: boolean }>(`/api/v1/jobs/${id}/run-now`),
   moveJob: (id: number, before: number) => post<{ ok: boolean }>(`/api/v1/jobs/${id}/move`, { before }),
   queueSummary: () =>

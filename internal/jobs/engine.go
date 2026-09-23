@@ -474,13 +474,22 @@ func (e *Engine) runJob(j *store.Job, resume bool) {
 	// The source may have been overwritten while we were encoding it (a
 	// Sonarr/Radarr upgrade is the common case): never replace a file we
 	// didn't actually encode. Checked right before the point of no return.
-	if cur, serr := replace.Snapshot(j.SrcPath); serr != nil {
+	cur, serr := replace.Snapshot(j.SrcPath)
+	switch {
+	case serr != nil:
 		removeTemp(tempPath)
 		e.failKeepAttempt(j, "source no longer exists")
 		return
-	} else if !replace.SameSource(st, cur) {
+	case !replace.SameSource(st, cur):
 		removeTemp(tempPath)
 		e.failKeepAttempt(j, fmt.Sprintf("source changed during encode (was %d bytes, now %d)", st.Size, cur.Size))
+		return
+	case cur.Nlink > 1 && !settings.ConfirmedHardlinked:
+		// A hardlink appeared during the encode (e.g. a torrent client
+		// started seeding this exact file): not covered by whatever was
+		// confirmed at queue time, so ask again rather than replace it.
+		removeTemp(tempPath)
+		e.failKeepAttempt(j, fmt.Sprintf("hardlinked: file now shares its data with another link (nlink=%d); confirm to replace anyway", cur.Nlink))
 		return
 	}
 
@@ -744,6 +753,31 @@ func (e *Engine) Retry(jobID int64) error {
 	e.notify(EvJob, map[string]any{"id": jobID, "status": store.StatusQueued})
 	e.Kick()
 	return nil
+}
+
+// RetryConfirmHardlinked is Retry, but first marks the job's settings as
+// confirmed for a hardlinked source — for the "Retry and replace anyway"
+// action on a job that failed because a link appeared during the encode.
+func (e *Engine) RetryConfirmHardlinked(jobID int64) error {
+	j, err := e.st.GetJob(jobID)
+	if err != nil || j == nil {
+		return fmt.Errorf("job %d not found", jobID)
+	}
+	var s encode.Settings
+	if j.SettingsJSON != "" {
+		if err := json.Unmarshal([]byte(j.SettingsJSON), &s); err != nil {
+			return fmt.Errorf("job %d: %w", jobID, err)
+		}
+	}
+	s.ConfirmedHardlinked = true
+	b, err := json.Marshal(s)
+	if err != nil {
+		return err
+	}
+	if err := e.st.UpdateJobSettings(jobID, j.Quality, string(b)); err != nil {
+		return err
+	}
+	return e.Retry(jobID)
 }
 
 func (e *Engine) broadcastQueue() {
