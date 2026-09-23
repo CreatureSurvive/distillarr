@@ -169,14 +169,7 @@ func (s *Server) arrTest(w http.ResponseWriter, r *http.Request) {
 // its last successful sync, and whether the user has acknowledged it.
 func (s *Server) arrGet(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	var inst *config.ArrInstance
-	for _, x := range s.cfg.Get().ArrInstances {
-		if x.ID == id {
-			x := x
-			inst = &x
-			break
-		}
-	}
+	inst := s.arrInstanceByID(id)
 	if inst == nil {
 		fail(w, 404, fmt.Errorf("no instance %q", id))
 		return

@@ -249,6 +249,30 @@ func (c *Client) Movies(ctx context.Context) ([]Movie, error) {
 	return out, err
 }
 
+// Movie fetches one movie by id — cheap enough to poll, unlike Movies.
+func (c *Client) Movie(ctx context.Context, id int64) (*Movie, error) {
+	var m Movie
+	err := c.get(ctx, &m, fmt.Sprintf("/api/v3/movie/%d", id), nil)
+	return &m, err
+}
+
+// commandRequest is the body for POST /api/v3/command.
+type commandRequest struct {
+	Name     string `json:"name"`
+	SeriesID int64  `json:"seriesId,omitempty"`
+	MovieID  int64  `json:"movieId,omitempty"`
+}
+
+// RescanSeries tells Sonarr to rescan a series' files on disk.
+func (c *Client) RescanSeries(ctx context.Context, seriesID int64) error {
+	return c.post(ctx, nil, "/api/v3/command", commandRequest{Name: "RescanSeries", SeriesID: seriesID})
+}
+
+// RescanMovie tells Radarr to rescan a movie's files on disk.
+func (c *Client) RescanMovie(ctx context.Context, movieID int64) error {
+	return c.post(ctx, nil, "/api/v3/command", commandRequest{Name: "RescanMovie", MovieID: movieID})
+}
+
 // CustomFormatField is one specification's configured field (for a
 // ReleaseTitleSpecification/SourceSpecification, "value" holds the regex
 // or source name being matched).

@@ -68,6 +68,7 @@ func main() {
 	recs.InitCalibration(st)
 	recs.ResolveBackend = func(pref string, c encode.Codec) encode.Backend { return eng.ResolveFor(pref, c) }
 	recs.Genres = st.GenresFor
+	recs.ArrPolicy = api.ArrPolicyFor(st, cfg)
 
 	// Preview notify is bound to the hub once the API server exists.
 	var hubNotify func(string, any)
@@ -138,6 +139,11 @@ func main() {
 			}
 		}
 	})
+
+	// Sonarr/Radarr: tell the owning instance to rescan after a replace
+	// A per-instance toggle, on by default once an instance is
+	// connected; a no-op for a file no instance manages.
+	eng.OnFinished(srv.ArrRescanSubscriber())
 
 	eng.Start()
 	defer eng.Stop()

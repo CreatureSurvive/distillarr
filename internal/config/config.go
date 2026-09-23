@@ -124,6 +124,19 @@ type ArrInstance struct {
 	AV1Tag       string `json:"av1_tag,omitempty"`
 	HEVCTag      string `json:"hevc_tag,omitempty"`
 	RemuxOnlyTag string `json:"remux_only_tag,omitempty"`
+
+	// RescanAfterReplace: tell this instance to rescan a series/movie
+	// right after Distillarr replaces one of its files. Default
+	// on; see .RescanAfterReplaceOn(). A write, but a harmless one
+	// (Sonarr/Radarr do this on their own schedule anyway) — still
+	// something the user should knowingly enable, so it stays a toggle
+	// rather than being silently assumed.
+	RescanAfterReplace *bool `json:"rescan_after_replace,omitempty"`
+}
+
+// RescanAfterReplaceOn reports the effective setting (default on).
+func (a ArrInstance) RescanAfterReplaceOn() bool {
+	return a.RescanAfterReplace == nil || *a.RescanAfterReplace
 }
 
 // Default tag names for the tag policy; see ArrInstance's tag
