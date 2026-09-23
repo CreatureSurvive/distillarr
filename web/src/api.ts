@@ -499,6 +499,10 @@ export type Config = {
   jellyfin_api_key?: string;
   jellyfin_key_set?: boolean;
   jellyfin_path_map: string;
+  plex_url: string;
+  plex_token?: string;
+  plex_token_set?: boolean;
+  plex_path_map: string;
   arr_instances: ArrInstance[];
   // Override for the host:port Settings shows in front of each webhook
   // path. Blank = use the browser's own origin.
@@ -583,6 +587,26 @@ export type JfStatus = {
 };
 
 export type JfTest = {
+  ok: boolean;
+  error?: string;
+  server_name?: string;
+  version?: string;
+  libraries?: { name: string; type: string; location: string; mapped: string; reachable: boolean }[];
+};
+
+export type PlexStatus = {
+  configured: boolean;
+  connected?: boolean;
+  server_name?: string;
+  version?: string;
+  error?: string;
+  url?: string;
+  cached: number;
+  syncing: boolean;
+  last_sync?: string;
+};
+
+export type PlexTest = {
   ok: boolean;
   error?: string;
   server_name?: string;
@@ -772,6 +796,10 @@ export const api = {
   jellyfinStatus: () => req<JfStatus>("/api/v1/jellyfin/status"),
   jellyfinTest: (body: { url?: string; key?: string; path_map?: string }) => post<JfTest>("/api/v1/jellyfin/test", body),
   jellyfinSync: () => post<{ started: boolean }>("/api/v1/jellyfin/sync"),
+
+  plexStatus: () => req<PlexStatus>("/api/v1/plex/status"),
+  plexTest: (body: { url?: string; token?: string; path_map?: string }) => post<PlexTest>("/api/v1/plex/test", body),
+  plexSync: () => post<{ started: boolean }>("/api/v1/plex/sync"),
 
   // id is the stored instance's id, or "new" for one not yet saved.
   arrTest: (id: string, body: { url?: string; api_key?: string; kind?: string; path_map?: string }) =>

@@ -21,6 +21,7 @@ export type LiveState = {
   hwVersion: number;
   previewVersion: number;
   jfVersion: number;
+  plexVersion: number;
   arrVersion: number;
   intakeVersion: number;
   notes: Record<number, string>;
@@ -37,7 +38,7 @@ const NAV = [
 
 export default function App() {
   const [live, setLive] = useState<LiveState>({
-    progress: {}, activeJobs: [], scan: null, queueVersion: 0, hwVersion: 0, previewVersion: 0, jfVersion: 0, arrVersion: 0, intakeVersion: 0, notes: {}, diskPressure: false,
+    progress: {}, activeJobs: [], scan: null, queueVersion: 0, hwVersion: 0, previewVersion: 0, jfVersion: 0, plexVersion: 0, arrVersion: 0, intakeVersion: 0, notes: {}, diskPressure: false,
   });
   const [jf, setJf] = useState<JfStatus | null>(null);
   const [needsConfirmation, setNeedsConfirmation] = useState(0);
@@ -69,6 +70,8 @@ export default function App() {
         setLive((l) => ({ ...l, previewVersion: l.previewVersion + 1 }));
       } else if (event === "jellyfin") {
         if (data?.done || data?.error) setLive((l) => ({ ...l, jfVersion: l.jfVersion + 1 }));
+      } else if (event === "plex") {
+        if (data?.done || data?.error) setLive((l) => ({ ...l, plexVersion: l.plexVersion + 1 }));
       } else if (event === "arr") {
         if (data?.done) setLive((l) => ({ ...l, arrVersion: l.arrVersion + 1 }));
       } else if (event === "intake") {
@@ -149,7 +152,9 @@ export default function App() {
           <Route path="/queue" element={<Queue live={live} />} />
           <Route path="/preview/:id" element={<PreviewView live={live} />} />
           <Route path="/upscale/:id" element={<UpscaleView />} />
-          <Route path="/settings" element={<SettingsView live={live} onJellyfin={() => setLive((l) => ({ ...l, jfVersion: l.jfVersion + 1 }))} />} />
+          <Route path="/settings" element={<SettingsView live={live}
+            onJellyfin={() => setLive((l) => ({ ...l, jfVersion: l.jfVersion + 1 }))}
+            onPlex={() => setLive((l) => ({ ...l, plexVersion: l.plexVersion + 1 }))} />} />
         </Routes>
       </main>
 

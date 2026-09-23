@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactNode } from "react";
-import { api, subscribe, type ArrInfo, type ArrInstance, type ArrTestResult, type AutopilotPreviewGroup, type AutoRule, type Config, type HwInfo, type JfStatus, type JfTest, type RuleAction, type RuleMatch, type TrashItem } from "../api";
+import { api, subscribe, type ArrInfo, type ArrInstance, type ArrTestResult, type AutopilotPreviewGroup, type AutoRule, type Config, type HwInfo, type JfStatus, type JfTest, type PlexStatus, type PlexTest, type RuleAction, type RuleMatch, type TrashItem } from "../api";
 import { Copyable, ISSUE_SHORT, Seg, Toggle, toast } from "../components";
 import { ago, backendLabel, bytes, codecLabel } from "../format";
 import { qualityWord } from "../options";
@@ -15,7 +15,7 @@ function Field({ label, hint, children }: { label: string; hint?: string; childr
   );
 }
 
-export default function SettingsView({ live, onJellyfin }: { live: LiveState; onJellyfin: () => void }) {
+export default function SettingsView({ live, onJellyfin, onPlex }: { live: LiveState; onJellyfin: () => void; onPlex: () => void }) {
   const [cfg, setCfg] = useState<Config | null>(null);
   const [hw, setHw] = useState<HwInfo | null>(null);
 
@@ -43,6 +43,7 @@ export default function SettingsView({ live, onJellyfin }: { live: LiveState; on
       </header>
       <nav className="settings-nav">
         <a href="#/settings" onClick={(e) => { e.preventDefault(); document.getElementById("s-jf")?.scrollIntoView({ behavior: "smooth" }); }}>Jellyfin</a>
+        <a href="#/settings" onClick={(e) => { e.preventDefault(); document.getElementById("s-plex")?.scrollIntoView({ behavior: "smooth" }); }}>Plex</a>
         <a href="#/settings" onClick={(e) => { e.preventDefault(); document.getElementById("s-arr")?.scrollIntoView({ behavior: "smooth" }); }}>Sonarr / Radarr</a>
         <a href="#/settings" onClick={(e) => { e.preventDefault(); document.getElementById("s-auto")?.scrollIntoView({ behavior: "smooth" }); }}>Autopilot</a>
         <a href="#/settings" onClick={(e) => { e.preventDefault(); document.getElementById("s-enc")?.scrollIntoView({ behavior: "smooth" }); }}>Encoding</a>
@@ -53,6 +54,8 @@ export default function SettingsView({ live, onJellyfin }: { live: LiveState; on
       </nav>
 
       <JellyfinSection cfg={cfg} setCfg={setCfg} live={live} onJellyfin={onJellyfin} />
+
+      <PlexSection cfg={cfg} setCfg={setCfg} live={live} onPlex={onPlex} />
 
       <ArrSection cfg={cfg} setCfg={setCfg} />
 
@@ -258,6 +261,116 @@ function JellyfinSection({ cfg, setCfg, live, onJellyfin }: { cfg: Config; setCf
               )}
               {test.libraries?.some((l) => !l.reachable) && (
                 <div className="dim small">Folders marked ✗ aren't visible here, so their items won't match. Adjust the path mapping, then test again.</div>
+              )}
+            </>
+          ) : (
+            <div><b>Not connected.</b> {test.error}</div>
+          )}
+        </div>
+      )}
+      <div className="dim small" style={{ marginTop: 10 }}>
+        {sync || (status?.cached ? `${status.cached.toLocaleString()} items cached · last sync ${ago(status.last_sync)}` : "Nothing synced yet.")}
+      </div>
+    </section>
+  );
+}
+
+function PlexSection({ cfg, setCfg, live, onPlex }: { cfg: Config; setCfg: (c: Config) => void; live: LiveState; onPlex: () => void }) {
+  const [status, setStatus] = useState<PlexStatus | null>(null);
+  const [url, setUrl] = useState(cfg.plex_url);
+  const [token, setToken] = useState("");
+  const [pathMap, setPathMap] = useState(cfg.plex_path_map);
+  const [test, setTest] = useState<PlexTest | null>(null);
+  const [testing, setTesting] = useState(false);
+  const [sync, setSync] = useState<string>("");
+
+  const refresh = () => api.plexStatus().then(setStatus).catch(() => {});
+  useEffect(() => { refresh(); }, [live.plexVersion]);
+  useEffect(() => {
+    // Live sync progress arrives over the event stream.
+    return subscribe((event, data) => {
+      if (event !== "plex") return;
+      if (data.error) setSync(`Sync failed: ${data.error}`);
+      else if (data.done) { setSync(`Synced ${data.synced.toLocaleString()} items`); refresh(); }
+      else setSync(`Syncing… ${data.synced.toLocaleString()} items`);
+    });
+  }, []);
+
+  const runTest = async () => {
+    setTesting(true);
+    setTest(null);
+    try {
+      setTest(await api.plexTest({ url, token, path_map: pathMap }));
+    } catch (e: any) {
+      setTest({ ok: false, error: e.message });
+    } finally {
+      setTesting(false);
+    }
+  };
+
+  const savePlex = async () => {
+    try {
+      const c = await api.saveConfig({ plex_url: url, plex_token: token || undefined, plex_path_map: pathMap });
+      setCfg(c);
+      setToken("");
+      toast("Plex settings saved");
+      onPlex();
+      refresh();
+    } catch (e: any) {
+      toast(e.message, "err");
+    }
+  };
+
+  const state = status?.connected ? "ok" : status?.configured ? "bad" : "off";
+  return (
+    <section className="panel" id="s-plex">
+      <div className="panel-head">
+        <h2 className="panel-title">Plex</h2>
+        <span className={`pill pill-${state}`}>
+          <span className="dot" aria-hidden />
+          {state === "ok" ? `Connected · ${status?.server_name} ${status?.version}` : state === "bad" ? "Can't reach Plex" : "Not connected"}
+        </span>
+      </div>
+      <p className="dim small">
+        Optional, alongside or instead of Jellyfin. Refreshes the affected library section after a file is replaced.
+      </p>
+      {state === "bad" && status?.error && <div className="alert">{status.error}</div>}
+      <div className="form-grid">
+        <label className="field"><span>Server URL</span>
+          <input className="input" value={url} onChange={(e) => setUrl(e.target.value)} placeholder="http://host.docker.internal:32400" spellCheck={false} />
+        </label>
+        <label className="field"><span>Token {cfg.plex_token_set && <span className="teal">· saved</span>}</span>
+          <input className="input" type="password" value={token} onChange={(e) => setToken(e.target.value)}
+            placeholder={cfg.plex_token_set ? "Leave blank to keep the saved token" : "support.plex.tv/articles/204059436"} autoComplete="off" />
+        </label>
+        <label className="field"><span>Path mapping <span className="dim">(Plex=here)</span></span>
+          <input className="input mono" value={pathMap} onChange={(e) => setPathMap(e.target.value)} placeholder="/data=/srv/media" spellCheck={false} />
+        </label>
+      </div>
+      <div className="toolbar">
+        <button className="btn" onClick={runTest} disabled={testing}>{testing ? "Testing…" : "Test connection"}</button>
+        <button className="btn btn-primary" onClick={savePlex}>Save</button>
+        <button className="btn" onClick={() => api.plexSync().then(() => setSync("Syncing…")).catch((e) => toast(e.message, "err"))}
+          disabled={!status?.connected || status?.syncing}>Sync library now</button>
+      </div>
+      {test && (
+        <div className={`test-result ${test.ok ? "ok" : "bad"}`}>
+          {test.ok ? (
+            <>
+              <div><b>Connected</b> to {test.server_name} ({test.version}).</div>
+              {test.libraries && test.libraries.length > 0 && (
+                <ul className="lib-check">
+                  {test.libraries.map((l) => (
+                    <li key={l.location}>
+                      <span className={l.reachable ? "teal" : "warm"}>{l.reachable ? "✓" : "✗"}</span>
+                      <span>{l.name}</span>
+                      <span className="mono dim small">{l.location} → {l.mapped}</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+              {test.libraries?.some((l) => !l.reachable) && (
+                <div className="dim small">Sections marked ✗ aren't visible here, so their items won't match. Adjust the path mapping, then test again.</div>
               )}
             </>
           ) : (
