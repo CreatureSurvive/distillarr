@@ -507,6 +507,9 @@ export type Config = {
   // match wins.
   autopilot_enabled?: boolean;
   auto_rules?: AutoRule[];
+  // off (0) unless the user sets a free-space threshold.
+  disk_pressure_pct?: number;
+  disk_pressure_budget_x?: number;
 };
 
 // One connected Sonarr or Radarr. api_key is never sent by the server
@@ -684,6 +687,7 @@ export const api = {
       trash_bytes: number;
       trash_count: number;
       crop?: { checked: number; total: number; with_bars: number };
+      disk_pressure?: boolean;
     }>("/api/v1/system"),
 
   config: () => req<Config>("/api/v1/config"),

@@ -24,6 +24,7 @@ export type LiveState = {
   arrVersion: number;
   intakeVersion: number;
   notes: Record<number, string>;
+  diskPressure: boolean;
 };
 
 const NAV = [
@@ -36,7 +37,7 @@ const NAV = [
 
 export default function App() {
   const [live, setLive] = useState<LiveState>({
-    progress: {}, activeJobs: [], scan: null, queueVersion: 0, hwVersion: 0, previewVersion: 0, jfVersion: 0, arrVersion: 0, intakeVersion: 0, notes: {},
+    progress: {}, activeJobs: [], scan: null, queueVersion: 0, hwVersion: 0, previewVersion: 0, jfVersion: 0, arrVersion: 0, intakeVersion: 0, notes: {}, diskPressure: false,
   });
   const [jf, setJf] = useState<JfStatus | null>(null);
   const [needsConfirmation, setNeedsConfirmation] = useState(0);
@@ -72,6 +73,8 @@ export default function App() {
         if (data?.done) setLive((l) => ({ ...l, arrVersion: l.arrVersion + 1 }));
       } else if (event === "intake") {
         setLive((l) => ({ ...l, intakeVersion: l.intakeVersion + 1 }));
+      } else if (event === "system" && data?.pressure !== undefined) {
+        setLive((l) => ({ ...l, diskPressure: !!data.pressure }));
       }
     });
     return () => {
@@ -83,6 +86,12 @@ export default function App() {
   useEffect(() => {
     api.jellyfinStatus().then(setJf).catch(() => setJf(null));
   }, [live.jfVersion]);
+
+  useEffect(() => {
+    // SSE "system" only fires on a change; fetch the state as of page
+    // load once so a reload mid-pressure still shows the banner.
+    api.system().then((s) => setLive((l) => ({ ...l, diskPressure: !!s.disk_pressure }))).catch(() => {});
+  }, []);
 
   useEffect(() => {
     api.intake("needs_confirmation").then((r) => setNeedsConfirmation(r.rows.length)).catch(() => {});
@@ -113,6 +122,11 @@ export default function App() {
           ))}
         </nav>
         <div className="sidebar-foot">
+          {live.diskPressure && (
+            <div className="side-status jf-bad" title="A library's filesystem is low on free space: autopilot favors quick wins and its budget is multiplied until this clears">
+              <span className="dot" aria-hidden /> Disk pressure — quick wins first
+            </div>
+          )}
           {live.scan?.running && (
             <div className="side-status">
               <span className="pulse-dot" aria-hidden /> Scanning · {live.scan.probed} probed

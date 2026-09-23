@@ -804,6 +804,33 @@ function AutopilotSection({ cfg, setCfg }: { cfg: Config; setCfg: (c: Config) =>
     }
   };
 
+  const [pressurePct, setPressurePct] = useState(String(cfg.disk_pressure_pct ?? 0));
+  const [pressureX, setPressureX] = useState(String(cfg.disk_pressure_budget_x ?? 2));
+  useEffect(() => setPressurePct(String(cfg.disk_pressure_pct ?? 0)), [cfg.disk_pressure_pct]);
+  useEffect(() => setPressureX(String(cfg.disk_pressure_budget_x ?? 2)), [cfg.disk_pressure_budget_x]);
+  const savePressurePct = async () => {
+    const v = Math.max(0, Math.min(100, parseInt(pressurePct, 10) || 0));
+    setPressurePct(String(v));
+    if (v === (cfg.disk_pressure_pct ?? 0)) return;
+    try {
+      setCfg(await api.saveConfig({ disk_pressure_pct: v }));
+      toast(v === 0 ? "Disk pressure mode is off" : `Disk pressure mode triggers at ${v}% free`);
+    } catch (e: any) {
+      toast(e.message, "err");
+    }
+  };
+  const savePressureX = async () => {
+    const v = Math.max(1, parseFloat(pressureX) || 2);
+    setPressureX(String(v));
+    if (v === (cfg.disk_pressure_budget_x ?? 2)) return;
+    try {
+      setCfg(await api.saveConfig({ disk_pressure_budget_x: v }));
+      toast(`Budget multiplier under pressure is now ${v}x`);
+    } catch (e: any) {
+      toast(e.message, "err");
+    }
+  };
+
   const move = (i: number, dir: -1 | 1) => {
     const j = i + dir;
     if (j < 0 || j >= rules.length) return;
@@ -889,6 +916,24 @@ function AutopilotSection({ cfg, setCfg }: { cfg: Config; setCfg: (c: Config) =>
       </div>
 
       {preview && <AutopilotPreviewResults groups={preview} />}
+
+      <div className="opt-row" style={{ marginTop: 12 }}>
+        <div className="opt-label">
+          Disk pressure mode
+          <div className="opt-hint">
+            0 = off. Below this free-space percentage on any library's filesystem, autopilot favors quick fixes
+            (remuxes) and its budget is multiplied so it clears space faster.
+          </div>
+        </div>
+        <div className="opt-ctl">
+          <input className="input" type="number" min={0} max={100} style={{ width: 80 }}
+            value={pressurePct} onChange={(e) => setPressurePct(e.target.value)} onBlur={savePressurePct} />
+          <span className="dim small">% free</span>
+          <input className="input" type="number" min={1} step={0.5} style={{ width: 70, marginLeft: 12 }}
+            value={pressureX} onChange={(e) => setPressureX(e.target.value)} onBlur={savePressureX} />
+          <span className="dim small">x budget while under pressure</span>
+        </div>
+      </div>
 
       {editing && (
         <RuleEditor rule={editing} instanceNames={instanceNames} onClose={() => setEditing(null)} onSave={saveRule}
