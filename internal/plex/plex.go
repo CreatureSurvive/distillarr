@@ -57,6 +57,29 @@ func (c *Client) get(ctx context.Context, out any, path string, q url.Values) er
 	return json.NewDecoder(resp.Body).Decode(out)
 }
 
+func (c *Client) put(ctx context.Context, path string, q url.Values) error {
+	if c == nil || c.Base == "" || c.Token == "" {
+		return fmt.Errorf("plex not configured")
+	}
+	u := c.Base + path + "?" + q.Encode()
+	req, err := http.NewRequestWithContext(ctx, http.MethodPut, u, nil)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("X-Plex-Token", c.Token)
+	req.Header.Set("Accept", "application/json")
+	resp, err := c.HC.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	io.Copy(io.Discard, resp.Body)
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return fmt.Errorf("PUT %s: %s", path, resp.Status)
+	}
+	return nil
+}
+
 // Identity is the server's root MediaContainer (connection test): unlike
 // the unauthenticated /identity endpoint, GET / requires the token and
 // carries the human-readable server name, so it doubles as the auth
@@ -174,4 +197,36 @@ func (c *Client) WalkSection(ctx context.Context, sectionKey string, typ int, fn
 // path must be Plex's view of the directory.
 func (c *Client) Refresh(ctx context.Context, sectionKey, path string) error {
 	return c.get(ctx, nil, "/library/sections/"+sectionKey+"/refresh", url.Values{"path": {path}})
+}
+
+// Metadata fetches one item by rating key (used to read its current
+// addedAt before/after a refresh).
+func (c *Client) Metadata(ctx context.Context, ratingKey string) (*Item, error) {
+	var r itemsResp
+	if err := c.get(ctx, &r, "/library/metadata/"+ratingKey, nil); err != nil {
+		return nil, err
+	}
+	if len(r.MediaContainer.Metadata) == 0 {
+		return nil, fmt.Errorf("plex: no such item %s", ratingKey)
+	}
+	return &r.MediaContainer.Metadata[0], nil
+}
+
+// SetAddedAt writes an item's "date added", locked so a later refresh or
+// agent match doesn't overwrite it (the query shape matches what
+// python-plexapi's AddedAtMixin sends, confirmed working against
+// current Plex Media Server versions —).
+// typ is the item's Plex metadata type (1 movie, 4 episode).
+func (c *Client) SetAddedAt(ctx context.Context, sectionKey, ratingKey string, typ int, unixTime int64, locked bool) error {
+	lockedVal := "0"
+	if locked {
+		lockedVal = "1"
+	}
+	q := url.Values{
+		"id":             {ratingKey},
+		"type":           {strconv.Itoa(typ)},
+		"addedAt.value":  {strconv.FormatInt(unixTime, 10)},
+		"addedAt.locked": {lockedVal},
+	}
+	return c.put(ctx, "/library/sections/"+sectionKey+"/all", q)
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"testing"
 )
 
@@ -140,5 +141,59 @@ func TestRefresh(t *testing.T) {
 	}
 	if gotQuery != "/data/movies/Some Movie" {
 		t.Errorf("wrong path query: %s", gotQuery)
+	}
+}
+
+func TestMetadata(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/library/metadata/42" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"MediaContainer":{"Metadata":[{"ratingKey":"42","addedAt":1700000000}]}}`))
+	}))
+	defer srv.Close()
+
+	c := New(srv.URL, "tok")
+	it, err := c.Metadata(context.Background(), "42")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if it.RatingKey != "42" || it.AddedAt != 1700000000 {
+		t.Errorf("wrong item: %+v", it)
+	}
+
+	srv.Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"MediaContainer":{"Metadata":[]}}`))
+	})
+	if _, err := c.Metadata(context.Background(), "42"); err == nil {
+		t.Error("an empty Metadata array must be an error, not a nil dereference")
+	}
+}
+
+func TestSetAddedAt(t *testing.T) {
+	var gotPath string
+	var gotQuery url.Values
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPut {
+			t.Errorf("expected PUT, got %s", r.Method)
+		}
+		gotPath, gotQuery = r.URL.Path, r.URL.Query()
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	c := New(srv.URL, "tok")
+	if err := c.SetAddedAt(context.Background(), "1", "42", 1, 1700000000, true); err != nil {
+		t.Fatal(err)
+	}
+	if gotPath != "/library/sections/1/all" {
+		t.Errorf("wrong path: %s", gotPath)
+	}
+	if gotQuery.Get("id") != "42" || gotQuery.Get("type") != "1" ||
+		gotQuery.Get("addedAt.value") != "1700000000" || gotQuery.Get("addedAt.locked") != "1" {
+		t.Errorf("wrong query: %v", gotQuery)
 	}
 }
