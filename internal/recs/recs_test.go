@@ -15,6 +15,46 @@ func file(h int, br int64, codec string, year int) *store.File {
 		VideoBitrate: br, TotalBitrate: br * 11 / 10}
 }
 
+// TestAudioPlanUsesRules covers "Estimates: recs size estimates
+// use the planned audio bitrates": a TrueHD 7.1 track's estimate should
+// follow AudioRules' explicit bitrate_by_channels (1024k for 7.1), not
+// the generic per-codec default (kbpsOf's own eac3 formula gives 896k
+// for 8 channels) — and should shrink far below leaving the track alone.
+func TestAudioPlanUsesRules(t *testing.T) {
+	f := file(1080, 8_000_000, "h264", 2015)
+	f.Audio = []store.AudioStream{{Index: 1, Codec: "truehd", Channels: 8, BitRate: 6_000_000}}
+	f.TotalBitrate = f.VideoBitrate + 6_500_000 // large enough that "other" isn't clamped to 0 below
+	rules := map[string]encode.AudioRule{
+		"truehd": {Action: "convert", Target: "eac3", BitrateByChannels: map[int]int{6: 640, 8: 1024}},
+	}
+	s := encode.Settings{Codec: encode.HEVC, ContainerGoal: "mp4_required", AudioRules: rules}
+	s.Normalize()
+
+	plans := audioPlan(f, s)
+	if len(plans) != 1 || plans[0].Action != "convert" || plans[0].Target != "eac3" || plans[0].Bitrate != 1024 {
+		t.Fatalf("want truehd 7.1 -> eac3 1024k: %+v", plans)
+	}
+
+	cfg := config.Default()
+	withRule := Estimate(f, s, cfg)
+
+	sNoRule := s
+	sNoRule.AudioRules = nil
+	withoutRule := Estimate(f, sNoRule, cfg)
+	if withRule.EstOut >= withoutRule.EstOut {
+		t.Errorf("converting 6Mb/s TrueHD to 1024k EAC3 should shrink the estimate: with=%d without=%d",
+			withRule.EstOut, withoutRule.EstOut)
+	}
+
+	sDefaultBitrate := s
+	sDefaultBitrate.AudioRules = nil
+	sDefaultBitrate.Audio = []encode.AudioTrack{{Index: 1, Action: "convert", Codec: "eac3"}} // no explicit bitrate
+	viaGenericDefault := Estimate(f, sDefaultBitrate, cfg)
+	if withRule.EstOut == viaGenericDefault.EstOut {
+		t.Errorf("rule's explicit 1024k should differ from kbpsOf's generic eac3 default (896k for 8ch): got equal %d", withRule.EstOut)
+	}
+}
+
 func TestQualityIsPerFile(t *testing.T) {
 	cfg := config.Default()
 	ResolveBackend = func(string, encode.Codec) encode.Backend { return encode.QSV }

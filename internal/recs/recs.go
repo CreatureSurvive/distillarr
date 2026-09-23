@@ -25,6 +25,7 @@ type AudioPlan struct {
 	Lang     string `json:"lang,omitempty"`
 	Action   string `json:"action"` // copy | convert | drop
 	Target   string `json:"target,omitempty"`
+	Bitrate  int    `json:"bitrate,omitempty"` // kbps; an AudioRule's explicit target, when it set one
 	Note     string `json:"note,omitempty"`
 }
 
@@ -510,7 +511,11 @@ func fillEstimate(r *Recommendation, f *store.File, s encode.Settings, cfg confi
 		case a.Action == "convert" && a.Target == "flac":
 			other -= trackBits(f, a.Index) / 2
 		case a.Action == "convert":
-			other -= trackBits(f, a.Index) - int64(kbpsOf(a.Target, a.Channels))*1000
+			br := a.Bitrate
+			if br <= 0 {
+				br = kbpsOf(a.Target, a.Channels)
+			}
+			other -= trackBits(f, a.Index) - int64(br)*1000
 		}
 	}
 	if other < 0 {
@@ -556,10 +561,31 @@ func kbpsOf(target string, ch int) int {
 	return 256
 }
 
-// audioPlan resolves per-track actions (explicit settings first, then
-// the PCM → lossless policy).
+// estimateContainer guesses the container the real encode would pick,
+// for AudioRules' convert_if_needed and the size estimate below —
+// audioPlan doesn't run ChooseContainer/fitsMP4 against real ffprobe
+// data, so mp4_required (always MP4) is the only goal it can resolve
+// exactly; prefer_mp4/keep are approximated as MKV, matching the old
+// PCM-only estimate's behaviour when no container is set explicitly.
+func estimateContainer(s encode.Settings) string {
+	switch s.Container {
+	case "mkv", "mp4":
+		return s.Container
+	}
+	if s.ContainerGoal == "mp4_required" {
+		return "mp4"
+	}
+	return "mkv"
+}
+
+// audioPlan resolves per-track actions: an explicit per-track override
+// first, then Settings.AudioRules, then the legacy PCM → lossless
+// policy — matching encode.audioPolicy's order, via the same
+// encode.ResolveAudioRule so a track's estimated action and its real
+// encode never disagree.
 func audioPlan(f *store.File, s encode.Settings) []AudioPlan {
 	out := []AudioPlan{}
+	container := estimateContainer(s)
 	for _, a := range f.Audio {
 		p := AudioPlan{Index: a.Index, Codec: a.Codec, Channels: a.Channels, Lang: a.Lang, Action: "copy"}
 		explicit := false
@@ -568,13 +594,21 @@ func audioPlan(f *store.File, s encode.Settings) []AudioPlan {
 				explicit = true
 				p.Action = t.Action
 				p.Target = t.Codec
+				p.Bitrate = t.Bitrate
 				if t.Channels > 0 {
 					p.Channels = t.Channels
 				}
 			}
 		}
-		if !explicit && isPCMLike(a.Codec) && s.AudioPCMTarget != "copy" {
-			p.Action, p.Target = "convert", s.AudioPCMTarget
+		if !explicit {
+			if t, ok := encode.ResolveAudioRule(s.AudioRules, a.Codec, a.Channels, container); ok {
+				p.Action, p.Target, p.Bitrate = t.Action, t.Codec, t.Bitrate
+				if t.Channels > 0 {
+					p.Channels = t.Channels
+				}
+			} else if isPCMLike(a.Codec) && s.AudioPCMTarget != "copy" {
+				p.Action, p.Target = "convert", s.AudioPCMTarget
+			}
 		}
 		switch {
 		case p.Action == "convert" && p.Target == "flac":
@@ -604,7 +638,8 @@ func baseSettings(cfg config.Config) encode.Settings {
 		TonemapHDR:     cfg.TonemapHDR,
 		AudioPCMTarget: cfg.AudioPCMTarget,
 		Container:      "auto",
-		PreferMP4:      cfg.MP4(),
+		ContainerGoal:  cfg.ContainerGoal,
+		AudioRules:     cfg.AudioRules,
 		VMAFTarget:     cfg.VMAF(),
 	}
 	s.Normalize()
