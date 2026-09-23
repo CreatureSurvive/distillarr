@@ -134,6 +134,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/v1/intake/approve", s.intakeApproveBulk)
 	mux.HandleFunc("POST /api/v1/intake/dismiss", s.intakeDismissBulk)
 
+	// autopilot
+	mux.HandleFunc("GET /api/v1/autopilot/preview", s.autopilotPreview)
+
 	// trash
 	mux.HandleFunc("GET /api/v1/trash", s.listTrash)
 	mux.HandleFunc("POST /api/v1/trash/{id}/restore", s.restoreTrash)

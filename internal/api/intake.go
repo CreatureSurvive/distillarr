@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"time"
 
+	"mediatrans/internal/arr"
 	"mediatrans/internal/autopilot"
 	"mediatrans/internal/encode"
 	"mediatrans/internal/issues"
@@ -32,6 +33,12 @@ type intakePromoter struct {
 	// quickFix builds the video-copy/remux settings for an autopilot
 	// "quick_fix" action.
 	quickFix func(f *store.File) encode.Settings
+	// codecPenaltyBlocked reports whether f's settings must be held for
+	// confirmation instead of queued: the owning arr instance has
+	// an unacknowledged codec penalty and settings is a real HEVC/AV1
+	// re-encode (not a remux). Never gates approveIntakeRow — that's an
+	// explicit human decision, same as manual queueing elsewhere.
+	codecPenaltyBlocked func(f *store.File, settings encode.Settings) (blocked bool, instanceName string)
 }
 
 func (s *Server) newIntakePromoter() *intakePromoter {
@@ -47,7 +54,36 @@ func (s *Server) newIntakePromoter() *intakePromoter {
 		quickFix: func(f *store.File) encode.Settings {
 			return issues.QuickFix(f, s.cfg.Get())
 		},
+		codecPenaltyBlocked: s.codecPenaltyBlocked,
 	}
+}
+
+// codecPenaltyBlocked implements the codec-penalty gate: a real HEVC/AV1
+// re-encode (VideoCopy=false — a remux is never gated) for a file whose
+// owning arr instance has a stored codec-penalty report with at least
+// one finding and hasn't acknowledged it (PenaltyAck==false) must not be
+// queued unattended.
+func (s *Server) codecPenaltyBlocked(f *store.File, settings encode.Settings) (bool, string) {
+	if settings.VideoCopy || (settings.Codec != "hevc" && settings.Codec != "av1") {
+		return false, ""
+	}
+	item, err := s.st.ArrItemByFileID(f.ID)
+	if err != nil || item == nil {
+		return false, ""
+	}
+	inst := s.arrInstanceByID(item.InstanceID)
+	if inst == nil || inst.PenaltyAck {
+		return false, ""
+	}
+	v, ok, _ := s.st.KVGet("arr_penalties_" + inst.ID)
+	if !ok {
+		return false, ""
+	}
+	var report arr.PenaltyReport
+	if err := json.Unmarshal([]byte(v), &report); err != nil || len(report.Penalties) == 0 {
+		return false, ""
+	}
+	return true, inst.Name
 }
 
 // autopilotDecision returns nil when autopilot is off; otherwise
@@ -60,17 +96,26 @@ func (s *Server) autopilotDecision(f *store.File, rec recs.Recommendation, origi
 		return nil
 	}
 	policy := recs.ArrPolicy(f.ID)
-	var tagNames []string
-	if item, err := s.st.ArrItemByFileID(f.ID); err == nil && item != nil {
-		names := s.st.ArrTags(item.InstanceID)
-		for _, id := range item.TagIDs() {
-			if n, ok := names[id]; ok {
-				tagNames = append(tagNames, n)
-			}
+	ctx := autopilot.Context{Origin: origin, TagNames: s.arrTagNamesFor(f.ID)}
+	d := autopilot.Evaluate(f, rec, policy, ctx, cfg.AutoRules, cfg.MinSavingsPct)
+	return &d
+}
+
+// arrTagNamesFor resolves a file's owning arr instance's tags (if any)
+// to their names, the form autopilot.Context.Tags matches against.
+func (s *Server) arrTagNamesFor(fileID int64) []string {
+	item, err := s.st.ArrItemByFileID(fileID)
+	if err != nil || item == nil {
+		return nil
+	}
+	names := s.st.ArrTags(item.InstanceID)
+	var out []string
+	for _, id := range item.TagIDs() {
+		if n, ok := names[id]; ok {
+			out = append(out, n)
 		}
 	}
-	d := autopilot.Evaluate(f, rec, policy, autopilot.Context{Origin: origin, TagNames: tagNames}, cfg.AutoRules, cfg.MinSavingsPct)
-	return &d
+	return out
 }
 
 // promoteOne re-probes the row's file, then walks the same gates for
@@ -136,6 +181,12 @@ func (p *intakePromoter) promoteOne(st *store.Store, row store.Intake) {
 }
 
 func (p *intakePromoter) enqueueNow(st *store.Store, row store.Intake, f *store.File, settings encode.Settings) {
+	if p.codecPenaltyBlocked != nil {
+		if blocked, _ := p.codecPenaltyBlocked(f, settings); blocked {
+			_ = st.SetIntakeState(row.ID, store.IntakeNeedsConfirmation, "codec_penalty")
+			return
+		}
+	}
 	j, err := p.enqueue(f, settings, row.Origin, row.Reason)
 	if err != nil {
 		log.Printf("intake: enqueue %s: %v", f.Path, err)
@@ -176,8 +227,10 @@ func (s *Server) IntakeLoop(stop <-chan struct{}) {
 
 type intakeOut struct {
 	store.Intake
-	FilePath  string `json:"file_path,omitempty"`
-	FileTitle string `json:"file_title,omitempty"`
+	FilePath     string `json:"file_path,omitempty"`
+	FileTitle    string `json:"file_title,omitempty"`
+	InstanceID   string `json:"instance_id,omitempty"`
+	InstanceName string `json:"instance_name,omitempty"`
 }
 
 func (s *Server) intakeOut(it store.Intake) intakeOut {
@@ -185,6 +238,12 @@ func (s *Server) intakeOut(it store.Intake) intakeOut {
 	if f, err := s.st.GetFile(it.FileID); err == nil && f != nil {
 		out.FilePath = f.Path
 		out.FileTitle = f.Title
+	}
+	if item, err := s.st.ArrItemByFileID(it.FileID); err == nil && item != nil {
+		out.InstanceID = item.InstanceID
+		if inst := s.arrInstanceByID(item.InstanceID); inst != nil {
+			out.InstanceName = inst.Name
+		}
 	}
 	return out
 }
