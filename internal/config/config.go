@@ -82,6 +82,14 @@ type Config struct {
 	// "from=to" (e.g. "/data=/srv/media" when Jellyfin mounts the library as /data).
 	JellyfinPathMap string `json:"jellyfin_path_map"`
 
+	// Plex: same shape as the Jellyfin fields above. No default
+	// path map is set — unlike Jellyfin's, which predates the public
+	// Distillarr release, this one shouldn't bake in one host's mount
+	// layout.
+	PlexURL     string `json:"plex_url"`
+	PlexToken   string `json:"plex_token"`
+	PlexPathMap string `json:"plex_path_map"`
+
 	// ArrInstances: any number of Sonarr and Radarr connections. See
 	// internal/arr for the client and for the design.
 	ArrInstances []ArrInstance `json:"arr_instances"`
@@ -514,6 +522,19 @@ func (c Config) MapJellyfinPath(p string) string {
 // (/srv/media/movies/x.mp4 becomes /data/movies/x.mp4).
 func (c Config) ToJellyfinPath(p string) string {
 	m, _ := pathmap.Parse(c.JellyfinPathMap)
+	return m.ToRemote(p)
+}
+
+// MapPlexPath rewrites a Plex-side path to the local view; see
+// MapJellyfinPath.
+func (c Config) MapPlexPath(p string) string {
+	m, _ := pathmap.Parse(c.PlexPathMap)
+	return m.ToLocal(p)
+}
+
+// ToPlexPath is MapPlexPath's inverse: our path as Plex sees it.
+func (c Config) ToPlexPath(p string) string {
+	m, _ := pathmap.Parse(c.PlexPathMap)
 	return m.ToRemote(p)
 }
 

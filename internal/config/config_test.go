@@ -26,6 +26,24 @@ func TestJellyfinPathMapBothWays(t *testing.T) {
 	}
 }
 
+func TestPlexPathMapBothWays(t *testing.T) {
+	c := Config{PlexPathMap: "/media=/srv/media"} // Plex mounts /srv/media as /media
+	for _, tc := range []struct{ plex, local string }{
+		{"/media/movies/A (2001)/A.mkv", "/srv/media/movies/A (2001)/A.mkv"},
+		{"/media", "/srv/media"},
+	} {
+		if got := c.MapPlexPath(tc.plex); got != tc.local {
+			t.Errorf("Plex->local %q = %q, want %q", tc.plex, got, tc.local)
+		}
+		if got := c.ToPlexPath(tc.local); got != tc.plex {
+			t.Errorf("local->Plex %q = %q, want %q", tc.local, got, tc.plex)
+		}
+	}
+	if got := (Config{}).ToPlexPath("/srv/media/x.mkv"); got != "/srv/media/x.mkv" {
+		t.Errorf("no mapping configured means no rewrite, got %q", got)
+	}
+}
+
 func TestPressureBudgetXDefault(t *testing.T) {
 	if got := (Config{}).PressureBudgetX(); got != 2 {
 		t.Errorf("default PressureBudgetX() = %v, want 2", got)
