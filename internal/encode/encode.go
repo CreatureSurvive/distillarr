@@ -101,7 +101,12 @@ type Settings struct {
 	// only AudioPCMTarget and the generic MP4-safety fallback apply, as
 	// before. See AudioRule and audioPolicy.
 	AudioRules map[string]AudioRule `json:"audio_rules,omitempty"`
-	Crop       string                `json:"crop,omitempty"` // "w:h:x:y" black-bar crop ("" = none)
+	// AddStereoCompat adds an AAC 2.0 track, downmixed with a
+	// centre-weighted pan filter from the first kept multichannel track,
+	// when the plan would otherwise keep no stereo/mono track at all.
+	// Off by default.
+	AddStereoCompat bool   `json:"add_stereo_compat,omitempty"`
+	Crop            string `json:"crop,omitempty"` // "w:h:x:y" black-bar crop ("" = none)
 	// VideoCopy keeps the video bitstream as-is: a quick fix (remux,
 	// hvc1 tag, faststart, audio conversion) with no re-encode.
 	VideoCopy bool `json:"video_copy,omitempty"`
@@ -725,7 +730,7 @@ func AudioDecision(s Settings, a media.Stream, container string) AudioTrack {
 	if t, ok := audioPolicy(s, a, container); ok {
 		return t
 	}
-	if container == "mp4" && !isMP4AudioSafe(a.CodecName) {
+	if container == "mp4" && !IsMP4AudioSafe(a.CodecName) {
 		return AudioTrack{Index: a.Index, Action: "convert", Codec: "aac"}
 	}
 	return AudioTrack{Index: a.Index, Action: "copy"}
@@ -799,7 +804,7 @@ func ResolveAudioRule(rules map[string]AudioRule, codec string, channels int, co
 	case "convert":
 		return buildConvert(rule, codec, channels), true
 	case "convert_if_needed":
-		if container == "mkv" || isMP4AudioSafe(codec) {
+		if container == "mkv" || IsMP4AudioSafe(codec) {
 			return AudioTrack{}, false // fits as-is; let the caller's own default (plain copy) stand
 		}
 		return buildConvert(rule, codec, channels), true
@@ -897,15 +902,24 @@ func planStreams(s Settings, src *media.Probe, container string, preview bool) s
 		return p
 	}
 
+	hasStereo := false
+	var firstMulti *media.Stream
 	for _, a := range src.Audios() {
+		a := a
 		d := AudioDecision(s, a, container)
 		if d.Action == "drop" {
 			continue
+		}
+		if firstMulti == nil && a.Channels > 2 {
+			firstMulti = &a
 		}
 		k := itoa(p.nAudio)
 		p.maps = append(p.maps, "-map", fmt.Sprintf("0:%d", a.Index))
 		if d.Action == "copy" {
 			p.codecs = append(p.codecs, "-c:a:"+k, "copy")
+			if a.Channels <= 2 {
+				hasStereo = true
+			}
 		} else {
 			codec := d.Codec
 			if codec == "" {
@@ -924,6 +938,9 @@ func planStreams(s Settings, src *media.Probe, container string, preview bool) s
 				ch = want
 				p.codecs = append(p.codecs, "-ac:a:"+k, itoa(want))
 			}
+			if ch <= 2 {
+				hasStereo = true
+			}
 			if codec != "flac" {
 				br := d.Bitrate
 				if br <= 0 {
@@ -932,6 +949,23 @@ func planStreams(s Settings, src *media.Probe, container string, preview bool) s
 				p.codecs = append(p.codecs, "-b:a:"+k, fmt.Sprintf("%dk", br))
 			}
 		}
+		p.nAudio++
+	}
+
+	// Stereo compat track: nothing kept plays on a device that can't
+	// decode the multichannel codec at all. Map the same source stream a
+	// second time (ffmpeg allows mapping one input stream into more than
+	// one output stream) and downmix it independently, so the main track's
+	// own action/codec/channel choice is untouched.
+	if s.AddStereoCompat && !hasStereo && firstMulti != nil {
+		k := itoa(p.nAudio)
+		p.maps = append(p.maps, "-map", fmt.Sprintf("0:%d", firstMulti.Index))
+		if filt := stereoCompatFilter(firstMulti.Channels); filt != "" {
+			p.codecs = append(p.codecs, "-filter:a:"+k, filt)
+		} else {
+			p.codecs = append(p.codecs, "-ac:a:"+k, "2")
+		}
+		p.codecs = append(p.codecs, "-c:a:"+k, "aac", "-b:a:"+k, "192k")
 		p.nAudio++
 	}
 
@@ -954,6 +988,24 @@ func planStreams(s Settings, src *media.Probe, container string, preview bool) s
 		p.codecs = append(p.codecs, "-c:t", "copy")
 	}
 	return p
+}
+
+// stereoCompatFilter returns a centre-weighted pan filter downmixing a
+// 5.1 or 7.1 layout to stereo, keeping dialogue (the centre channel) at
+// full level rather than ffmpeg's own default downmix, which attenuates
+// it by -3dB (0.707) same as every other channel. Channel names follow
+// ffmpeg's pan filter syntax (FL/FR/FC/LFE/BL/BR/SL/SR); LFE is dropped,
+// as in any standard downmix. Any channel count without a named-layout
+// mapping here (5.0, quad, ...) falls back to plain -ac (the caller uses
+// ffmpeg's own downmix instead) — "" signals that.
+func stereoCompatFilter(channels int) string {
+	switch channels {
+	case 6: // 5.1: FL FR FC LFE BL BR
+		return "pan=stereo|FL=FL+FC+0.5*BL|FR=FR+FC+0.5*BR"
+	case 8: // 7.1: FL FR FC LFE BL BR SL SR
+		return "pan=stereo|FL=FL+FC+0.5*BL+0.5*SL|FR=FR+FC+0.5*BR+0.5*SR"
+	}
+	return ""
 }
 
 // defaultAudioKbps picks a transparent bitrate by codec and channels.
@@ -1055,7 +1107,7 @@ func fitsMP4(s Settings, src *media.Probe) bool {
 	}
 	for _, a := range src.Audios() {
 		if t, ok := audioPolicy(s, a, "mp4"); ok {
-			if t.Action == "copy" && !isMP4AudioSafe(a.CodecName) {
+			if t.Action == "copy" && !IsMP4AudioSafe(a.CodecName) {
 				return false
 			}
 			if t.Action == "convert" && t.Codec == "opus" {
@@ -1063,7 +1115,7 @@ func fitsMP4(s Settings, src *media.Probe) bool {
 			}
 			continue
 		}
-		if !isMP4AudioSafe(a.CodecName) {
+		if !IsMP4AudioSafe(a.CodecName) {
 			return false
 		}
 	}
@@ -1091,7 +1143,11 @@ var mp4AudioCompat = map[string]struct{ muxable, apple bool }{
 	"dts":    {false, false},
 }
 
-func isMP4AudioSafe(codec string) bool {
+// IsMP4AudioSafe reports whether shipping Apple devices are known to play
+// codec inside an MP4 container. Exported so internal/issues can judge
+// "audio_blocks_mp4" against a persisted store.File's audio
+// codecs, mirroring fitsMP4's own per-track check.
+func IsMP4AudioSafe(codec string) bool {
 	c, ok := mp4AudioCompat[codec]
 	return ok && c.apple
 }

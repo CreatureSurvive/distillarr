@@ -385,8 +385,8 @@ func TestIsMP4AudioSafeTable(t *testing.T) {
 		"flac": false, "truehd": false, "dts": false, "vorbis": false, "pcm_s24le": false,
 	}
 	for codec, want := range cases {
-		if got := isMP4AudioSafe(codec); got != want {
-			t.Errorf("isMP4AudioSafe(%q) = %v, want %v", codec, got, want)
+		if got := IsMP4AudioSafe(codec); got != want {
+			t.Errorf("IsMP4AudioSafe(%q) = %v, want %v", codec, got, want)
 		}
 	}
 }
@@ -485,5 +485,52 @@ func TestAudioWarnings(t *testing.T) {
 	}
 	if got := AudioWarnings(rules, []media.Stream{{Index: 5, CodecType: "audio", CodecName: "aac", Channels: 2}}, "mp4"); len(got) != 0 {
 		t.Errorf("a track with no matching rule (or copy) needs no warning: %v", got)
+	}
+}
+
+func TestStereoCompatFilterTable(t *testing.T) {
+	if got := stereoCompatFilter(6); got != "pan=stereo|FL=FL+FC+0.5*BL|FR=FR+FC+0.5*BR" {
+		t.Errorf("5.1 pan filter: %q", got)
+	}
+	if got := stereoCompatFilter(8); got != "pan=stereo|FL=FL+FC+0.5*BL+0.5*SL|FR=FR+FC+0.5*BR+0.5*SR" {
+		t.Errorf("7.1 pan filter: %q", got)
+	}
+	if got := stereoCompatFilter(5); got != "" {
+		t.Errorf("unknown layout should fall back to plain -ac: %q", got)
+	}
+}
+
+func TestStereoCompatTrack(t *testing.T) {
+	// 5.1 only, nothing stereo/mono kept: a compat track is added.
+	p := probe("/m/a.mkv", "h264", "yuv420p", "", []string{"eac3"}, nil)
+	s := Settings{Codec: HEVC, Backend: SW, AddStereoCompat: true}
+	a, prim, _ := joined(t, s, p, nil)
+	if prim.ExpectAudio != 2 {
+		t.Fatalf("want the main 5.1 track plus a compat track: %d", prim.ExpectAudio)
+	}
+	if !strings.Contains(a, "-c:a:0 copy") {
+		t.Errorf("main track unaffected by the compat track: %s", a)
+	}
+	if !strings.Contains(a, "-filter:a:1 pan=stereo|FL=FL+FC+0.5*BL|FR=FR+FC+0.5*BR") ||
+		!strings.Contains(a, "-c:a:1 aac") || !strings.Contains(a, "-b:a:1 192k") {
+		t.Errorf("want a centre-weighted-pan AAC compat track: %s", a)
+	}
+
+	// Already has a stereo/mono track kept: no compat track needed.
+	p2 := &media.Probe{Format: media.Format{Filename: "/m/b.mkv"}}
+	p2.Streams = append(p2.Streams,
+		media.Stream{Index: 0, CodecType: "video", CodecName: "h264", Width: 1920, Height: 1080},
+		media.Stream{Index: 1, CodecType: "audio", CodecName: "eac3", Channels: 6},
+		media.Stream{Index: 2, CodecType: "audio", CodecName: "aac", Channels: 2})
+	_, prim2, _ := joined(t, s, p2, nil)
+	if prim2.ExpectAudio != 2 {
+		t.Errorf("no compat track once a stereo track is already kept: %d", prim2.ExpectAudio)
+	}
+
+	// Off by default: never added unless AddStereoCompat is set.
+	s.AddStereoCompat = false
+	_, prim3, _ := joined(t, s, p, nil)
+	if prim3.ExpectAudio != 1 {
+		t.Errorf("compat track must stay opt-in: %d", prim3.ExpectAudio)
 	}
 }
