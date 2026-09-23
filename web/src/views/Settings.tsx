@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactNode } from "react";
-import { api, subscribe, type Config, type HwInfo, type JfStatus, type JfTest, type TrashItem } from "../api";
+import { api, subscribe, type ArrInstance, type ArrTestResult, type Config, type HwInfo, type JfStatus, type JfTest, type TrashItem } from "../api";
 import { Seg, Toggle, toast } from "../components";
 import { ago, backendLabel, bytes } from "../format";
 import { qualityWord } from "../options";
@@ -43,6 +43,7 @@ export default function SettingsView({ live, onJellyfin }: { live: LiveState; on
       </header>
       <nav className="settings-nav">
         <a href="#/settings" onClick={(e) => { e.preventDefault(); document.getElementById("s-jf")?.scrollIntoView({ behavior: "smooth" }); }}>Jellyfin</a>
+        <a href="#/settings" onClick={(e) => { e.preventDefault(); document.getElementById("s-arr")?.scrollIntoView({ behavior: "smooth" }); }}>Sonarr / Radarr</a>
         <a href="#/settings" onClick={(e) => { e.preventDefault(); document.getElementById("s-enc")?.scrollIntoView({ behavior: "smooth" }); }}>Encoding</a>
         <a href="#/settings" onClick={(e) => { e.preventDefault(); document.getElementById("s-up")?.scrollIntoView({ behavior: "smooth" }); }}>Upscaling</a>
         <a href="#/settings" onClick={(e) => { e.preventDefault(); document.getElementById("s-hw")?.scrollIntoView({ behavior: "smooth" }); }}>Hardware</a>
@@ -51,6 +52,8 @@ export default function SettingsView({ live, onJellyfin }: { live: LiveState; on
       </nav>
 
       <JellyfinSection cfg={cfg} setCfg={setCfg} live={live} onJellyfin={onJellyfin} />
+
+      <ArrSection cfg={cfg} setCfg={setCfg} />
 
       <section className="panel" id="s-enc">
         <h2 className="panel-title">Encoding defaults</h2>
@@ -261,6 +264,149 @@ function JellyfinSection({ cfg, setCfg, live, onJellyfin }: { cfg: Config; setCf
       )}
       <div className="dim small" style={{ marginTop: 10 }}>
         {sync || (status?.cached ? `${status.cached.toLocaleString()} items cached · last sync ${ago(status.last_sync)}` : "Nothing synced yet.")}
+      </div>
+    </section>
+  );
+}
+
+type ArrDraft = ArrInstance & { keyInput: string };
+
+// Any number of Sonarr/Radarr connections. Each card edits its own
+// fields locally; Save/Remove always sends the whole list, since the
+// server's PUT replaces arr_instances wholesale (an id left out is
+// removed) — a blank key on an existing id keeps what's already saved.
+function ArrSection({ cfg, setCfg }: { cfg: Config; setCfg: (c: Config) => void }) {
+  const [drafts, setDrafts] = useState<ArrDraft[]>(() => cfg.arr_instances.map((a) => ({ ...a, keyInput: "" })));
+  const [results, setResults] = useState<Record<number, ArrTestResult | null>>({});
+  const [testing, setTesting] = useState<Record<number, boolean>>({});
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    setDrafts(cfg.arr_instances.map((a) => ({ ...a, keyInput: "" })));
+  }, [cfg.arr_instances]);
+
+  const update = (i: number, patch: Partial<ArrDraft>) =>
+    setDrafts((d) => d.map((x, j) => (j === i ? { ...x, ...patch } : x)));
+
+  const toPayload = (d: ArrDraft) => ({
+    id: d.id || undefined, name: d.name, kind: d.kind, url: d.url,
+    api_key: d.keyInput || undefined, path_map: d.path_map, enabled: d.enabled,
+  });
+
+  const saveAll = async (list: ArrDraft[], msg: string) => {
+    setSaving(true);
+    try {
+      const c = await api.saveConfig({ arr_instances: list.map(toPayload) });
+      setCfg(c);
+      toast(msg);
+    } catch (e: any) {
+      toast(e.message, "err");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const addInstance = (kind: "sonarr" | "radarr") => {
+    setDrafts((d) => [...d, {
+      id: "", name: kind === "sonarr" ? "Sonarr" : "Radarr", kind, url: "",
+      api_key_set: false, path_map: "", enabled: true, keyInput: "",
+    }]);
+  };
+
+  const removeInstance = (i: number) => {
+    const next = drafts.filter((_, j) => j !== i);
+    saveAll(next, "Removed");
+  };
+
+  const testOne = async (i: number) => {
+    const d = drafts[i];
+    setTesting((t) => ({ ...t, [i]: true }));
+    setResults((r) => ({ ...r, [i]: null }));
+    try {
+      const r = await api.arrTest(d.id || "new", {
+        url: d.url, api_key: d.keyInput || undefined, kind: d.kind, path_map: d.path_map,
+      });
+      setResults((res) => ({ ...res, [i]: r }));
+    } catch (e: any) {
+      setResults((res) => ({ ...res, [i]: { ok: false, error: e.message } }));
+    } finally {
+      setTesting((t) => ({ ...t, [i]: false }));
+    }
+  };
+
+  return (
+    <section className="panel" id="s-arr">
+      <div className="panel-head">
+        <h2 className="panel-title">Sonarr / Radarr</h2>
+      </div>
+      <p className="dim small">
+        Optional. Connect any number of Sonarr and Radarr instances (a 4K
+        Radarr fits fine alongside a regular one) to see what they know
+        about a file, and later — nothing yet — to tell them about
+        replaced files.
+      </p>
+      {drafts.map((d, i) => {
+        const test = results[i];
+        return (
+          <div key={i} className="panel" style={{ marginTop: 12, marginBottom: 0 }}>
+            <div className="panel-head">
+              <h3 className="panel-title" style={{ fontSize: 14 }}>{d.name || (d.kind === "sonarr" ? "Sonarr" : "Radarr")}</h3>
+              <Toggle on={d.enabled !== false} onChange={(v) => update(i, { enabled: v })} label="Enabled" />
+            </div>
+            <div className="form-grid">
+              <label className="field"><span>Name</span>
+                <input className="input" value={d.name} onChange={(e) => update(i, { name: e.target.value })} placeholder={d.kind === "sonarr" ? "Sonarr" : "Radarr"} />
+              </label>
+              <label className="field"><span>Kind</span>
+                <Seg value={d.kind} onChange={(v) => update(i, { kind: v as "sonarr" | "radarr" })}
+                  options={[{ value: "sonarr", label: "Sonarr" }, { value: "radarr", label: "Radarr" }]} />
+              </label>
+              <label className="field"><span>Server URL <span className="dim">(container name if on the same Docker network, otherwise host.docker.internal or the LAN IP)</span></span>
+                <input className="input" value={d.url} onChange={(e) => update(i, { url: e.target.value })} placeholder="http://host.docker.internal:8989" spellCheck={false} />
+              </label>
+              <label className="field"><span>API key {d.api_key_set && <span className="teal">· saved</span>}</span>
+                <input className="input" type="password" value={d.keyInput} onChange={(e) => update(i, { keyInput: e.target.value })}
+                  placeholder={d.api_key_set ? "Leave blank to keep the saved key" : "Settings → General → Security"} autoComplete="off" />
+              </label>
+              <label className="field"><span>Path mapping <span className="dim">(their view=here)</span></span>
+                <input className="input mono" value={d.path_map || ""} onChange={(e) => update(i, { path_map: e.target.value })} placeholder="/data=/media" spellCheck={false} />
+              </label>
+            </div>
+            <div className="toolbar">
+              <button className="btn" onClick={() => testOne(i)} disabled={testing[i]}>{testing[i] ? "Testing…" : "Test connection"}</button>
+              <button className="btn btn-primary" onClick={() => saveAll(drafts, "Saved")} disabled={saving}>Save</button>
+              <button className="btn btn-danger" onClick={() => removeInstance(i)} disabled={saving}>Remove</button>
+            </div>
+            {test && (
+              <div className={`test-result ${test.ok ? "ok" : "bad"}`}>
+                {test.ok ? (
+                  <>
+                    <div><b>Connected</b> to {test.app_name} ({test.version}).</div>
+                    {test.root_folders && test.root_folders.length > 0 && (
+                      <ul className="lib-check">
+                        {test.root_folders.map((f) => (
+                          <li key={f.path}>
+                            <span className={f.reachable ? "teal" : "warm"}>{f.reachable ? "✓" : "✗"}</span>
+                            <span className="mono dim small">{f.path} → {f.mapped}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                    {test.root_folders?.some((f) => !f.reachable) && (
+                      <div className="dim small">Folders marked ✗ aren't visible here. Adjust the path mapping, then test again.</div>
+                    )}
+                  </>
+                ) : (
+                  <div><b>Not connected.</b> {test.error}</div>
+                )}
+              </div>
+            )}
+          </div>
+        );
+      })}
+      <div className="toolbar" style={{ marginTop: 14 }}>
+        <button className="btn" onClick={() => addInstance("sonarr")}>+ Add Sonarr</button>
+        <button className="btn" onClick={() => addInstance("radarr")}>+ Add Radarr</button>
       </div>
     </section>
   );

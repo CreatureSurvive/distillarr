@@ -442,7 +442,7 @@ export type Config = {
 // keeps the stored one. id is a stable slug: never edit it after
 // creation, since webhook URLs (later phases) key on it.
 export type ArrInstance = {
-  id: string;
+  id?: string; // omit when creating a new one; the server assigns it
   name: string;
   kind: "sonarr" | "radarr";
   url: string;
@@ -450,6 +450,14 @@ export type ArrInstance = {
   api_key_set?: boolean;
   path_map?: string;
   enabled?: boolean;
+};
+
+export type ArrTestResult = {
+  ok: boolean;
+  error?: string;
+  version?: string;
+  app_name?: string;
+  root_folders?: { path: string; mapped: string; reachable: boolean }[];
 };
 
 export type JfStatus = {
@@ -645,6 +653,10 @@ export const api = {
   jellyfinStatus: () => req<JfStatus>("/api/v1/jellyfin/status"),
   jellyfinTest: (body: { url?: string; key?: string; path_map?: string }) => post<JfTest>("/api/v1/jellyfin/test", body),
   jellyfinSync: () => post<{ started: boolean }>("/api/v1/jellyfin/sync"),
+
+  // id is the stored instance's id, or "new" for one not yet saved.
+  arrTest: (id: string, body: { url?: string; api_key?: string; kind?: string; path_map?: string }) =>
+    post<ArrTestResult>(`/api/v1/arr/${id}/test`, body),
 
   preview: (id: string) => req<Preview>(`/api/v1/previews/${id}`),
   previews: () => req<{ previews: Preview[] }>("/api/v1/previews"),

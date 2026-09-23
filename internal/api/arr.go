@@ -1,14 +1,20 @@
 package api
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"net/http"
+	"os"
 	"regexp"
 	"strings"
+	"time"
 
+	"mediatrans/internal/arr"
 	"mediatrans/internal/config"
+	"mediatrans/internal/pathmap"
 )
 
 // arrInstanceOut is an ArrInstance as returned by the API: the key is
@@ -81,4 +87,77 @@ func mergeArrInstances(stored []config.ArrInstance, patch json.RawMessage) ([]co
 		out = append(out, inst)
 	}
 	return out, nil
+}
+
+// arrKind maps the stored string to the client's Kind, defaulting to
+// Radarr only because Kind must be something; callers always have a
+// real value from either the stored instance or the request body.
+func arrKind(s string) arr.Kind {
+	if s == "sonarr" {
+		return arr.Sonarr
+	}
+	return arr.Radarr
+}
+
+type rootFolderOut struct {
+	Path      string `json:"path"`
+	Mapped    string `json:"mapped"`
+	Reachable bool   `json:"reachable"`
+}
+
+// arrTest checks connectivity and the path map for one instance, saved
+// or not: {id} names a stored instance to fall back to for any field
+// left blank in the body (so testing a saved instance doesn't require
+// re-entering its key), or "new" for one that hasn't been saved yet.
+// Nothing is persisted here — Settings saves through PUT /config as usual.
+func (s *Server) arrTest(w http.ResponseWriter, r *http.Request) {
+	var req config.ArrInstance
+	_ = readJSON(r, &req)
+
+	cfg := s.cfg.Get()
+	id := r.PathValue("id")
+	for _, inst := range cfg.ArrInstances {
+		if inst.ID != id {
+			continue
+		}
+		if req.URL == "" {
+			req.URL = inst.URL
+		}
+		if req.APIKey == "" {
+			req.APIKey = inst.APIKey
+		}
+		if req.PathMap == "" {
+			req.PathMap = inst.PathMap
+		}
+		if req.Kind == "" {
+			req.Kind = inst.Kind
+		}
+		break
+	}
+	if req.URL == "" || req.APIKey == "" {
+		writeJSON(w, http.StatusOK, map[string]any{"ok": false, "error": "Enter the server URL and an API key."})
+		return
+	}
+
+	cl := arr.New(req.URL, req.APIKey, arrKind(req.Kind))
+	ctx, cancel := context.WithTimeout(r.Context(), 8*time.Second)
+	defer cancel()
+	st, err := cl.Test(ctx)
+	if err != nil {
+		writeJSON(w, http.StatusOK, map[string]any{"ok": false, "error": arr.FriendlyError(err)})
+		return
+	}
+
+	pm, _ := pathmap.Parse(req.PathMap)
+	var roots []rootFolderOut
+	if folders, err := cl.RootFolders(ctx); err == nil {
+		for _, f := range folders {
+			mapped := pm.ToLocal(f.Path)
+			_, statErr := os.Stat(mapped)
+			roots = append(roots, rootFolderOut{Path: f.Path, Mapped: mapped, Reachable: statErr == nil})
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok": true, "version": st.Version, "app_name": st.AppName, "root_folders": roots,
+	})
 }

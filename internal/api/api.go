@@ -121,6 +121,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/v1/jellyfin/sync", s.jfSync)
 	mux.HandleFunc("GET /api/v1/image/{itemid}", s.image)
 
+	// sonarr / radarr
+	mux.HandleFunc("POST /api/v1/arr/{id}/test", s.arrTest)
+
 	// previews
 	mux.HandleFunc("GET /api/v1/previews", s.listPreviews)
 	mux.HandleFunc("GET /api/v1/previews/{id}", s.getPreview)
