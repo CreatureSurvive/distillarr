@@ -1,0 +1,481 @@
+[
+  {
+    "id": 1,
+    "name": "H264",
+    "includeCustomFormatWhenRenaming": false,
+    "specifications": [
+      {
+        "name": "x264",
+        "implementation": "ReleaseTitleSpecification",
+        "implementationName": "Release Title",
+        "infoLink": "https://wiki.servarr.com/sonarr/settings#custom-formats-2",
+        "negate": false,
+        "required": false,
+        "fields": [
+          {
+            "order": 0,
+            "name": "value",
+            "label": "Regular Expression",
+            "helpText": "Custom Format RegEx is Case Insensitive",
+            "value": "(x|h)\\.?264",
+            "type": "textbox",
+            "advanced": false,
+            "privacy": "normal",
+            "isFloat": false
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": 2,
+    "name": "RARBG",
+    "includeCustomFormatWhenRenaming": false,
+    "specifications": [
+      {
+        "name": "RARBG",
+        "implementation": "ReleaseGroupSpecification",
+        "implementationName": "Release Group",
+        "infoLink": "https://wiki.servarr.com/sonarr/settings#custom-formats-2",
+        "negate": false,
+        "required": true,
+        "fields": [
+          {
+            "order": 0,
+            "name": "value",
+            "label": "Regular Expression",
+            "helpText": "Custom Format RegEx is Case Insensitive",
+            "value": "(RARBG)",
+            "type": "textbox",
+            "advanced": false,
+            "privacy": "normal",
+            "isFloat": false
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": 3,
+    "name": "H265",
+    "includeCustomFormatWhenRenaming": false,
+    "specifications": [
+      {
+        "name": "x265",
+        "implementation": "ReleaseTitleSpecification",
+        "implementationName": "Release Title",
+        "infoLink": "https://wiki.servarr.com/sonarr/settings#custom-formats-2",
+        "negate": false,
+        "required": false,
+        "fields": [
+          {
+            "order": 0,
+            "name": "value",
+            "label": "Regular Expression",
+            "helpText": "Custom Format RegEx is Case Insensitive",
+            "value": "(((x|h)\\.?265)|(HEVC))",
+            "type": "textbox",
+            "advanced": false,
+            "privacy": "normal",
+            "isFloat": false
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": 4,
+    "name": "1GB - 5GB",
+    "includeCustomFormatWhenRenaming": false,
+    "specifications": [
+      {
+        "name": "1GB - 5GB",
+        "implementation": "SizeSpecification",
+        "implementationName": "Size",
+        "infoLink": "https://wiki.servarr.com/sonarr/settings#custom-formats-2",
+        "negate": false,
+        "required": false,
+        "fields": [
+          {
+            "order": 0,
+            "name": "min",
+            "label": "Minimum Size",
+            "unit": "GB",
+            "helpText": "Release must be greater than this size",
+            "value": 1,
+            "type": "number",
+            "advanced": false,
+            "privacy": "normal",
+            "isFloat": true
+          },
+          {
+            "order": 1,
+            "name": "max",
+            "label": "Maximum Size",
+            "unit": "GB",
+            "helpText": "Release must be less than or equal to this size",
+            "value": 5,
+            "type": "number",
+            "advanced": false,
+            "privacy": "normal",
+            "isFloat": true
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": 5,
+    "name": "5GB - 10GB",
+    "includeCustomFormatWhenRenaming": false,
+    "specifications": [
+      {
+        "name": "5GB - 10BG",
+        "implementation": "SizeSpecification",
+        "implementationName": "Size",
+        "infoLink": "https://wiki.servarr.com/sonarr/settings#custom-formats-2",
+        "negate": false,
+        "required": false,
+        "fields": [
+          {
+            "order": 0,
+            "name": "min",
+            "label": "Minimum Size",
+            "unit": "GB",
+            "helpText": "Release must be greater than this size",
+            "value": 5,
+            "type": "number",
+            "advanced": false,
+            "privacy": "normal",
+            "isFloat": true
+          },
+          {
+            "order": 1,
+            "name": "max",
+            "label": "Maximum Size",
+            "unit": "GB",
+            "helpText": "Release must be less than or equal to this size",
+            "value": 10,
+            "type": "number",
+            "advanced": false,
+            "privacy": "normal",
+            "isFloat": true
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": 6,
+    "name": "10GB - 15GB",
+    "includeCustomFormatWhenRenaming": false,
+    "specifications": [
+      {
+        "name": "10GB - 15GB",
+        "implementation": "SizeSpecification",
+        "implementationName": "Size",
+        "infoLink": "https://wiki.servarr.com/sonarr/settings#custom-formats-2",
+        "negate": false,
+        "required": false,
+        "fields": [
+          {
+            "order": 0,
+            "name": "min",
+            "label": "Minimum Size",
+            "unit": "GB",
+            "helpText": "Release must be greater than this size",
+            "value": 10,
+            "type": "number",
+            "advanced": false,
+            "privacy": "normal",
+            "isFloat": true
+          },
+          {
+            "order": 1,
+            "name": "max",
+            "label": "Maximum Size",
+            "unit": "GB",
+            "helpText": "Release must be less than or equal to this size",
+            "value": 15,
+            "type": "number",
+            "advanced": false,
+            "privacy": "normal",
+            "isFloat": true
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": 7,
+    "name": "15GB - 20GB",
+    "includeCustomFormatWhenRenaming": false,
+    "specifications": [
+      {
+        "name": "15GB - 20GB",
+        "implementation": "SizeSpecification",
+        "implementationName": "Size",
+        "infoLink": "https://wiki.servarr.com/sonarr/settings#custom-formats-2",
+        "negate": false,
+        "required": false,
+        "fields": [
+          {
+            "order": 0,
+            "name": "min",
+            "label": "Minimum Size",
+            "unit": "GB",
+            "helpText": "Release must be greater than this size",
+            "value": 15,
+            "type": "number",
+            "advanced": false,
+            "privacy": "normal",
+            "isFloat": true
+          },
+          {
+            "order": 1,
+            "name": "max",
+            "label": "Maximum Size",
+            "unit": "GB",
+            "helpText": "Release must be less than or equal to this size",
+            "value": 20,
+            "type": "number",
+            "advanced": false,
+            "privacy": "normal",
+            "isFloat": true
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": 8,
+    "name": "20GB - 30GB",
+    "includeCustomFormatWhenRenaming": false,
+    "specifications": [
+      {
+        "name": "20GB - 30GB",
+        "implementation": "SizeSpecification",
+        "implementationName": "Size",
+        "infoLink": "https://wiki.servarr.com/sonarr/settings#custom-formats-2",
+        "negate": false,
+        "required": false,
+        "fields": [
+          {
+            "order": 0,
+            "name": "min",
+            "label": "Minimum Size",
+            "unit": "GB",
+            "helpText": "Release must be greater than this size",
+            "value": 20,
+            "type": "number",
+            "advanced": false,
+            "privacy": "normal",
+            "isFloat": true
+          },
+          {
+            "order": 1,
+            "name": "max",
+            "label": "Maximum Size",
+            "unit": "GB",
+            "helpText": "Release must be less than or equal to this size",
+            "value": 30,
+            "type": "number",
+            "advanced": false,
+            "privacy": "normal",
+            "isFloat": true
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": 9,
+    "name": "EZTV",
+    "includeCustomFormatWhenRenaming": false,
+    "specifications": [
+      {
+        "name": "EZTV",
+        "implementation": "ReleaseGroupSpecification",
+        "implementationName": "Release Group",
+        "infoLink": "https://wiki.servarr.com/sonarr/settings#custom-formats-2",
+        "negate": false,
+        "required": true,
+        "fields": [
+          {
+            "order": 0,
+            "name": "value",
+            "label": "Regular Expression",
+            "helpText": "Custom Format RegEx is Case Insensitive",
+            "value": "(EZTV)",
+            "type": "textbox",
+            "advanced": false,
+            "privacy": "normal",
+            "isFloat": false
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": 10,
+    "name": "UTR",
+    "includeCustomFormatWhenRenaming": false,
+    "specifications": [
+      {
+        "name": "UTR",
+        "implementation": "ReleaseGroupSpecification",
+        "implementationName": "Release Group",
+        "infoLink": "https://wiki.servarr.com/sonarr/settings#custom-formats-2",
+        "negate": false,
+        "required": true,
+        "fields": [
+          {
+            "order": 0,
+            "name": "value",
+            "label": "Regular Expression",
+            "helpText": "Custom Format RegEx is Case Insensitive",
+            "value": "(UTR)",
+            "type": "textbox",
+            "advanced": false,
+            "privacy": "normal",
+            "isFloat": false
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": 11,
+    "name": "0GB - 1GB",
+    "includeCustomFormatWhenRenaming": false,
+    "specifications": [
+      {
+        "name": "0GB - 1GB",
+        "implementation": "SizeSpecification",
+        "implementationName": "Size",
+        "infoLink": "https://wiki.servarr.com/sonarr/settings#custom-formats-2",
+        "negate": false,
+        "required": false,
+        "fields": [
+          {
+            "order": 0,
+            "name": "min",
+            "label": "Minimum Size",
+            "unit": "GB",
+            "helpText": "Release must be greater than this size",
+            "value": 0.1,
+            "type": "number",
+            "advanced": false,
+            "privacy": "normal",
+            "isFloat": true
+          },
+          {
+            "order": 1,
+            "name": "max",
+            "label": "Maximum Size",
+            "unit": "GB",
+            "helpText": "Release must be less than or equal to this size",
+            "value": 1,
+            "type": "number",
+            "advanced": false,
+            "privacy": "normal",
+            "isFloat": true
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": 12,
+    "name": "1GB - 2GB",
+    "includeCustomFormatWhenRenaming": false,
+    "specifications": [
+      {
+        "name": "1GB - 2GB",
+        "implementation": "SizeSpecification",
+        "implementationName": "Size",
+        "infoLink": "https://wiki.servarr.com/sonarr/settings#custom-formats-2",
+        "negate": false,
+        "required": false,
+        "fields": [
+          {
+            "order": 0,
+            "name": "min",
+            "label": "Minimum Size",
+            "unit": "GB",
+            "helpText": "Release must be greater than this size",
+            "value": 1,
+            "type": "number",
+            "advanced": false,
+            "privacy": "normal",
+            "isFloat": true
+          },
+          {
+            "order": 1,
+            "name": "max",
+            "label": "Maximum Size",
+            "unit": "GB",
+            "helpText": "Release must be less than or equal to this size",
+            "value": 2,
+            "type": "number",
+            "advanced": false,
+            "privacy": "normal",
+            "isFloat": true
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": 13,
+    "name": "Season Pack",
+    "includeCustomFormatWhenRenaming": false,
+    "specifications": [
+      {
+        "name": "Season Packs",
+        "implementation": "ReleaseTypeSpecification",
+        "implementationName": "Release Type",
+        "infoLink": "https://wiki.servarr.com/sonarr/settings#custom-formats-2",
+        "negate": false,
+        "required": false,
+        "fields": [
+          {
+            "order": 0,
+            "name": "value",
+            "label": "Release Type",
+            "value": 3,
+            "type": "select",
+            "advanced": false,
+            "selectOptions": [
+              {
+                "value": 0,
+                "name": "Unknown",
+                "order": 0
+              },
+              {
+                "value": 1,
+                "name": "Single Episode",
+                "order": 9,
+                "hint": "(1)"
+              },
+              {
+                "value": 2,
+                "name": "Multi-Episode",
+                "order": 12,
+                "hint": "(2)"
+              },
+              {
+                "value": 3,
+                "name": "Season Pack",
+                "order": 15,
+                "hint": "(3)"
+              }
+            ],
+            "privacy": "normal",
+            "isFloat": false
+          }
+        ]
+      }
+    ]
+  }
+]

@@ -1,0 +1,65 @@
+{
+  "seriesId": 1,
+  "seasonNumber": 1,
+  "relativePath": "Season 01/Sample Show - S01E01 - Pilot Bluray-1080p.mkv",
+  "path": "/data/tvshows/Sample Show (2020)/Season 01/Sample Show - S01E01 - Pilot Bluray-1080p.mkv",
+  "size": 1077231437,
+  "dateAdded": "2025-12-30T03:37:12Z",
+  "sceneName": "Sample.Show.S01E01.Pilot.1080p.Bluray.AV1.Opus.5.1-EXAMPLE",
+  "releaseGroup": "EXAMPLE",
+  "languages": [
+    {
+      "id": 1,
+      "name": "English"
+    }
+  ],
+  "quality": {
+    "quality": {
+      "id": 7,
+      "name": "Bluray-1080p",
+      "source": "bluray",
+      "resolution": 1080
+    },
+    "revision": {
+      "version": 1,
+      "real": 0,
+      "isRepack": false
+    }
+  },
+  "customFormats": [
+    {
+      "id": 12,
+      "name": "1GB - 2GB"
+    },
+    {
+      "id": 4,
+      "name": "1GB - 5GB"
+    },
+    {
+      "id": 13,
+      "name": "Season Pack"
+    }
+  ],
+  "customFormatScore": 0,
+  "indexerFlags": 1,
+  "releaseType": "seasonPack",
+  "mediaInfo": {
+    "audioBitrate": 0,
+    "audioChannels": 5.1,
+    "audioCodec": "Opus",
+    "audioLanguages": "eng",
+    "audioStreamCount": 1,
+    "videoBitDepth": 10,
+    "videoBitrate": 0,
+    "videoCodec": "AV1",
+    "videoFps": 23.976,
+    "videoDynamicRange": "",
+    "videoDynamicRangeType": "",
+    "resolution": "1920x960",
+    "runTime": "58:33",
+    "scanType": "Progressive",
+    "subtitles": "eng"
+  },
+  "qualityCutoffNotMet": false,
+  "id": 638
+}
