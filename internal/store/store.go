@@ -264,6 +264,20 @@ var alters = []string{
 	// to build the addedAt-restore PUT, which requires the
 	// section's type param same as the original sync WalkSection call.
 	`ALTER TABLE plex_items ADD COLUMN item_type INTEGER NOT NULL DEFAULT 1`,
+	// One row per (file, server, hour): the sessions poller upserts here
+	// every time it sees a session for a tracked file, so a session
+	// polled every 15s for an hour still produces one row.
+	// direct=1 means the whole session played without any transcoding;
+	// reasons is a comma-joined list of issues.ReasonCategory keys,
+	// empty when direct=1.
+	`CREATE TABLE IF NOT EXISTS playback_events(
+		file_id INTEGER NOT NULL REFERENCES files(id) ON DELETE CASCADE,
+		server TEXT NOT NULL,
+		at TEXT NOT NULL,
+		direct INTEGER NOT NULL DEFAULT 0,
+		reasons TEXT NOT NULL DEFAULT '',
+		PRIMARY KEY(file_id, server, at))`,
+	`CREATE INDEX IF NOT EXISTS playback_events_lookback ON playback_events(direct, at)`,
 }
 
 func (s *Store) migrate() error {
