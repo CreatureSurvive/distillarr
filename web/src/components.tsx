@@ -92,6 +92,21 @@ export const ISSUE_SHORT: Record<string, { label: string; fix: "quick" | "reenco
   worth_reencoding: { label: "worth re-encoding", fix: "reencode" },
   quality_limited: { label: "can't reach target", fix: "info" },
   upgrade_pending: { label: "upgrade pending", fix: "info" },
+  forces_transcode: { label: "forces client transcode", fix: "info" },
+};
+
+// Canonical reason category (issues.ReasonCategory on the Go side) ->
+// display label, for the forces_transcode detail.
+export const REASON_LABEL: Record<string, string> = {
+  container: "container",
+  audio_codec: "audio codec",
+  audio_channels: "audio channels",
+  video_codec: "video codec",
+  video_profile: "video profile",
+  video_level: "video level",
+  bit_depth: "bit depth",
+  subtitle: "subtitle burn-in",
+  other: "other",
 };
 
 export function issueKeys(f: FileItem): string[] {

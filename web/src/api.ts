@@ -80,6 +80,14 @@ export type IssueType = {
   bytes: number;
 };
 
+// forces_transcode issue detail: reason category -> session
+// count, server -> session count, and the most recent event's hour.
+export type ForcesTranscodeDetail = {
+  reasons: Record<string, number>;
+  servers: Record<string, number>;
+  last: string;
+};
+
 export type MixedSeason = {
   show: string;
   season: number;
@@ -750,7 +758,10 @@ export const api = {
   }) => post<{ created: number; skipped: number }>("/api/v1/show/queue", body),
 
   file: (id: number) =>
-    req<{ file: FileItem; streams: Stream[]; autopilot?: AutopilotDecision; codec_penalty_warning?: string }>(`/api/v1/files/${id}`),
+    req<{
+      file: FileItem; streams: Stream[]; autopilot?: AutopilotDecision; codec_penalty_warning?: string;
+      forces_transcode?: ForcesTranscodeDetail;
+    }>(`/api/v1/files/${id}`),
   autopilotPreview: () => req<{ groups: AutopilotPreviewGroup[] }>("/api/v1/autopilot/preview"),
   plan: (id: number, settings?: Settings) => post<Plan>(`/api/v1/files/${id}/plan`, { settings }),
   queueFile: (id: number, body: { settings?: Settings; run_now?: boolean; confirm_hardlinked?: boolean }) =>

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { api, hardlinkedFiles, type AutopilotDecision, type FileItem, type HwReport, type Plan, type Settings, type Stream } from "../api";
-import { Art, Copyable, Empty, FileChips, IssueChips, SavingsGauge, hasQuickFix, toast, useHardlinkedConfirm } from "../components";
+import { api, hardlinkedFiles, type AutopilotDecision, type FileItem, type ForcesTranscodeDetail, type HwReport, type Plan, type Settings, type Stream } from "../api";
+import { Art, Copyable, Empty, FileChips, IssueChips, REASON_LABEL, SavingsGauge, hasQuickFix, toast, useHardlinkedConfirm } from "../components";
 import EncodeOptions, { hasBars } from "../options";
 import { backendLabel, bitrate, bytes, channelsLabel, codecLabel, dur, resClass, se } from "../format";
 import type { LiveState } from "../App";
@@ -21,6 +21,7 @@ export default function FileDetail({ live }: { live: LiveState }) {
   const [busy, setBusy] = useState("");
   const [autopilot, setAutopilot] = useState<AutopilotDecision | null>(null);
   const [codecPenaltyWarning, setCodecPenaltyWarning] = useState("");
+  const [forcesTranscode, setForcesTranscode] = useState<ForcesTranscodeDetail | null>(null);
   const { ask: askHardlinked, dialog: hardlinkedDialog } = useHardlinkedConfirm();
   const planReq = useRef(0);
 
@@ -33,6 +34,7 @@ export default function FileDetail({ live }: { live: LiveState }) {
       setStreams(r.streams);
       setAutopilot(r.autopilot || null);
       setCodecPenaltyWarning(r.codec_penalty_warning || "");
+      setForcesTranscode(r.forces_transcode || null);
     }).catch((e) => setErr(e.message));
     api.hw().then((h) => { setHw(h.report); setAuto(h.auto); setDevices(h.devices || {}); }).catch(() => {});
   }, [id]);
@@ -136,6 +138,14 @@ export default function FileDetail({ live }: { live: LiveState }) {
               {" · CF score "}{file.arr.cf_score}
               {file.arr.original_language && <> · {file.arr.original_language}</>}
               {file.arr.tag_names && file.arr.tag_names.length > 0 && <> · tags: {file.arr.tag_names.join(", ")}</>}
+            </div>
+          )}
+          {forcesTranscode && (
+            <div className="dim small" style={{ marginTop: 4 }}>
+              Forces transcode: {Object.entries(forcesTranscode.reasons)
+                .map(([k, n]) => `${REASON_LABEL[k] || k} ×${n}`).join(", ")}
+              {" "}({Object.entries(forcesTranscode.servers).map(([s, n]) => `${s} ×${n}`).join(", ")}
+              {", last "}{forcesTranscode.last.slice(0, 10)})
             </div>
           )}
           {(file.issues || "").replace(/,/g, "") !== "" && (
