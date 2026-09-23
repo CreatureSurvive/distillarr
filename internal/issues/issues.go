@@ -191,7 +191,7 @@ func QuickFix(f *store.File, cfg config.Config) encode.Settings {
 		VideoCopy:      true,
 		Codec:          encode.Codec(f.VideoCodec),
 		AudioPCMTarget: cfg.AudioPCMTarget,
-		PreferMP4:      cfg.MP4(),
+		AudioRules:     cfg.AudioRules,
 		Container:      f.Container,
 		Backend:        encode.SW,
 	}
