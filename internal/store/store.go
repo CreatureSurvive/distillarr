@@ -209,6 +209,10 @@ var alters = []string{
 	// reason is a short free-text note shown in the UI.
 	`ALTER TABLE jobs ADD COLUMN origin TEXT NOT NULL DEFAULT 'manual'`,
 	`ALTER TABLE jobs ADD COLUMN reason TEXT NOT NULL DEFAULT ''`,
+	// Hardlink count: >1 means another link shares this file's data
+	// (usually a seeding torrent). Checked on every scan pass, since it
+	// can change without size or mtime changing.
+	`ALTER TABLE files ADD COLUMN nlink INTEGER NOT NULL DEFAULT 1`,
 }
 
 func (s *Store) migrate() error {

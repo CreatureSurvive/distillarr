@@ -170,6 +170,7 @@ select.input { width: auto; }
 .c-av1 { color: var(--violet); border-color: rgba(184, 166, 255, 0.35); }
 .c-h264 { color: var(--amber); border-color: rgba(255, 178, 87, 0.3); }
 .c-hdr { color: var(--amber); border-color: rgba(255, 178, 87, 0.45); }
+.c-warn { color: var(--red); border-color: rgba(247, 118, 142, 0.4); }
 
 .tag { font: 600 11px var(--font-mono); padding: 3px 7px; border-radius: 3px; white-space: nowrap; }
 .tag-save { background: rgba(69, 214, 192, 0.92); color: #06201a; }

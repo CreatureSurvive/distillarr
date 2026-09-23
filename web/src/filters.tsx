@@ -5,8 +5,8 @@ import { useEffect, useState } from "react";
 import { api, type Composition, type Facet, type IssueType } from "./api";
 import { codecLabel, resLabel } from "./format";
 
-export type Facets = { container: string; video: string; audio: string; res: string; issue: string; upscale?: string };
-export const NO_FACETS: Facets = { container: "", video: "", audio: "", res: "", issue: "", upscale: "" };
+export type Facets = { container: string; video: string; audio: string; res: string; issue: string; upscale?: string; hardlinked?: string };
+export const NO_FACETS: Facets = { container: "", video: "", audio: "", res: "", issue: "", upscale: "", hardlinked: "" };
 
 const LEGACY_CONTAINERS = new Set(["avi", "wmv", "asf", "flv", "mpg", "mpeg", "ts", "m2ts", "vob", "divx", "ogm", "rm", "rmvb", "3gp"]);
 const LEGACY_CODECS = new Set(["mpeg1video", "mpeg2video", "mpeg4", "msmpeg4v1", "msmpeg4v2", "msmpeg4v3", "wmv1", "wmv2", "wmv3", "vc1", "h263", "vp8", "theora", "flv1"]);
@@ -92,6 +92,9 @@ export function FacetFilters({
         { value: "upscalable", label: "Could be upscaled (below 4K)" },
         { value: "upscaled", label: "Already upscaled" },
       ])}
+      {sel("hardlinked", "Hardlinked", [
+        { value: "yes", label: "Shares data with another file" },
+      ])}
       {issues && sel("issue", "Issue", types.filter((t) => t.scope === "file" && libCount(t) > 0).map((t) => ({
         value: t.key, label: t.label + count(libCount(t)),
       })))}
@@ -102,5 +105,5 @@ export function FacetFilters({
 
 // Query params for api.files.
 export function facetParams(f: Facets) {
-  return { container: f.container, codec: f.video, audio: f.audio, res: f.res, issue: f.issue, upscale: f.upscale ?? "" };
+  return { container: f.container, codec: f.video, audio: f.audio, res: f.res, issue: f.issue, upscale: f.upscale ?? "", hardlinked: f.hardlinked ?? "" };
 }

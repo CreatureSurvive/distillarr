@@ -96,6 +96,7 @@ func (s *Server) listFiles(w http.ResponseWriter, r *http.Request) {
 		Issue:      q.Get("issue"),
 		ResClass:   atoi(q.Get("res")),
 		Upscale:    q.Get("upscale"),
+		Hardlinked: q.Get("hardlinked"),
 		Show:       q.Get("show"),
 	}
 	f.Candidates = q.Get("candidates") == "1"

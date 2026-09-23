@@ -41,6 +41,10 @@ type File struct {
 	QualityTag  string `json:"quality_tag"`
 	Size        int64  `json:"size"`
 	MtimeNS     int64  `json:"mtime_ns"`
+	// Nlink is the hardlink count (>1 means another link shares this
+	// file's data, usually a seeding torrent). Replacing such a file
+	// frees no space until the other link is removed.
+	Nlink       int    `json:"nlink"`
 	Container   string `json:"container"`
 	Duration    float64 `json:"duration"`
 	VideoCodec  string `json:"video_codec"`
@@ -103,7 +107,7 @@ const fileCols = `id, path, library, title, year, season, episode, ep_title, qua
 	size, mtime_ns, container, duration, video_codec, width, height, bit_depth, fps, hdr,
 	video_bitrate, total_bitrate, audio_json, sub_count, sidecars_json, transcode_score,
 	rec_json, missing, scanned_at, updated_at, interlaced, crop_w, crop_h, crop_x, crop_y, crop_checked, tune_json,
-	video_tag, faststart, meta_checked, issues`
+	video_tag, faststart, meta_checked, issues, nlink`
 
 func scanFile(row interface{ Scan(...any) error }) (*File, error) {
 	f := &File{}
@@ -115,7 +119,7 @@ func scanFile(row interface{ Scan(...any) error }) (*File, error) {
 		&f.VideoBitrate, &f.TotalBitrate, &audio, &f.SubCount, &sidecars,
 		&f.TranscodeScore, &f.RecJSON, &missing, &f.ScannedAt, &f.UpdatedAt, &interlaced,
 		&f.CropW, &f.CropH, &f.CropX, &f.CropY, &cropChecked, &f.TuneJSON,
-		&f.VideoTag, &f.Faststart, &metaChecked, &f.Issues)
+		&f.VideoTag, &f.Faststart, &metaChecked, &f.Issues, &f.Nlink)
 	if err != nil {
 		return nil, err
 	}
@@ -189,8 +193,8 @@ func (s *Store) UpsertFile(f *File, streams []Stream) error {
 	f.ID = id
 	// A (re)probed file is a new picture: bars must be detected again.
 	if _, err := tx.Exec(`UPDATE files SET interlaced=?, crop_w=0, crop_h=0, crop_x=0, crop_y=0,
-		crop_checked=0, tune_json='', video_tag=?, faststart=?, meta_checked=?, issues=? WHERE id=?`,
-		b2i(f.Interlaced), f.VideoTag, f.Faststart, b2i(f.MetaChecked), f.Issues, id); err != nil {
+		crop_checked=0, tune_json='', video_tag=?, faststart=?, meta_checked=?, issues=?, nlink=? WHERE id=?`,
+		b2i(f.Interlaced), f.VideoTag, f.Faststart, b2i(f.MetaChecked), f.Issues, nlinkOrDefault(f.Nlink), id); err != nil {
 		return err
 	}
 	for i := range streams {
@@ -311,11 +315,12 @@ type FileStat struct {
 	Path    string
 	Size    int64
 	MtimeNS int64
+	Nlink   int
 }
 
-// ListFileStat loads path/size/mtime for one library.
+// ListFileStat loads path/size/mtime/nlink for one library.
 func (s *Store) ListFileStat(library string) ([]FileStat, error) {
-	rows, err := s.dbR.Query(`SELECT path, size, mtime_ns FROM files WHERE library=? AND missing=0`, library)
+	rows, err := s.dbR.Query(`SELECT path, size, mtime_ns, nlink FROM files WHERE library=? AND missing=0`, library)
 	if err != nil {
 		return nil, err
 	}
@@ -323,12 +328,39 @@ func (s *Store) ListFileStat(library string) ([]FileStat, error) {
 	out := []FileStat{}
 	for rows.Next() {
 		var f FileStat
-		if err := rows.Scan(&f.Path, &f.Size, &f.MtimeNS); err != nil {
+		if err := rows.Scan(&f.Path, &f.Size, &f.MtimeNS, &f.Nlink); err != nil {
 			return nil, err
 		}
 		out = append(out, f)
 	}
 	return out, rows.Err()
+}
+
+// UpdateNlinks batches hardlink-count updates for files whose count
+// changed since the last scan. nlink can change without size or mtime
+// changing (a torrent client adding or removing a hardlink is the common
+// case), so every scan pass checks it even for files it otherwise treats
+// as unchanged and skips re-probing.
+func (s *Store) UpdateNlinks(updates map[string]int) error {
+	if len(updates) == 0 {
+		return nil
+	}
+	tx, err := s.dbW.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	stmt, err := tx.Prepare(`UPDATE files SET nlink=? WHERE path=?`)
+	if err != nil {
+		return err
+	}
+	defer stmt.Close()
+	for path, n := range updates {
+		if _, err := stmt.Exec(nlinkOrDefault(n), path); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
 }
 
 // ExecDdl runs an arbitrary statement (temp-table management for scans).
@@ -365,6 +397,17 @@ func b2i(b bool) int {
 	return 0
 }
 
+// nlinkOrDefault treats an unset (zero) hardlink count as 1, the minimum
+// valid value. Callers that don't set File.Nlink (tests, any future code
+// path that doesn't stat the file) must not record "shares data with
+// zero other links".
+func nlinkOrDefault(n int) int {
+	if n <= 0 {
+		return 1
+	}
+	return n
+}
+
 // FileFilter describes a library browse query.
 type FileFilter struct {
 	Library   string // movies | tvshows | ""
@@ -384,6 +427,7 @@ type FileFilter struct {
 	Issue      string // issue key (see internal/issues)
 	ResClass   int    // nominal class (res.Class): 480, 576, 720, 1080, 2160
 	Upscale    string // "upscaled": made by an upscale job; "upscalable": below 4K and not one
+	Hardlinked string // "yes": nlink > 1 (shares its data with another file, usually a seeding torrent)
 }
 
 // resClassSQL mirrors res.Class in SQL.
@@ -593,6 +637,9 @@ func (f FileFilter) where() (string, []any) {
 		w = append(w, "path IN ("+upscaleOutputs+")")
 	case "upscalable":
 		w = append(w, "path NOT IN ("+upscaleOutputs+")", resClassSQL+"<2160", "height>0")
+	}
+	if f.Hardlinked == "yes" {
+		w = append(w, "nlink>1")
 	}
 	if f.HDR != "" {
 		w = append(w, "hdr=?")

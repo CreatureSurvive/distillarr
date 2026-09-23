@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"mediatrans/internal/config"
@@ -145,16 +146,22 @@ func (s *Scanner) walkLibrary(lib config.Library, seen map[string]bool,
 	toProbe *[]string, probeMu *sync.Mutex) error {
 	s.report(func(st *Stats) { st.Phase = "walking"; st.Library = lib.Name })
 
-	// existing size+mtime for change detection
-	type finfo struct{ size int64; mtime int64 }
+	// existing size+mtime+nlink for change detection
+	type finfo struct{ size, mtime int64; nlink int }
 	existing := map[string]finfo{}
 	rows, err := s.st.ListFileStat(lib.Name)
 	if err != nil {
 		return err
 	}
 	for _, r := range rows {
-		existing[r.Path] = finfo{r.Size, r.MtimeNS}
+		existing[r.Path] = finfo{r.Size, r.MtimeNS, r.Nlink}
 	}
+
+	// nlink can change (a torrent client adding or removing a hardlink)
+	// without size or mtime changing, so it's checked here even for
+	// files the walk otherwise treats as unchanged, and applied in one
+	// batched update per library.
+	nlinkUpdates := map[string]int{}
 
 	root := lib.Path
 	filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
@@ -178,6 +185,9 @@ func (s *Scanner) walkLibrary(lib config.Library, seen map[string]bool,
 				if ex, ok := existing[path]; ok && ex.size == fi.Size() && ex.mtime == mt {
 					seen[path] = true
 					s.report(func(st *Stats) { st.Seen++ })
+					if nlink := nlinkOf(fi); nlink != ex.nlink {
+						nlinkUpdates[path] = nlink
+					}
 					return nil
 				}
 			}
@@ -187,6 +197,10 @@ func (s *Scanner) walkLibrary(lib config.Library, seen map[string]bool,
 		}
 		return nil
 	})
+
+	if err := s.st.UpdateNlinks(nlinkUpdates); err != nil {
+		return err
+	}
 
 	// Probed files are also "seen".
 	for _, p := range *toProbe {
@@ -241,6 +255,16 @@ func (s *Scanner) libraryFor(path string) string {
 }
 
 // buildFile converts a probe result into a store.File.
+// nlinkOf returns a file's hardlink count (1 for a file with no other
+// links). A count above 1 usually means a torrent client is still
+// seeding the same file, so replacing it wouldn't reclaim any space.
+func nlinkOf(fi os.FileInfo) int {
+	if st, ok := fi.Sys().(*syscall.Stat_t); ok {
+		return int(st.Nlink)
+	}
+	return 1
+}
+
 func buildFile(lib, path string, p *media.Probe) *store.File {
 	pr := Parse(lib, path)
 	v := p.Video()
@@ -250,10 +274,12 @@ func buildFile(lib, path string, p *media.Probe) *store.File {
 		Title: pr.Title, Year: pr.Year, Season: pr.Season, Episode: pr.Episode,
 		EpTitle: pr.EpTitle, QualityTag: pr.QualityTag,
 		Container: strings.TrimPrefix(strings.ToLower(filepath.Ext(path)), "."),
+		Nlink:     1,
 	}
 	if fi != nil {
 		f.Size = fi.Size()
 		f.MtimeNS = fi.ModTime().UnixNano()
+		f.Nlink = nlinkOf(fi)
 	}
 	f.Duration = p.DurationSec()
 	f.TotalBitrate = p.TotalBitrate()

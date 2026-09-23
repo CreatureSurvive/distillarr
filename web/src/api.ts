@@ -54,6 +54,7 @@ export type FileItem = {
   sidecars: { name: string; lang: string; kind: string }[];
   transcode_score: number;
   mtime_ns: number;
+  nlink: number; // >1 means another link shares this file's data (usually a seeding torrent)
   rec?: RecSummary;
   image?: string;
   backdrop?: string;
