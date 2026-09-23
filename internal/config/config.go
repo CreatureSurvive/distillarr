@@ -414,6 +414,10 @@ func (m *Manager) normalize() {
 	if m.cfg.JellyfinPathMap == "" {
 		m.cfg.JellyfinPathMap = d.JellyfinPathMap
 	}
+	if m.cfg.PlexKeepAddedAt == nil {
+		t := true
+		m.cfg.PlexKeepAddedAt = &t
+	}
 	switch m.cfg.DefaultSpeed {
 	case "faster", "fast", "medium", "slow", "slower":
 	default:

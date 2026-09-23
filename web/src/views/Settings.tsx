@@ -321,6 +321,14 @@ function PlexSection({ cfg, setCfg, live, onPlex }: { cfg: Config; setCfg: (c: C
     }
   };
 
+  const saveKeepAddedAt = async (v: boolean) => {
+    try {
+      setCfg(await api.saveConfig({ plex_keep_added_at: v }));
+    } catch (e: any) {
+      toast(e.message, "err");
+    }
+  };
+
   const state = status?.connected ? "ok" : status?.configured ? "bad" : "off";
   return (
     <section className="panel" id="s-plex">
@@ -353,6 +361,10 @@ function PlexSection({ cfg, setCfg, live, onPlex }: { cfg: Config; setCfg: (c: C
         <button className="btn btn-primary" onClick={savePlex}>Save</button>
         <button className="btn" onClick={() => api.plexSync().then(() => setSync("Syncing…")).catch((e) => toast(e.message, "err"))}
           disabled={!status?.connected || status?.syncing}>Sync library now</button>
+      </div>
+      <div className="toggles" style={{ marginTop: 10 }}>
+        <Toggle on={cfg.plex_keep_added_at} onChange={saveKeepAddedAt} label="Keep the original &quot;date added&quot;"
+          hint="If a Plex refresh changes an item's added date, put it back and lock the field so a later refresh doesn't change it again." />
       </div>
       {test && (
         <div className={`test-result ${test.ok ? "ok" : "bad"}`}>

@@ -503,6 +503,7 @@ export type Config = {
   plex_token?: string;
   plex_token_set?: boolean;
   plex_path_map: string;
+  plex_keep_added_at: boolean;
   arr_instances: ArrInstance[];
   // Override for the host:port Settings shows in front of each webhook
   // path. Blank = use the browser's own origin.
