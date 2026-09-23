@@ -167,3 +167,97 @@ func (c *Client) RootFolders(ctx context.Context) ([]RootFolder, error) {
 	err := c.get(ctx, &rf, "/api/v3/rootfolder", nil)
 	return rf, err
 }
+
+// Language is the shape Sonarr/Radarr use for originalLanguage.
+type Language struct {
+	Name string `json:"name"`
+}
+
+// Series is the subset of Sonarr's /api/v3/series resource used for
+// sync and policy.
+type Series struct {
+	ID               int64    `json:"id"`
+	Title            string   `json:"title"`
+	Path             string   `json:"path"`
+	QualityProfileID int64    `json:"qualityProfileId"`
+	Tags             []int64  `json:"tags"`
+	Status           string   `json:"status"`
+	Monitored        bool     `json:"monitored"`
+	OriginalLanguage Language `json:"originalLanguage"`
+}
+
+// Series lists every series (sync walks all of them; there is no
+// paged/changed-since endpoint in v3).
+func (c *Client) Series(ctx context.Context) ([]Series, error) {
+	var out []Series
+	err := c.get(ctx, &out, "/api/v3/series", nil)
+	return out, err
+}
+
+// EpisodeFile is the subset of Sonarr's /api/v3/episodefile resource.
+// CustomFormatScore and QualityCutoffNotMet can be their zero value on a
+// server that hasn't computed them yet; that decodes cleanly (a JSON
+// null into a non-pointer field is a no-op, not an error).
+type EpisodeFile struct {
+	ID                  int64  `json:"id"`
+	SeriesID            int64  `json:"seriesId"`
+	RelativePath        string `json:"relativePath"`
+	Path                string `json:"path"`
+	QualityCutoffNotMet bool   `json:"qualityCutoffNotMet"`
+	CustomFormatScore   int    `json:"customFormatScore"`
+	SceneName           string `json:"sceneName"`
+}
+
+// EpisodeFiles lists a series' episode files.
+func (c *Client) EpisodeFiles(ctx context.Context, seriesID int64) ([]EpisodeFile, error) {
+	var out []EpisodeFile
+	err := c.get(ctx, &out, "/api/v3/episodefile", url.Values{"seriesId": {fmt.Sprint(seriesID)}})
+	return out, err
+}
+
+// MovieFile is the subset of Radarr's embedded movieFile object.
+type MovieFile struct {
+	ID                  int64  `json:"id"`
+	MovieID             int64  `json:"movieId"`
+	RelativePath        string `json:"relativePath"`
+	Path                string `json:"path"`
+	QualityCutoffNotMet bool   `json:"qualityCutoffNotMet"`
+	CustomFormatScore   int    `json:"customFormatScore"`
+	SceneName           string `json:"sceneName"`
+}
+
+// Movie is the subset of Radarr's /api/v3/movie resource. MovieFile is
+// nil when the movie has no file yet (HasFile false) — Radarr embeds it
+// directly rather than needing a separate lookup like Sonarr does.
+type Movie struct {
+	ID               int64      `json:"id"`
+	Title            string     `json:"title"`
+	Path             string     `json:"path"`
+	QualityProfileID int64      `json:"qualityProfileId"`
+	Tags             []int64    `json:"tags"`
+	Status           string     `json:"status"`
+	Monitored        bool       `json:"monitored"`
+	HasFile          bool       `json:"hasFile"`
+	OriginalLanguage Language   `json:"originalLanguage"`
+	MovieFile        *MovieFile `json:"movieFile"`
+}
+
+// Movies lists every movie.
+func (c *Client) Movies(ctx context.Context) ([]Movie, error) {
+	var out []Movie
+	err := c.get(ctx, &out, "/api/v3/movie", nil)
+	return out, err
+}
+
+// Tag is one user-defined label (Settings → Tags).
+type Tag struct {
+	ID    int64  `json:"id"`
+	Label string `json:"label"`
+}
+
+// Tags lists every tag defined on the instance.
+func (c *Client) Tags(ctx context.Context) ([]Tag, error) {
+	var out []Tag
+	err := c.get(ctx, &out, "/api/v3/tag", nil)
+	return out, err
+}

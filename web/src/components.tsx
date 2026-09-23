@@ -57,6 +57,11 @@ export function FileChips({ f }: { f: FileItem }) {
           hardlinked
         </span>
       )}
+      {f.arr && (
+        <span className="chip" title={`Managed by ${f.arr.instance_name}${f.arr.monitored ? "" : " (unmonitored)"}`}>
+          {f.arr.instance_name}
+        </span>
+      )}
       {f.upscaled && (
         <span className="chip c-up" title={`Upscaled to ${f.upscaled.to === 2160 ? "4K" : f.upscaled.to + "p"} with ${f.upscaled.preset}${f.upscaled.at ? " on " + f.upscaled.at.slice(0, 10) : ""}`}>
           upscaled
@@ -126,6 +131,11 @@ export function MovieCard({ f }: { f: FileItem }) {
           <span className={f.video_codec === "hevc" || f.video_codec === "av1" ? "ok" : "warm"}>
             {codecLabel(f.video_codec)}
           </span>
+          {f.arr ? (
+            <span title={`Managed by ${f.arr.instance_name}${f.arr.monitored ? "" : " (unmonitored)"}`}>{f.arr.instance_name}</span>
+          ) : (
+            <span className="dim" title="No connected Sonarr/Radarr instance manages this file">unmanaged</span>
+          )}
         </div>
       </div>
     </a>

@@ -122,6 +122,15 @@ export default function FileDetail({ live }: { live: LiveState }) {
             <span>{dur(file.duration)}</span>
             {file.interlaced && <span className="warm">interlaced</span>}
           </div>
+          {file.arr && (
+            <div className="dim small" style={{ marginTop: 4 }}>
+              {file.arr.instance_name}: {file.arr.monitored ? "monitored" : "unmonitored"}
+              {file.arr.cutoff_not_met && <span className="warm"> · upgrade pending</span>}
+              {" · CF score "}{file.arr.cf_score}
+              {file.arr.original_language && <> · {file.arr.original_language}</>}
+              {file.arr.tag_names && file.arr.tag_names.length > 0 && <> · tags: {file.arr.tag_names.join(", ")}</>}
+            </div>
+          )}
           {(file.issues || "").replace(/,/g, "") !== "" && (
             <div className="hero-issues">
               <IssueChips f={file} />

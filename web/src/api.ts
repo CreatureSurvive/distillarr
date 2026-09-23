@@ -55,6 +55,7 @@ export type FileItem = {
   transcode_score: number;
   mtime_ns: number;
   nlink: number; // >1 means another link shares this file's data (usually a seeding torrent)
+  arr?: ArrFileInfo; // set when a connected Sonarr/Radarr instance manages this file
   rec?: RecSummary;
   image?: string;
   backdrop?: string;
@@ -450,6 +451,18 @@ export type ArrInstance = {
   api_key_set?: boolean;
   path_map?: string;
   enabled?: boolean;
+};
+
+export type ArrFileInfo = {
+  instance_id: string;
+  instance_name: string;
+  kind: "sonarr" | "radarr";
+  monitored: boolean;
+  cutoff_not_met: boolean;
+  cf_score: number;
+  tag_names?: string[];
+  original_language?: string;
+  series_status?: string;
 };
 
 export type ArrTestResult = {

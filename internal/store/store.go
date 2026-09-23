@@ -213,6 +213,26 @@ var alters = []string{
 	// (usually a seeding torrent). Checked on every scan pass, since it
 	// can change without size or mtime changing.
 	`ALTER TABLE files ADD COLUMN nlink INTEGER NOT NULL DEFAULT 1`,
+	// One Sonarr/Radarr's view of a file, keyed by file_id (see ArrItem's
+	// doc comment for why not path). At most one instance owns a file;
+	// ON DELETE CASCADE drops the row once its file row is actually
+	// purged (missing=1 for 7+ days), not merely marked missing.
+	`CREATE TABLE IF NOT EXISTS arr_items(
+		file_id INTEGER PRIMARY KEY REFERENCES files(id) ON DELETE CASCADE,
+		instance_id TEXT NOT NULL,
+		kind TEXT NOT NULL,
+		item_id INTEGER NOT NULL,
+		file_rec_id INTEGER NOT NULL,
+		monitored INTEGER NOT NULL DEFAULT 0,
+		tags TEXT NOT NULL DEFAULT '',
+		quality_profile_id INTEGER NOT NULL DEFAULT 0,
+		cutoff_not_met INTEGER NOT NULL DEFAULT 0,
+		cf_score INTEGER NOT NULL DEFAULT 0,
+		original_language TEXT NOT NULL DEFAULT '',
+		series_status TEXT NOT NULL DEFAULT '',
+		scene_name TEXT NOT NULL DEFAULT '',
+		synced_at TEXT NOT NULL)`,
+	`CREATE INDEX IF NOT EXISTS arr_items_instance ON arr_items(instance_id)`,
 }
 
 func (s *Store) migrate() error {

@@ -21,6 +21,7 @@ export type LiveState = {
   hwVersion: number;
   previewVersion: number;
   jfVersion: number;
+  arrVersion: number;
   notes: Record<number, string>;
 };
 
@@ -34,7 +35,7 @@ const NAV = [
 
 export default function App() {
   const [live, setLive] = useState<LiveState>({
-    progress: {}, activeJobs: [], scan: null, queueVersion: 0, hwVersion: 0, previewVersion: 0, jfVersion: 0, notes: {},
+    progress: {}, activeJobs: [], scan: null, queueVersion: 0, hwVersion: 0, previewVersion: 0, jfVersion: 0, arrVersion: 0, notes: {},
   });
   const [jf, setJf] = useState<JfStatus | null>(null);
 
@@ -65,6 +66,8 @@ export default function App() {
         setLive((l) => ({ ...l, previewVersion: l.previewVersion + 1 }));
       } else if (event === "jellyfin") {
         if (data?.done || data?.error) setLive((l) => ({ ...l, jfVersion: l.jfVersion + 1 }));
+      } else if (event === "arr") {
+        if (data?.done) setLive((l) => ({ ...l, arrVersion: l.arrVersion + 1 }));
       }
     });
     return () => {

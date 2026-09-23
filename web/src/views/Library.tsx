@@ -53,7 +53,7 @@ export default function Library({ live }: { live: LiveState }) {
       }).finally(() => id === reqId.current && setLoading(false));
     }, search ? 250 : 0);
     return () => clearTimeout(t);
-  }, [params, live.queueVersion]);
+  }, [params, live.queueVersion, live.arrVersion]);
 
   useEffect(() => {
     api.libraryStats("movies").then(setStats).catch(() => {});

@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -34,12 +35,29 @@ type Server struct {
 	still *still.Manager
 	hub   *Hub
 	ui   fs.FS // embedded frontend (web/dist)
+
+	// scanWasRunning is scan.Stats.Running as of the last Progress call,
+	// used to fire the post-scan arr sync on the true->false transition
+	// only. Stats.Running is also false during every single-file
+	// ProbeSingle reprobe (after each finished job) — without edge
+	// detection here, that fires a full arr sync on every job completion
+	// instead of once per actual library scan.
+	scanWasRunning atomic.Bool
 }
 
 func NewServer(st *store.Store, cfg *config.Manager, sc *scan.Scanner,
 	eng *jobs.Engine, pv *preview.Manager, stl *still.Manager, ui fs.FS) *Server {
 	s := &Server{st: st, cfg: cfg, scan: sc, eng: eng, prev: pv, still: stl, hub: NewHub(), ui: ui}
-	sc.Progress = func(st scan.Stats) { s.hub.Broadcast("scan", st) }
+	sc.Progress = func(st scan.Stats) {
+		s.hub.Broadcast("scan", st)
+		// A full scan pass just finished (true->false edge only — see
+		// scanWasRunning's doc comment): files it found or updated need
+		// an owning instance worked out.
+		wasRunning := s.scanWasRunning.Swap(st.Running)
+		if wasRunning && !st.Running && len(s.cfg.Get().ArrInstances) > 0 {
+			s.TriggerArrSync()
+		}
+	}
 	eng.Notify = func(event string, payload any) { s.hub.Broadcast(event, payload) }
 	return s
 }
@@ -123,6 +141,7 @@ func (s *Server) Handler() http.Handler {
 
 	// sonarr / radarr
 	mux.HandleFunc("POST /api/v1/arr/{id}/test", s.arrTest)
+	mux.HandleFunc("POST /api/v1/arr/sync", s.arrSyncNow)
 
 	// previews
 	mux.HandleFunc("GET /api/v1/previews", s.listPreviews)

@@ -428,6 +428,7 @@ type FileFilter struct {
 	ResClass   int    // nominal class (res.Class): 480, 576, 720, 1080, 2160
 	Upscale    string // "upscaled": made by an upscale job; "upscalable": below 4K and not one
 	Hardlinked string // "yes": nlink > 1 (shares its data with another file, usually a seeding torrent)
+	Managed    string // "yes": a connected Sonarr/Radarr instance owns this file; "no": none does
 }
 
 // resClassSQL mirrors res.Class in SQL.
@@ -640,6 +641,12 @@ func (f FileFilter) where() (string, []any) {
 	}
 	if f.Hardlinked == "yes" {
 		w = append(w, "nlink>1")
+	}
+	switch f.Managed {
+	case "yes":
+		w = append(w, "EXISTS(SELECT 1 FROM arr_items WHERE file_id=files.id)")
+	case "no":
+		w = append(w, "NOT EXISTS(SELECT 1 FROM arr_items WHERE file_id=files.id)")
 	}
 	if f.HDR != "" {
 		w = append(w, "hdr=?")

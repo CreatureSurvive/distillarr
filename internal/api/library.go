@@ -35,6 +35,57 @@ type fileOut struct {
 	Queued   bool        `json:"queued,omitempty"`
 	// Upscaled is set when this file is the output of a finished upscale job.
 	Upscaled *store.UpscaleRecord `json:"upscaled,omitempty"`
+	// Arr is set when a connected Sonarr/Radarr instance manages this file.
+	Arr *arrItemOut `json:"arr,omitempty"`
+}
+
+// arrItemOut is a store.ArrItem shaped for display: the instance name and
+// tag labels resolved instead of bare ids.
+type arrItemOut struct {
+	InstanceID       string   `json:"instance_id"`
+	InstanceName     string   `json:"instance_name"`
+	Kind             string   `json:"kind"`
+	Monitored        bool     `json:"monitored"`
+	CutoffNotMet     bool     `json:"cutoff_not_met"`
+	CFScore          int      `json:"cf_score"`
+	TagNames         []string `json:"tag_names,omitempty"`
+	OriginalLanguage string   `json:"original_language,omitempty"`
+	SeriesStatus     string   `json:"series_status,omitempty"`
+}
+
+// arrItemOuts resolves a batch of arr_items rows against the current
+// instance list and each instance's cached tag names, for one API
+// response — so instance/tag lookups happen once per response, not once
+// per file.
+func (s *Server) arrItemOuts(items map[int64]store.ArrItem) map[int64]arrItemOut {
+	if len(items) == 0 {
+		return nil
+	}
+	names := map[string]string{}
+	for _, inst := range s.cfg.Get().ArrInstances {
+		names[inst.ID] = inst.Name
+	}
+	tagCache := map[string]map[int64]string{}
+	out := make(map[int64]arrItemOut, len(items))
+	for fid, a := range items {
+		tags, ok := tagCache[a.InstanceID]
+		if !ok {
+			tags = s.st.ArrTags(a.InstanceID)
+			tagCache[a.InstanceID] = tags
+		}
+		var tagNames []string
+		for _, id := range a.TagIDs() {
+			if n, ok := tags[id]; ok {
+				tagNames = append(tagNames, n)
+			}
+		}
+		out[fid] = arrItemOut{
+			InstanceID: a.InstanceID, InstanceName: names[a.InstanceID], Kind: a.Kind,
+			Monitored: a.Monitored, CutoffNotMet: a.CutoffNotMet, CFScore: a.CFScore,
+			TagNames: tagNames, OriginalLanguage: a.OriginalLanguage, SeriesStatus: a.SeriesStatus,
+		}
+	}
+	return out
 }
 
 func imgURL(itemID, kind string, w int) string {
@@ -46,11 +97,15 @@ func imgURL(itemID, kind string, w int) string {
 
 func (s *Server) decorate(files []*store.File) []fileOut {
 	paths := make([]string, len(files))
+	ids := make([]int64, len(files))
 	for i, f := range files {
 		paths[i] = f.Path
+		ids[i] = f.ID
 	}
 	jf, _ := s.st.JellyfinMap(paths)
 	ups, _ := s.st.UpscaledFiles(paths)
+	arrItems, _ := s.st.ArrItemsMap(ids)
+	arrOuts := s.arrItemOuts(arrItems)
 	out := make([]fileOut, 0, len(files))
 	for _, f := range files {
 		fo := fileOut{File: f}
@@ -75,6 +130,9 @@ func (s *Server) decorate(files []*store.File) []fileOut {
 		if u, ok := ups[f.Path]; ok {
 			fo.Upscaled = &u
 		}
+		if a, ok := arrOuts[f.ID]; ok {
+			fo.Arr = &a
+		}
 		out = append(out, fo)
 	}
 	return out
@@ -97,6 +155,7 @@ func (s *Server) listFiles(w http.ResponseWriter, r *http.Request) {
 		ResClass:   atoi(q.Get("res")),
 		Upscale:    q.Get("upscale"),
 		Hardlinked: q.Get("hardlinked"),
+		Managed:    q.Get("managed"),
 		Show:       q.Get("show"),
 	}
 	f.Candidates = q.Get("candidates") == "1"
