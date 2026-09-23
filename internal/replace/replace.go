@@ -61,6 +61,21 @@ func Snapshot(path string) (*SrcStat, error) {
 	return s, nil
 }
 
+// SameSource reports whether two snapshots of the same path describe the
+// same file content: an untouched source has the same size, mtime and
+// inode. atime is excluded on purpose — reading the file (ffprobe, a
+// preview) changes atime without changing the file. Used right before a
+// replace to catch a source that Sonarr/Radarr (or anything else)
+// overwrote while the encode was running.
+func SameSource(orig, now *SrcStat) bool {
+	if orig == nil || now == nil {
+		return false
+	}
+	return orig.Size == now.Size &&
+		orig.MtimeSec == now.MtimeSec && orig.MtimeNsec == now.MtimeNsec &&
+		orig.Ino == now.Ino
+}
+
 // RestoreTimes puts the original atime+mtime back on path.
 func RestoreTimes(path string, s *SrcStat) error {
 	times := []unix.Timespec{

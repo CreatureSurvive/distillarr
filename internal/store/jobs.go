@@ -160,6 +160,17 @@ func (s *Store) FinishJob(id int64, status string, outputSize int64, errMsg, err
 	return err
 }
 
+// FailJobKeepAttempt marks a job failed without spending the attempt that
+// claimed it (ClaimNext already incremented attempts): used when the run
+// never had a real chance to succeed, such as the source file changing
+// underneath an in-progress encode.
+func (s *Store) FailJobKeepAttempt(id int64, errMsg, errorTail string) error {
+	_, err := s.dbW.Exec(`UPDATE jobs SET status=?, output_size=0, error=?, error_tail=?,
+		finished_at=strftime('%Y-%m-%dT%H:%M:%fZ','now'), attempts=MAX(attempts-1,0) WHERE id=?`,
+		StatusFailed, errMsg, errorTail, id)
+	return err
+}
+
 // SetJobTemp records the temp path and pre-encode stat snapshot.
 func (s *Store) SetJobTemp(id int64, tempPath, srcStatJSON string) error {
 	_, err := s.dbW.Exec(`UPDATE jobs SET temp_path=?, src_stat_json=? WHERE id=?`,

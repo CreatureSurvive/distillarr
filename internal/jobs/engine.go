@@ -471,6 +471,19 @@ func (e *Engine) runJob(j *store.Job, resume bool) {
 		return
 	}
 
+	// The source may have been overwritten while we were encoding it (a
+	// Sonarr/Radarr upgrade is the common case): never replace a file we
+	// didn't actually encode. Checked right before the point of no return.
+	if cur, serr := replace.Snapshot(j.SrcPath); serr != nil {
+		removeTemp(tempPath)
+		e.failKeepAttempt(j, "source no longer exists")
+		return
+	} else if !replace.SameSource(st, cur) {
+		removeTemp(tempPath)
+		e.failKeepAttempt(j, fmt.Sprintf("source changed during encode (was %d bytes, now %d)", st.Size, cur.Size))
+		return
+	}
+
 	// Replace.
 	e.st.UpdateJobStatus(j.ID, store.StatusReplacing, "")
 	e.notify(EvJob, map[string]any{"id": j.ID, "status": store.StatusReplacing})
@@ -689,6 +702,16 @@ func (e *Engine) handleEncodeFailure(j *store.Job, s encode.Settings, err error)
 func (e *Engine) fail(j *store.Job, msg, tail string) {
 	_ = e.st.FinishJob(j.ID, store.StatusFailed, 0, msg, tail)
 	log.Printf("jobs: %d failed: %s", j.ID, msg)
+	e.notify(EvJob, map[string]any{"id": j.ID, "status": store.StatusFailed, "error": msg})
+}
+
+// failKeepAttempt is like fail, but doesn't spend the attempt that claimed
+// the job: used when this run never had a real chance to succeed (the
+// source changed or vanished during the encode), so a user-triggered
+// retry isn't penalized for it.
+func (e *Engine) failKeepAttempt(j *store.Job, msg string) {
+	_ = e.st.FailJobKeepAttempt(j.ID, msg, "")
+	log.Printf("jobs: %d failed (attempt not counted): %s", j.ID, msg)
 	e.notify(EvJob, map[string]any{"id": j.ID, "status": store.StatusFailed, "error": msg})
 }
 
