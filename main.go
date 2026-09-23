@@ -140,6 +140,12 @@ func main() {
 		}
 	})
 
+	// Plex post-job subscriber: refresh the affected directory.
+	// No conditional guard needed beyond what's inside the subscriber
+	// itself (it no-ops when Plex isn't configured or the file was
+	// never synced from it).
+	eng.OnFinished(srv.PlexRefreshSubscriber())
+
 	// Sonarr/Radarr: tell the owning instance to rescan after a replace.
 	// Sonarr
 	// rescans are batched per series (arrSeasonDebounce) so re-encoding

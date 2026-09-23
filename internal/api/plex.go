@@ -6,10 +6,12 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"time"
 
+	"mediatrans/internal/jobs"
 	"mediatrans/internal/plex"
 	"mediatrans/internal/store"
 )
@@ -197,4 +199,31 @@ func (s *Server) SyncPlex(ctx context.Context, cl *plex.Client) (int, error) {
 	}
 	_ = s.st.KVSet("plex_last_sync", time.Now().UTC().Format(time.RFC3339))
 	return n, nil
+}
+
+// PlexRefreshSubscriber returns an OnFinished subscriber that asks Plex
+// to rescan the affected directory after a replace or upscale-copy, so
+// it picks up the changed/new file without waiting for its own scan
+// interval. Unlike the Jellyfin subscriber, this never needs to look up
+// a new item id or patch a "date added": plex_items is keyed by file_id,
+// which survives the replace, and (not yet built) is what will
+// restore addedAt if Plex changes it on refresh.
+func (s *Server) PlexRefreshSubscriber() func(jobs.ReplacedEvent) {
+	return func(ev jobs.ReplacedEvent) {
+		c := s.cfg.Get()
+		if c.PlexURL == "" || c.PlexToken == "" {
+			return
+		}
+		row, err := s.st.PlexByFileID(ev.FileID)
+		if err != nil || row == nil {
+			return
+		}
+		cl := plex.New(c.PlexURL, c.PlexToken)
+		dir := c.ToPlexPath(filepath.Dir(ev.NewPath))
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		if err := cl.Refresh(ctx, row.SectionID, dir); err != nil {
+			log.Printf("plex refresh %s: %v", ev.NewPath, err)
+		}
+	}
 }
