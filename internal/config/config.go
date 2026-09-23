@@ -94,6 +94,17 @@ type Config struct {
 	// Jellyfin already does unconditionally; see PlexKeepAddedAtOn.
 	PlexKeepAddedAt *bool `json:"plex_keep_added_at,omitempty"`
 
+	// DeferWhileTranscoding stops new encode jobs from starting while any
+	// Jellyfin/Plex session is transcoding video; it can only take
+	// effect once a server is connected. Default on; see
+	// DeferWhileTranscodingOn.
+	DeferWhileTranscoding *bool `json:"defer_while_transcoding,omitempty"`
+	// HoldReplaceWhilePlaying waits for a file's playback session to end
+	// before swapping the finished encode in, rather than
+	// replacing a file someone is watching. Default on; see
+	// HoldReplaceWhilePlayingOn.
+	HoldReplaceWhilePlaying *bool `json:"hold_replace_while_playing,omitempty"`
+
 	// ArrInstances: any number of Sonarr and Radarr connections. See
 	// internal/arr for the client and for the design.
 	ArrInstances []ArrInstance `json:"arr_instances"`
@@ -418,6 +429,14 @@ func (m *Manager) normalize() {
 		t := true
 		m.cfg.PlexKeepAddedAt = &t
 	}
+	if m.cfg.DeferWhileTranscoding == nil {
+		t := true
+		m.cfg.DeferWhileTranscoding = &t
+	}
+	if m.cfg.HoldReplaceWhilePlaying == nil {
+		t := true
+		m.cfg.HoldReplaceWhilePlaying = &t
+	}
 	switch m.cfg.DefaultSpeed {
 	case "faster", "fast", "medium", "slow", "slower":
 	default:
@@ -549,6 +568,16 @@ func (c Config) ToPlexPath(p string) string {
 // PlexKeepAddedAtOn reports the effective setting (default on).
 func (c Config) PlexKeepAddedAtOn() bool {
 	return c.PlexKeepAddedAt == nil || *c.PlexKeepAddedAt
+}
+
+// DeferWhileTranscodingOn reports the effective setting (default on).
+func (c Config) DeferWhileTranscodingOn() bool {
+	return c.DeferWhileTranscoding == nil || *c.DeferWhileTranscoding
+}
+
+// HoldReplaceWhilePlayingOn reports the effective setting (default on).
+func (c Config) HoldReplaceWhilePlayingOn() bool {
+	return c.HoldReplaceWhilePlaying == nil || *c.HoldReplaceWhilePlaying
 }
 
 // WindowOpen reports whether the queue may start new jobs right now.
