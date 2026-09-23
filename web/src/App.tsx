@@ -85,7 +85,7 @@ export default function App() {
         <div className="brand">
           <span className="brand-mark" aria-hidden />
           <div>
-            <div className="brand-name">mediatrans</div>
+            <div className="brand-name">distillarr</div>
             <div className="brand-sub">encode bay</div>
           </div>
         </div>

@@ -30,8 +30,13 @@ func New(base, key string) *Client {
 
 // auth sends the key in the Authorization header. Jellyfin 10.11+
 // rejects the legacy ?api_key= query parameter by default.
+//
+// DeviceId stays "mediatrans" (the app's internal name, unrelated to its
+// Distillarr display name) so existing installs don't get a duplicate
+// device entry in Jellyfin; only the user-visible Client/Device strings
+// changed with the rename.
 func (c *Client) auth(req *http.Request) {
-	req.Header.Set("Authorization", fmt.Sprintf(`MediaBrowser Client="mediatrans", Device="mediatrans", DeviceId="mediatrans", Version="1", Token="%s"`, c.Key))
+	req.Header.Set("Authorization", fmt.Sprintf(`MediaBrowser Client="Distillarr", Device="Distillarr", DeviceId="mediatrans", Version="1", Token="%s"`, c.Key))
 }
 
 func (c *Client) get(ctx context.Context, out any, path string, q url.Values) error {
