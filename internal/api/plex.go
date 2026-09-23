@@ -159,12 +159,12 @@ func (s *Server) SyncPlex(ctx context.Context, cl *plex.Client) (int, error) {
 	}
 	n := 0
 	for _, sec := range secs {
-		var typ int
+		var typ, itemType int
 		switch sec.Type {
 		case "movie":
-			typ = 0 // Plex's own default for a movie section
+			typ, itemType = 0, 1 // typ 0 omits the filter (Plex's own default); items are still metadata type 1
 		case "show":
-			typ = 4 // flattens every episode out of the section in one walk
+			typ, itemType = 4, 4 // flattens every episode out of the section in one walk
 		default:
 			continue
 		}
@@ -182,7 +182,7 @@ func (s *Server) SyncPlex(ctx context.Context, cl *plex.Client) (int, error) {
 							continue
 						}
 						rows = append(rows, store.PlexRow{FileID: f.ID, RatingKey: it.RatingKey,
-							SectionID: sec.Key, AddedAt: it.AddedAt})
+							SectionID: sec.Key, AddedAt: it.AddedAt, ItemType: itemType})
 					}
 				}
 			}
@@ -204,10 +204,11 @@ func (s *Server) SyncPlex(ctx context.Context, cl *plex.Client) (int, error) {
 // PlexRefreshSubscriber returns an OnFinished subscriber that asks Plex
 // to rescan the affected directory after a replace or upscale-copy, so
 // it picks up the changed/new file without waiting for its own scan
-// interval. Unlike the Jellyfin subscriber, this never needs to look up
-// a new item id or patch a "date added": plex_items is keyed by file_id,
-// which survives the replace, and (not yet built) is what will
-// restore addedAt if Plex changes it on refresh.
+// interval. plex_items is keyed by file_id, which survives the replace,
+// so no new item id needs to be looked up. When PlexKeepAddedAtOn,
+// it also restores the item's "date added" if the refresh changed it —
+// best-effort throughout: any Metadata/SetAddedAt failure just logs, the
+// same as a Refresh failure does.
 func (s *Server) PlexRefreshSubscriber() func(jobs.ReplacedEvent) {
 	return func(ev jobs.ReplacedEvent) {
 		c := s.cfg.Get()
@@ -222,8 +223,40 @@ func (s *Server) PlexRefreshSubscriber() func(jobs.ReplacedEvent) {
 		dir := c.ToPlexPath(filepath.Dir(ev.NewPath))
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
+
+		var before int64
+		keepAddedAt := c.PlexKeepAddedAtOn()
+		if keepAddedAt {
+			if it, err := cl.Metadata(ctx, row.RatingKey); err == nil {
+				before = it.AddedAt
+			} else {
+				log.Printf("plex addedAt before-read %s: %v", ev.NewPath, err)
+				keepAddedAt = false
+			}
+		}
+
 		if err := cl.Refresh(ctx, row.SectionID, dir); err != nil {
 			log.Printf("plex refresh %s: %v", ev.NewPath, err)
+			return
+		}
+
+		if !keepAddedAt || before == 0 {
+			return
+		}
+		it, err := cl.Metadata(ctx, row.RatingKey)
+		if err != nil {
+			log.Printf("plex addedAt after-read %s: %v", ev.NewPath, err)
+			return
+		}
+		if it.AddedAt == before {
+			return
+		}
+		if err := cl.SetAddedAt(ctx, row.SectionID, row.RatingKey, row.ItemType, before, true); err != nil {
+			log.Printf("plex addedAt restore %s: %v", ev.NewPath, err)
+			return
+		}
+		if err := s.st.SetPlexAddedAt(ev.FileID, before); err != nil {
+			log.Printf("plex addedAt cache update %s: %v", ev.NewPath, err)
 		}
 	}
 }

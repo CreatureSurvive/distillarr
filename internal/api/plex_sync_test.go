@@ -72,7 +72,7 @@ func TestSyncPlexMapsPartsToFiles(t *testing.T) {
 	if err != nil || row == nil {
 		t.Fatalf("expected a plex_items row for the movie, got %v, %v", row, err)
 	}
-	if row.RatingKey != "100" || row.SectionID != "1" || row.AddedAt != 1700000000 {
+	if row.RatingKey != "100" || row.SectionID != "1" || row.AddedAt != 1700000000 || row.ItemType != 1 {
 		t.Errorf("movie row = %+v", row)
 	}
 
@@ -80,7 +80,7 @@ func TestSyncPlexMapsPartsToFiles(t *testing.T) {
 	if err != nil || epRow == nil {
 		t.Fatalf("expected a plex_items row for the episode, got %v, %v", epRow, err)
 	}
-	if epRow.RatingKey != "200" || epRow.SectionID != "2" {
+	if epRow.RatingKey != "200" || epRow.SectionID != "2" || epRow.ItemType != 4 {
 		t.Errorf("episode row = %+v", epRow)
 	}
 

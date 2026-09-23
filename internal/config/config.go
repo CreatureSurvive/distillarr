@@ -89,6 +89,10 @@ type Config struct {
 	PlexURL     string `json:"plex_url"`
 	PlexToken   string `json:"plex_token"`
 	PlexPathMap string `json:"plex_path_map"`
+	// PlexKeepAddedAt restores an item's "date added" after a
+	// post-replace refresh if Plex changed it. Default on, like
+	// Jellyfin already does unconditionally; see PlexKeepAddedAtOn.
+	PlexKeepAddedAt *bool `json:"plex_keep_added_at,omitempty"`
 
 	// ArrInstances: any number of Sonarr and Radarr connections. See
 	// internal/arr for the client and for the design.
@@ -536,6 +540,11 @@ func (c Config) MapPlexPath(p string) string {
 func (c Config) ToPlexPath(p string) string {
 	m, _ := pathmap.Parse(c.PlexPathMap)
 	return m.ToRemote(p)
+}
+
+// PlexKeepAddedAtOn reports the effective setting (default on).
+func (c Config) PlexKeepAddedAtOn() bool {
+	return c.PlexKeepAddedAt == nil || *c.PlexKeepAddedAt
 }
 
 // WindowOpen reports whether the queue may start new jobs right now.

@@ -260,6 +260,10 @@ var alters = []string{
 		section_id TEXT NOT NULL,
 		added_at INTEGER NOT NULL DEFAULT 0)`,
 	`CREATE INDEX IF NOT EXISTS plex_items_section ON plex_items(section_id)`,
+	// Plex's own metadata type for the item (1 movie, 4 episode): needed
+	// to build the addedAt-restore PUT, which requires the
+	// section's type param same as the original sync WalkSection call.
+	`ALTER TABLE plex_items ADD COLUMN item_type INTEGER NOT NULL DEFAULT 1`,
 }
 
 func (s *Store) migrate() error {
