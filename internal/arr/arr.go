@@ -249,6 +249,75 @@ func (c *Client) Movies(ctx context.Context) ([]Movie, error) {
 	return out, err
 }
 
+// CustomFormatField is one specification's configured field (for a
+// ReleaseTitleSpecification/SourceSpecification, "value" holds the regex
+// or source name being matched).
+type CustomFormatField struct {
+	Name  string `json:"name"`
+	Value any    `json:"value"`
+}
+
+// CustomFormatSpec is one condition within a custom format. All of a
+// format's specifications must match (unless Negate) for it to apply.
+type CustomFormatSpec struct {
+	Name           string              `json:"name"`
+	Implementation string              `json:"implementation"`
+	Negate         bool                `json:"negate"`
+	Required       bool                `json:"required"`
+	Fields         []CustomFormatField `json:"fields"`
+}
+
+// CustomFormat is one user-defined format (Settings → Custom Formats).
+type CustomFormat struct {
+	ID             int64               `json:"id"`
+	Name           string              `json:"name"`
+	Specifications []CustomFormatSpec  `json:"specifications"`
+}
+
+// CustomFormats lists every custom format defined on the instance.
+func (c *Client) CustomFormats(ctx context.Context) ([]CustomFormat, error) {
+	var out []CustomFormat
+	err := c.get(ctx, &out, "/api/v3/customformat", nil)
+	return out, err
+}
+
+// FormatItem is one row of a quality profile's custom-format score table.
+type FormatItem struct {
+	Format int64 `json:"format"` // CustomFormat.ID
+	Score  int   `json:"score"`
+}
+
+// QualityProfile is the subset used for the codec-penalty check.
+type QualityProfile struct {
+	ID          int64        `json:"id"`
+	Name        string       `json:"name"`
+	FormatItems []FormatItem `json:"formatItems"`
+}
+
+// QualityProfiles lists every quality profile defined on the instance.
+func (c *Client) QualityProfiles(ctx context.Context) ([]QualityProfile, error) {
+	var out []QualityProfile
+	err := c.get(ctx, &out, "/api/v3/qualityprofile", nil)
+	return out, err
+}
+
+// Naming is the subset of /api/v3/config/naming used for the
+// codec-in-filename check. Sonarr sets the Episode fields; Radarr sets
+// only Movie; the unused ones simply stay "".
+type Naming struct {
+	StandardEpisodeFormat string `json:"standardEpisodeFormat,omitempty"`
+	DailyEpisodeFormat    string `json:"dailyEpisodeFormat,omitempty"`
+	AnimeEpisodeFormat    string `json:"animeEpisodeFormat,omitempty"`
+	StandardMovieFormat   string `json:"standardMovieFormat,omitempty"`
+}
+
+// GetNaming fetches the instance's naming configuration.
+func (c *Client) GetNaming(ctx context.Context) (*Naming, error) {
+	var out Naming
+	err := c.get(ctx, &out, "/api/v3/config/naming", nil)
+	return &out, err
+}
+
 // Tag is one user-defined label (Settings → Tags).
 type Tag struct {
 	ID    int64  `json:"id"`

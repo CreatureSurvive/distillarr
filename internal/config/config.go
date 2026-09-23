@@ -101,6 +101,10 @@ type ArrInstance struct {
 	APIKey  string `json:"api_key"`
 	PathMap string `json:"path_map,omitempty"` // pathmap format; "" = identical paths
 	Enabled *bool  `json:"enabled,omitempty"`  // default on; see (ArrInstance).On()
+	// PenaltyAck records that the user acknowledged this instance's
+	// codec-penalty warning and wants autopilot to proceed anyway
+	// once autopilot exists. Never set automatically.
+	PenaltyAck bool `json:"penalty_ack,omitempty"`
 }
 
 // On reports whether the instance is enabled (default true, so existing

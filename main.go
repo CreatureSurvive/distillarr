@@ -169,6 +169,20 @@ func main() {
 		}
 	}()
 
+	// Sonarr/Radarr: an initial sync shortly after boot (the scan usually
+	// beats it to most files anyway, but not every file needs a fresh
+	// probe to already be in the library), then hourly. The scan-finish
+	// hook (NewServer) and POST /api/v1/arr/sync cover the other triggers.
+	go func() {
+		time.Sleep(20 * time.Second)
+		srv.TriggerArrSync()
+		t := time.NewTicker(time.Hour)
+		defer t.Stop()
+		for range t.C {
+			srv.TriggerArrSync()
+		}
+	}()
+
 	httpSrv := &http.Server{
 		Addr:              listen,
 		Handler:           srv.Handler(),

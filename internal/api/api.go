@@ -140,7 +140,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/v1/image/{itemid}", s.image)
 
 	// sonarr / radarr
+	mux.HandleFunc("GET /api/v1/arr/{id}", s.arrGet)
 	mux.HandleFunc("POST /api/v1/arr/{id}/test", s.arrTest)
+	mux.HandleFunc("POST /api/v1/arr/{id}/ack", s.arrAck)
 	mux.HandleFunc("POST /api/v1/arr/sync", s.arrSyncNow)
 
 	// previews

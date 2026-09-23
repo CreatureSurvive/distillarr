@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactNode } from "react";
-import { api, subscribe, type ArrInstance, type ArrTestResult, type Config, type HwInfo, type JfStatus, type JfTest, type TrashItem } from "../api";
+import { api, subscribe, type ArrInfo, type ArrInstance, type ArrTestResult, type Config, type HwInfo, type JfStatus, type JfTest, type TrashItem } from "../api";
 import { Seg, Toggle, toast } from "../components";
 import { ago, backendLabel, bytes } from "../format";
 import { qualityWord } from "../options";
@@ -280,10 +280,28 @@ function ArrSection({ cfg, setCfg }: { cfg: Config; setCfg: (c: Config) => void 
   const [results, setResults] = useState<Record<number, ArrTestResult | null>>({});
   const [testing, setTesting] = useState<Record<number, boolean>>({});
   const [saving, setSaving] = useState(false);
+  const [info, setInfo] = useState<Record<string, ArrInfo>>({});
+  const [syncing, setSyncing] = useState(false);
 
   useEffect(() => {
     setDrafts(cfg.arr_instances.map((a) => ({ ...a, keyInput: "" })));
+    // Codec-penalty reports come from each saved instance's own
+    // last sync, not this form's draft state.
+    cfg.arr_instances.forEach((a) => {
+      if (!a.id) return;
+      api.arrGet(a.id).then((r) => setInfo((m) => ({ ...m, [a.id!]: r }))).catch(() => {});
+    });
   }, [cfg.arr_instances]);
+
+  const ack = async (id: string) => {
+    try {
+      await api.arrAck(id);
+      const r = await api.arrGet(id);
+      setInfo((m) => ({ ...m, [id]: r }));
+    } catch (e: any) {
+      toast(e.message, "err");
+    }
+  };
 
   const update = (i: number, patch: Partial<ArrDraft>) =>
     setDrafts((d) => d.map((x, j) => (j === i ? { ...x, ...patch } : x)));
@@ -338,6 +356,12 @@ function ArrSection({ cfg, setCfg }: { cfg: Config; setCfg: (c: Config) => void 
     <section className="panel" id="s-arr">
       <div className="panel-head">
         <h2 className="panel-title">Sonarr / Radarr</h2>
+        {drafts.some((d) => d.id) && (
+          <button className="btn mini" disabled={syncing}
+            onClick={() => { setSyncing(true); api.arrSync().then((r) => { if (!r.started) toast("Already syncing"); }).catch((e) => toast(e.message, "err")).finally(() => setTimeout(() => setSyncing(false), 2000)); }}>
+            {syncing ? "Syncing…" : "Sync now"}
+          </button>
+        )}
       </div>
       <p className="dim small">
         Optional. Connect any number of Sonarr and Radarr instances (a 4K
@@ -347,12 +371,41 @@ function ArrSection({ cfg, setCfg }: { cfg: Config; setCfg: (c: Config) => void 
       </p>
       {drafts.map((d, i) => {
         const test = results[i];
+        const inst = d.id ? info[d.id] : undefined;
+        const penalties = inst?.penalties.penalties || [];
+        const namingWarnings = inst?.penalties.naming_warnings || [];
+        const showWarning = (penalties.length > 0 || namingWarnings.length > 0) && !inst?.penalty_ack;
         return (
           <div key={i} className="panel" style={{ marginTop: 12, marginBottom: 0 }}>
             <div className="panel-head">
               <h3 className="panel-title" style={{ fontSize: 14 }}>{d.name || (d.kind === "sonarr" ? "Sonarr" : "Radarr")}</h3>
               <Toggle on={d.enabled !== false} onChange={(v) => update(i, { enabled: v })} label="Enabled" />
             </div>
+            {showWarning && (
+              <div className="alert">
+                <div><b>Re-encoded files may look worse to {d.name || "this instance"}.</b></div>
+                {penalties.map((p, pi) => (
+                  <div key={pi} className="small">
+                    Profile "{p.profile}" scores custom format "{p.custom_format}" at {p.score} (matches: {p.terms.join(", ")}
+                    {" via "}{p.matches}). A file Distillarr re-encodes could be treated as worth replacing again.
+                  </div>
+                ))}
+                {namingWarnings.map((n, ni) => (
+                  <div key={ni} className="small">
+                    Naming format "{n.field}" includes the codec ({n.template}) — a future scoring rule would apply to
+                    every renamed file immediately, even though nothing is scored today.
+                  </div>
+                ))}
+                <div className="small dim" style={{ marginTop: 6 }}>
+                  Fix: exclude a tag from that custom format in {d.kind === "sonarr" ? "Sonarr" : "Radarr"} → Settings → Custom
+                  Formats, or in Recyclarr's config under that format's <code>quality_profiles.score</code> override. See{" "}
+                  <a href="https://github.com/TRaSH-Guides/Guides" target="_blank" rel="noreferrer">TRaSH-Guides</a> for the exclusion syntax.
+                </div>
+                <div className="toolbar" style={{ marginTop: 8 }}>
+                  <button className="btn mini" onClick={() => d.id && ack(d.id)}>I understand</button>
+                </div>
+              </div>
+            )}
             <div className="form-grid">
               <label className="field"><span>Name</span>
                 <input className="input" value={d.name} onChange={(e) => update(i, { name: e.target.value })} placeholder={d.kind === "sonarr" ? "Sonarr" : "Radarr"} />

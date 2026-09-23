@@ -171,5 +171,19 @@ func (s *Server) syncOneArrInstance(ctx context.Context, inst config.ArrInstance
 		_ = s.st.SetArrTags(inst.ID, m)
 	}
 
+	// Codec-penalty check: read-only against this instance's own
+	// setup, never assuming any particular quality-profile or naming
+	// convention. A fetch failure here just means a stale (or no)
+	// report until the next sync — it must never fail the sync itself.
+	if cfs, err := cl.CustomFormats(ctx); err == nil {
+		if profiles, err := cl.QualityProfiles(ctx); err == nil {
+			naming, _ := cl.GetNaming(ctx) // nil is fine; AnalyzePenalties handles it
+			report := arr.AnalyzePenalties(cfs, profiles, naming)
+			if b, err := json.Marshal(report); err == nil {
+				_ = s.st.KVSet("arr_penalties_"+inst.ID, string(b))
+			}
+		}
+	}
+
 	return len(items), nil
 }

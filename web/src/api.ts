@@ -451,7 +451,13 @@ export type ArrInstance = {
   api_key_set?: boolean;
   path_map?: string;
   enabled?: boolean;
+  penalty_ack?: boolean; // set only via api.arrAck(); a plain save never changes it
 };
+
+export type ArrPenalty = { profile: string; custom_format: string; score: number; matches: string; terms: string[] };
+export type ArrNamingWarning = { field: string; template: string };
+export type ArrPenaltyReport = { penalties: ArrPenalty[] | null; naming_warnings: ArrNamingWarning[] | null };
+export type ArrInfo = { id: string; penalties: ArrPenaltyReport; penalty_ack: boolean };
 
 export type ArrFileInfo = {
   instance_id: string;
@@ -670,6 +676,9 @@ export const api = {
   // id is the stored instance's id, or "new" for one not yet saved.
   arrTest: (id: string, body: { url?: string; api_key?: string; kind?: string; path_map?: string }) =>
     post<ArrTestResult>(`/api/v1/arr/${id}/test`, body),
+  arrGet: (id: string) => req<ArrInfo>(`/api/v1/arr/${id}`),
+  arrAck: (id: string) => post<{ ok: boolean }>(`/api/v1/arr/${id}/ack`),
+  arrSync: () => post<{ started: boolean; syncing?: boolean }>("/api/v1/arr/sync"),
 
   preview: (id: string) => req<Preview>(`/api/v1/previews/${id}`),
   previews: () => req<{ previews: Preview[] }>("/api/v1/previews"),

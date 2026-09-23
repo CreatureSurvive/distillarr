@@ -70,18 +70,21 @@ func mergeArrInstances(stored []config.ArrInstance, patch json.RawMessage) ([]co
 	used := make(map[string]bool, len(incoming))
 	out := make([]config.ArrInstance, 0, len(incoming))
 	for _, inst := range incoming {
-		switch {
-		case inst.ID == "":
+		if inst.ID == "" {
 			base := slugify(inst.Name)
 			id := base
 			for used[id] || byID[id].ID != "" {
 				id = base + "-" + randomSuffix()
 			}
 			inst.ID = id
-		case strings.TrimSpace(inst.APIKey) == "":
-			if old, ok := byID[inst.ID]; ok {
+		} else if old, ok := byID[inst.ID]; ok {
+			if strings.TrimSpace(inst.APIKey) == "" {
 				inst.APIKey = old.APIKey
 			}
+			// PenaltyAck has its own endpoint (arrAck): a plain settings
+			// save can never flip it, in either direction — a bool has
+			// no "not sent" state to distinguish from false.
+			inst.PenaltyAck = old.PenaltyAck
 		}
 		used[inst.ID] = true
 		out = append(out, inst)
@@ -160,4 +163,56 @@ func (s *Server) arrTest(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"ok": true, "version": st.Version, "app_name": st.AppName, "root_folders": roots,
 	})
+}
+
+// GET /api/v1/arr/{id} — an instance's codec-penalty report from
+// its last successful sync, and whether the user has acknowledged it.
+func (s *Server) arrGet(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	var inst *config.ArrInstance
+	for _, x := range s.cfg.Get().ArrInstances {
+		if x.ID == id {
+			x := x
+			inst = &x
+			break
+		}
+	}
+	if inst == nil {
+		fail(w, 404, fmt.Errorf("no instance %q", id))
+		return
+	}
+	var report arr.PenaltyReport
+	if v, ok, _ := s.st.KVGet("arr_penalties_" + id); ok {
+		_ = json.Unmarshal([]byte(v), &report)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"id": id, "penalties": report, "penalty_ack": inst.PenaltyAck,
+	})
+}
+
+// POST /api/v1/arr/{id}/ack — acknowledge this instance's codec-penalty
+// warning. Its own endpoint, deliberately outside the general config
+// save path (see mergeArrInstances): a plain settings save can never
+// flip a bool that has no "not sent" state.
+func (s *Server) arrAck(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	found := false
+	err := s.cfg.Update(func(c *config.Config) {
+		for i := range c.ArrInstances {
+			if c.ArrInstances[i].ID == id {
+				c.ArrInstances[i].PenaltyAck = true
+				found = true
+				break
+			}
+		}
+	})
+	if err != nil {
+		fail(w, 500, err)
+		return
+	}
+	if !found {
+		fail(w, 404, fmt.Errorf("no instance %q", id))
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
