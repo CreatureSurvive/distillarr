@@ -9,7 +9,6 @@ import (
 	"mediatrans/internal/issues"
 	"mediatrans/internal/jellyfin"
 	"mediatrans/internal/plex"
-	"mediatrans/internal/store"
 )
 
 // sessionsState is the latest snapshot from the sessions poller:
@@ -41,25 +40,18 @@ func (e *Engine) IsPlaying(path string) bool {
 	return playing[path]
 }
 
-// needSessions: only poll while there's queue work the gate or hold could
-// affect (matches measureIdle's reasoning in reverse — sessions polling
-// only matters when jobs exist).
-func (e *Engine) needSessions() bool {
-	if e.active.Load() > 0 {
-		return true
-	}
-	c, _ := e.st.CountJobsByStatus()
-	return c[store.StatusQueued] > 0
-}
-
+// sessionsLoop polls unconditionally every 15s, not just while jobs are
+// queued/running: dispatch gate and replace hold only matter
+// during queue activity, but playback_events history (what a
+// file has forced clients to transcode, over time) needs to see
+// ordinary playback too, which happens most often when nothing's
+// queued.
 func (e *Engine) sessionsLoop() {
 	defer e.wg.Done()
 	t := time.NewTicker(15 * time.Second)
 	defer t.Stop()
 	for {
-		if e.needSessions() {
-			e.pollSessions()
-		}
+		e.pollSessions()
 		select {
 		case <-t.C:
 		case <-e.stopCh:
