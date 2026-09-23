@@ -12,6 +12,10 @@ import (
 	"mediatrans/internal/store"
 )
 
+// ForcesTranscodeLookbackDays is the forces_transcode issue's window: a
+// non-direct playback session inside this many days counts.
+const ForcesTranscodeLookbackDays = 30
+
 // Fix kinds.
 const (
 	Quick    = "quick"    // remux / audio-only: video copied bit-exact, minutes
@@ -40,6 +44,7 @@ var Types = []Type{
 	{"quality_limited", "Can't reach quality target", Info, "Measured: no tested setting reached your VMAF target, usually because the source is already heavily compressed. Best left as is.", "file"},
 	{"upgrade_pending", "Upgrade pending", Info, "A connected Sonarr/Radarr instance monitors this file and its quality cutoff isn't met yet, so a better release is probably coming. Skipped so a re-encode isn't wasted on a file about to be replaced.", "file"},
 	{"mixed_season", "Mixed formats in a season", Reencode, "Episodes in the same season use different codecs, containers or resolutions, which can cause inconsistent playback or transcoding.", "season"},
+	{"forces_transcode", "Forces client transcode", Info, "A Jellyfin or Plex session played this file with a transcode in the last 30 days, so at least one client couldn't play it directly. See the file page for the reasons.", "file"},
 }
 
 // ByKey finds a type.
@@ -68,8 +73,9 @@ func isMP4(container string) bool {
 }
 
 // Detect returns the issue keys for one file. worth/measuredMiss come
-// from its current recommendation.
-func Detect(f *store.File, worth, measuredMiss, upgradePending bool) []string {
+// from its current recommendation; forcesTranscode comes from the
+// playback-events table.
+func Detect(f *store.File, worth, measuredMiss, upgradePending, forcesTranscode bool) []string {
 	var out []string
 	// Any tag other than hvc1 (hev1, blank-in-MP4 "[0][0][0][0]", ...);
 	// "" means the tag couldn't be read, so don't guess.
@@ -103,7 +109,44 @@ func Detect(f *store.File, worth, measuredMiss, upgradePending bool) []string {
 	if upgradePending {
 		out = append(out, "upgrade_pending")
 	}
+	if forcesTranscode {
+		out = append(out, "forces_transcode")
+	}
 	return out
+}
+
+// ReasonCategory buckets a raw transcode reason from either server into
+// one of a small set of canonical keys, so playback_events and
+// the forces_transcode detail stay comparable across Jellyfin's many
+// TranscodeReasons enum values and Plex's decision fields:
+//   - container, audio_codec, audio_channels: a quick fix (remux, or
+//     an audio rule conversion) resolves it;
+//   - video_codec, video_profile, video_level, bit_depth: needs a
+//     re-encode;
+//   - subtitle: image-subtitle burn-in, not automated yet (P4.x).
+func ReasonCategory(raw string) string {
+	r := strings.ToLower(raw)
+	switch {
+	case strings.Contains(r, "subtitle"):
+		return "subtitle"
+	case strings.Contains(r, "container"):
+		return "container"
+	case strings.Contains(r, "audiochannel"):
+		return "audio_channels"
+	case strings.Contains(r, "audiocodec"), strings.Contains(r, "audiobitrate"),
+		strings.Contains(r, "audiosamplerate"), strings.Contains(r, "secondaryaudio"):
+		return "audio_codec"
+	case strings.Contains(r, "videoprofile"):
+		return "video_profile"
+	case strings.Contains(r, "videolevel"):
+		return "video_level"
+	case strings.Contains(r, "bitdepth"):
+		return "bit_depth"
+	case strings.Contains(r, "video"), strings.Contains(r, "directplayerror"):
+		return "video_codec"
+	default:
+		return "other"
+	}
 }
 
 // Encode joins keys for storage (",a,b," so LIKE '%,a,%' matches exactly).

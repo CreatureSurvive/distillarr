@@ -229,7 +229,8 @@ func (s *Scanner) probeOne(path string, cfg config.Config) {
 	rec := recs.Recommend(f, cfg)
 	f.TranscodeScore = rec.Score
 	f.RecJSON = rec.JSON()
-	f.Issues = issues.Encode(issues.Detect(f, rec.Action == "transcode", rec.Limited, rec.UpgradePending))
+	forces, _ := s.st.ForcesTranscode(f.ID, issues.ForcesTranscodeLookbackDays)
+	f.Issues = issues.Encode(issues.Detect(f, rec.Action == "transcode", rec.Limited, rec.UpgradePending, forces))
 
 	if err := s.st.UpsertFile(f, buildStreams(f.ID, p)); err != nil {
 		log.Printf("scan: upsert %s: %v", path, err)
@@ -390,6 +391,10 @@ func (s *Scanner) markMissing(seen map[string]bool) {
 // hardware or size-model calibration change). Cheap: no probing.
 func (s *Scanner) RefreshRecs() {
 	cfg := s.cfg.Get()
+	forces, err := s.st.ForcesTranscodeFileIDs(issues.ForcesTranscodeLookbackDays)
+	if err != nil {
+		log.Printf("scan: refresh recs: forces_transcode lookup: %v", err)
+	}
 	batch := map[int64]store.RecUpdate{}
 	flush := func() {
 		if len(batch) > 0 {
@@ -402,7 +407,7 @@ func (s *Scanner) RefreshRecs() {
 	_ = s.st.EachFile(func(f *store.File) error {
 		r := recs.Recommend(f, cfg)
 		batch[f.ID] = store.RecUpdate{Score: r.Score, Rec: r.JSON(),
-			Issues: issues.Encode(issues.Detect(f, r.Action == "transcode", r.Limited, r.UpgradePending))}
+			Issues: issues.Encode(issues.Detect(f, r.Action == "transcode", r.Limited, r.UpgradePending, forces[f.ID]))}
 		if len(batch) >= 500 {
 			flush()
 		}
