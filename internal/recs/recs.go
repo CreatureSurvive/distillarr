@@ -521,6 +521,18 @@ func fillEstimate(r *Recommendation, f *store.File, s encode.Settings, cfg confi
 	if other < 0 {
 		other = 0
 	}
+	if s.AddStereoCompat {
+		hasStereo := false
+		for _, a := range r.Audio {
+			if a.Action != "drop" && a.Channels > 0 && a.Channels <= 2 {
+				hasStereo = true
+				break
+			}
+		}
+		if !hasStereo {
+			other += 192_000 // AAC 2.0 compat track (encode.planStreams' default bitrate)
+		}
+	}
 	vb := float64(f.VideoBitrate) * ratio
 	r.EstOut = int64((vb + float64(other)) * f.Duration / 8)
 	// Uncertainty narrows as real samples accumulate.
@@ -630,17 +642,18 @@ func audioPlan(f *store.File, s encode.Settings) []AudioPlan {
 func baseSettings(cfg config.Config) encode.Settings {
 	c := encode.Codec(cfg.DefaultCodec)
 	s := encode.Settings{
-		Codec:          c,
-		Backend:        ResolveBackend(cfg.PreferredBackend, c),
-		Quality:        cfg.DefaultQuality,
-		Speed:          cfg.DefaultSpeed,
-		MaxHeight:      cfg.MaxHeight,
-		TonemapHDR:     cfg.TonemapHDR,
-		AudioPCMTarget: cfg.AudioPCMTarget,
-		Container:      "auto",
-		ContainerGoal:  cfg.ContainerGoal,
-		AudioRules:     cfg.AudioRules,
-		VMAFTarget:     cfg.VMAF(),
+		Codec:           c,
+		Backend:         ResolveBackend(cfg.PreferredBackend, c),
+		Quality:         cfg.DefaultQuality,
+		Speed:           cfg.DefaultSpeed,
+		MaxHeight:       cfg.MaxHeight,
+		TonemapHDR:      cfg.TonemapHDR,
+		AudioPCMTarget:  cfg.AudioPCMTarget,
+		Container:       "auto",
+		ContainerGoal:   cfg.ContainerGoal,
+		AudioRules:      cfg.AudioRules,
+		AddStereoCompat: cfg.AddStereoCompat,
+		VMAFTarget:      cfg.VMAF(),
 	}
 	s.Normalize()
 	return s

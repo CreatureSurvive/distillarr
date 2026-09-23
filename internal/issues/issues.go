@@ -43,6 +43,7 @@ var Types = []Type{
 	{"worth_reencoding", "Worth re-encoding", Reencode, "Would shrink by at least your savings threshold at your quality target.", "file"},
 	{"quality_limited", "Can't reach quality target", Info, "Measured: no tested setting reached your VMAF target, usually because the source is already heavily compressed. Best left as is.", "file"},
 	{"upgrade_pending", "Upgrade pending", Info, "A connected Sonarr/Radarr instance monitors this file and its quality cutoff isn't met yet, so a better release is probably coming. Skipped so a re-encode isn't wasted on a file about to be replaced.", "file"},
+	{"audio_blocks_mp4", "Audio blocks MP4", Quick, "The video (and any subtitles) already fit MP4, but the audio — TrueHD, DTS, FLAC or PCM with no matching conversion rule — would force MKV. Fixed by remuxing to MP4 and converting just the audio, per your audio rules.", "file"},
 	{"mixed_season", "Mixed formats in a season", Reencode, "Episodes in the same season use different codecs, containers or resolutions, which can cause inconsistent playback or transcoding.", "season"},
 	{"forces_transcode", "Forces client transcode", Info, "A Jellyfin or Plex session played this file with a transcode in the last 30 days, so at least one client couldn't play it directly. See the file page for the reasons.", "file"},
 }
@@ -74,8 +75,9 @@ func isMP4(container string) bool {
 
 // Detect returns the issue keys for one file. worth/measuredMiss come
 // from its current recommendation; forcesTranscode comes from the
-// playback-events table.
-func Detect(f *store.File, worth, measuredMiss, upgradePending, forcesTranscode bool) []string {
+// playback-events table; cfg supplies AudioRules for
+// audio_blocks_mp4.
+func Detect(f *store.File, cfg config.Config, worth, measuredMiss, upgradePending, forcesTranscode bool) []string {
 	var out []string
 	// Any tag other than hvc1 (hev1, blank-in-MP4 "[0][0][0][0]", ...);
 	// "" means the tag couldn't be read, so don't guess.
@@ -93,6 +95,9 @@ func Detect(f *store.File, worth, measuredMiss, upgradePending, forcesTranscode 
 	}
 	if legacyContainers[f.Container] {
 		out = append(out, "legacy_container")
+	}
+	if audioBlocksMP4(f, cfg) {
+		out = append(out, "audio_blocks_mp4")
 	}
 	if legacyCodecs[f.VideoCodec] {
 		out = append(out, "legacy_codec")
@@ -174,6 +179,36 @@ func Decode(s string) []string {
 	return out
 }
 
+// mp4SafeVideoCodecs mirrors fitsMP4's VideoCopy check (encode.go) for the
+// codecs ffmpeg can copy straight into an MP4 container.
+var mp4SafeVideoCodecs = map[string]bool{"h264": true, "hevc": true, "av1": true, "mpeg4": true}
+
+// audioBlocksMP4 reports whether f's video already fits MP4 but its audio
+// would force MKV under cfg's AudioRules — "surface files held in MKV
+// only by their audio". Computed from persisted store.File fields
+// (mirroring fitsMP4's audio loop in encode.go) rather than a live
+// media.Probe: store.File has no per-subtitle codec, but that's fine here
+// since a subtitle-forced MKV isn't this issue's concern, and a legacy
+// container is already its own issue (legacy_container's quick fix
+// already routes through "auto", so it isn't blocked the same way).
+func audioBlocksMP4(f *store.File, cfg config.Config) bool {
+	if !mp4SafeVideoCodecs[f.VideoCodec] || legacyContainers[f.Container] || isMP4(f.Container) {
+		return false
+	}
+	for _, a := range f.Audio {
+		if t, ok := encode.ResolveAudioRule(cfg.AudioRules, a.Codec, a.Channels, "mp4"); ok {
+			if t.Action == "convert" && t.Codec == "opus" {
+				return true // opus itself doesn't mux MP4-safe here (fitsMP4 parity)
+			}
+			continue
+		}
+		if !encode.IsMP4AudioSafe(a.Codec) {
+			return true
+		}
+	}
+	return false
+}
+
 // HasQuick reports whether any of a file's issues has a quick fix.
 func HasQuick(keys []string) bool {
 	for _, k := range keys {
@@ -203,6 +238,8 @@ func QuickFix(f *store.File, cfg config.Config) encode.Settings {
 		s.Container = "auto" // MP4 when everything fits, else MKV
 	case isMP4(f.Container):
 		s.Container = "mp4"
+	case audioBlocksMP4(f, cfg):
+		s.Container = "auto" // audio_blocks_mp4: the rules resolve it, so let ChooseContainer pick MP4
 	default:
 		s.Container = "mkv"
 	}
