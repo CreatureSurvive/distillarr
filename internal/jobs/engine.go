@@ -79,6 +79,8 @@ type Engine struct {
 
 	ms measurer
 
+	sess sessionsState // latest playback-sessions poll
+
 	stopCh chan struct{}
 	wg     sync.WaitGroup
 	kick   chan struct{}
@@ -114,6 +116,8 @@ func (e *Engine) Start() {
 	go e.housekeepingLoop()
 	e.wg.Add(1)
 	go e.measureLoop()
+	e.wg.Add(1)
+	go e.sessionsLoop()
 	// Probe hardware in the background on first boot.
 	if e.Report() == nil {
 		go func() {
@@ -270,6 +274,11 @@ func (e *Engine) tryDispatch() {
 		if int(e.active.Load()) >= int(e.workerCap.Load()) {
 			return
 		}
+		// Don't compete with a viewer's transcode for the GPU.
+		// Jobs already running continue; only new starts are gated.
+		if e.cfg.Get().DeferWhileTranscodingOn() && e.Transcoding() > 0 {
+			return
+		}
 		j, err := e.st.ClaimNext(e.windowOpen.Load(), e.neuralOpen.Load())
 		if err != nil {
 			log.Printf("jobs: claim: %v", err)
@@ -332,6 +341,13 @@ func (e *Engine) runJob(j *store.Job, resume bool) {
 			stJSON = []byte(j.SrcStatJSON)
 		}
 	}
+
+	// A job requeued after hitting the replace-hold cap (still playing) is
+	// resumable exactly like a boot-recovery resume: its temp file already
+	// passed Verify and the source hasn't changed, so redoing the encode
+	// would just waste GPU time. canResume upgrades resume without ever
+	// downgrading an explicit true.
+	resume = resume || canResume(j)
 
 	// Resolve backend + render node against live hardware, then build
 	// the exact plan (also used to verify stream counts on resume).
@@ -510,6 +526,34 @@ func (e *Engine) runJob(j *store.Job, resume bool) {
 	// Replace.
 	e.st.UpdateJobStatus(j.ID, store.StatusReplacing, "")
 	e.notify(EvJob, map[string]any{"id": j.ID, "status": store.StatusReplacing})
+
+	// Never swap a file someone is watching: hold the finished,
+	// already-verified temp file until playback stops.
+	if e.cfg.Get().HoldReplaceWhilePlayingOn() {
+		switch ok, capped := e.waitForPlaybackDone(ctx, j); {
+		case ok:
+			// nobody was playing it, or they stopped in time.
+		case capped:
+			// Still being watched after the cap: keep the temp (it stays
+			// out of sweepStaleTemps because the job is still active) and
+			// try again later without spending an attempt or the encode.
+			_ = e.st.PauseJob(j.ID)
+			e.notify(EvJob, map[string]any{"id": j.ID, "status": store.StatusQueued,
+				"note": "still being watched; will retry replacing it later"})
+			return
+		case ctx.Err() != nil:
+			removeTemp(tempPath)
+			e.st.FinishJob(j.ID, store.StatusCanceled, 0, "canceled", "")
+			e.notify(EvJob, map[string]any{"id": j.ID, "status": store.StatusCanceled})
+			return
+		default:
+			// Shutting down: leave status at 'replacing' with the temp in
+			// place. recoverAtBoot resumes it here on the next start, the
+			// same path it already uses for an interrupted replace.
+			return
+		}
+	}
+
 	cfg := e.cfg.Get()
 	trashDir := ""
 	if cfg.TrashEnabled {
@@ -968,6 +1012,58 @@ func srcUnchanged(j *store.Job) bool {
 		return false
 	}
 	return cur.Size == st.Size && cur.MtimeSec == st.MtimeSec && cur.MtimeNsec == st.MtimeNsec
+}
+
+// canResume reports whether j's temp file is a finished, still-good
+// encode that can skip straight past probing/tuning/encoding, the way a
+// boot-recovery resume does: the source hasn't changed since it was
+// snapshotted, and the temp file recorded for it is still on disk (a
+// requeue after a genuine encode failure always removes the temp first,
+// so this can't accidentally skip a real re-encode).
+func canResume(j *store.Job) bool {
+	if j.TempPath == "" || !srcUnchanged(j) {
+		return false
+	}
+	_, err := os.Stat(j.TempPath)
+	return err == nil
+}
+
+// replaceHoldCap is the longest waitForPlaybackDone waits before giving
+// up for this run: long enough for most movies/episodes to finish,
+// short enough that a forgotten paused session doesn't stall the queue
+// forever behind one worker slot.
+const replaceHoldCap = 3 * time.Hour
+
+// waitForPlaybackDone polls whether j's source is currently playing and
+// blocks (holding a worker slot, not a GPU semaphore — the encode
+// finished before this runs) until it isn't. ok is true once it's safe to
+// replace; capped is true if the wait hit replaceHoldCap while still
+// playing. When ok is false and capped is false, the caller distinguishes
+// an explicit cancel (ctx.Err() != nil) from a plain shutdown.
+func (e *Engine) waitForPlaybackDone(ctx context.Context, j *store.Job) (ok, capped bool) {
+	if !e.IsPlaying(j.SrcPath) {
+		return true, false
+	}
+	deadline := time.Now().Add(replaceHoldCap)
+	t := time.NewTicker(30 * time.Second)
+	defer t.Stop()
+	for {
+		e.notify(EvJob, map[string]any{"id": j.ID, "status": store.StatusReplacing,
+			"note": "held: the file is being watched"})
+		select {
+		case <-ctx.Done():
+			return false, false
+		case <-e.stopCh:
+			return false, false
+		case <-t.C:
+		}
+		if !e.IsPlaying(j.SrcPath) {
+			return true, false
+		}
+		if time.Now().After(deadline) {
+			return false, true
+		}
+	}
 }
 
 func (e *Engine) housekeepingLoop() {
