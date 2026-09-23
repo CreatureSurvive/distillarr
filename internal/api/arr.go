@@ -17,18 +17,23 @@ import (
 	"mediatrans/internal/pathmap"
 )
 
-// arrInstanceOut is an ArrInstance as returned by the API: the key is
-// never sent back, matching the Jellyfin key's masking convention.
+// arrInstanceOut is an ArrInstance as returned by the API: the key and
+// webhook token are never sent back, matching the Jellyfin key's masking
+// convention.
 type arrInstanceOut struct {
 	config.ArrInstance
-	APIKey    string `json:"api_key"`
-	APIKeySet bool   `json:"api_key_set"`
+	APIKey        string `json:"api_key"`
+	APIKeySet     bool   `json:"api_key_set"`
+	WebhookToken  string `json:"webhook_token"`
+	WebhookTokSet bool   `json:"webhook_token_set"`
 }
 
 func arrOut(inst config.ArrInstance) arrInstanceOut {
 	keySet := inst.APIKey != ""
+	tokSet := inst.WebhookToken != ""
 	inst.APIKey = ""
-	return arrInstanceOut{ArrInstance: inst, APIKeySet: keySet}
+	inst.WebhookToken = ""
+	return arrInstanceOut{ArrInstance: inst, APIKeySet: keySet, WebhookTokSet: tokSet}
 }
 
 var slugNonAlnum = regexp.MustCompile(`[^a-z0-9]+`)
@@ -47,6 +52,14 @@ func slugify(name string) string {
 
 func randomSuffix() string {
 	b := make([]byte, 3)
+	_, _ = rand.Read(b)
+	return hex.EncodeToString(b)
+}
+
+// randomWebhookToken is a bearer secret (HTTP Basic password), so it
+// gets far more entropy than the id-dedup suffix above.
+func randomWebhookToken() string {
+	b := make([]byte, 24)
 	_, _ = rand.Read(b)
 	return hex.EncodeToString(b)
 }
@@ -77,6 +90,7 @@ func mergeArrInstances(stored []config.ArrInstance, patch json.RawMessage) ([]co
 				id = base + "-" + randomSuffix()
 			}
 			inst.ID = id
+			inst.WebhookToken = randomWebhookToken()
 		} else if old, ok := byID[inst.ID]; ok {
 			if strings.TrimSpace(inst.APIKey) == "" {
 				inst.APIKey = old.APIKey
@@ -85,6 +99,10 @@ func mergeArrInstances(stored []config.ArrInstance, patch json.RawMessage) ([]co
 			// save can never flip it, in either direction — a bool has
 			// no "not sent" state to distinguish from false.
 			inst.PenaltyAck = old.PenaltyAck
+			// WebhookToken only ever changes via its own regenerate
+			// endpoint, never through a plain settings save (the
+			// frontend never even sends it back).
+			inst.WebhookToken = old.WebhookToken
 		}
 		if inst.TagAfterReencodeOn() && strings.TrimSpace(inst.ReencodeTag) == "" {
 			return nil, fmt.Errorf("%s: enabling tag-after-reencode needs a tag name", inst.Name)
@@ -183,6 +201,7 @@ func (s *Server) arrGet(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"id": id, "penalties": report, "penalty_ack": inst.PenaltyAck,
+		"webhook": s.arrWebhookInfo(id),
 	})
 }
 
@@ -211,4 +230,35 @@ func (s *Server) arrAck(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+// POST /api/v1/arr/{id}/regenerate-webhook-token — the only way
+// webhook_token ever changes (see mergeArrInstances), and the only
+// endpoint that ever reveals it: the response carries the new token in
+// the clear (Settings shows it once, with a copy button, then goes back
+// to masking it like every other GET) since the user needs it to paste
+// into Sonarr/Radarr's webhook connection. Invalidates whatever's
+// currently pasted there immediately.
+func (s *Server) arrRegenerateWebhookToken(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	found := false
+	token := randomWebhookToken()
+	err := s.cfg.Update(func(c *config.Config) {
+		for i := range c.ArrInstances {
+			if c.ArrInstances[i].ID == id {
+				c.ArrInstances[i].WebhookToken = token
+				found = true
+				break
+			}
+		}
+	})
+	if err != nil {
+		fail(w, 500, err)
+		return
+	}
+	if !found {
+		fail(w, 404, fmt.Errorf("no instance %q", id))
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "token": token})
 }

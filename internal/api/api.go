@@ -151,7 +151,11 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/v1/arr/{id}/test", s.arrTest)
 	mux.HandleFunc("POST /api/v1/arr/{id}/ack", s.arrAck)
 	mux.HandleFunc("POST /api/v1/arr/{id}/rename-tag", s.arrRenameTag)
+	mux.HandleFunc("POST /api/v1/arr/{id}/regenerate-webhook-token", s.arrRegenerateWebhookToken)
 	mux.HandleFunc("POST /api/v1/arr/sync", s.arrSyncNow)
+	// authenticated by its own per-instance token (see arrWebhook),
+	// so app-wide auth must leave it reachable.
+	mux.HandleFunc("POST /api/v1/hooks/arr/{instanceID}", s.arrWebhook)
 
 	// previews
 	mux.HandleFunc("GET /api/v1/previews", s.listPreviews)

@@ -85,6 +85,13 @@ type Config struct {
 	// ArrInstances: any number of Sonarr and Radarr connections. See
 	// internal/arr for the client and for the design.
 	ArrInstances []ArrInstance `json:"arr_instances"`
+
+	// WebhookBaseURL overrides the host:port Settings shows in front of
+	// each instance's webhook path. Blank means "use whatever
+	// origin the browser is loaded from" (computed client-side) — only
+	// needed when that's wrong for Sonarr/Radarr, e.g. they see this
+	// container under a different Docker-network hostname.
+	WebhookBaseURL string `json:"webhook_base_url,omitempty"`
 }
 
 // ArrInstance is one connected Sonarr or Radarr.
@@ -146,6 +153,34 @@ type ArrInstance struct {
 	// the whole series) after a successful re-encode. Off by
 	// default.
 	UnmonitorAfterReencode *bool `json:"unmonitor_after_reencode,omitempty"`
+
+	// WebhookToken authenticates POST /api/v1/hooks/arr/{id}: Sonarr/Radarr
+	// send it as the HTTP Basic password (any username). Generated once
+	// on instance create; masked like APIKey, regenerated only via its
+	// own endpoint (arrRegenerateWebhookToken) — a blank value on a
+	// plain settings save must never erase it, same convention as the key.
+	WebhookToken string `json:"webhook_token,omitempty"`
+	// WebhookIntake: a Download event creates a settling intake row
+	// instead of just refreshing the file's recommendation. Off
+	// by default — connecting the webhook at all is opt-in, and letting
+	// it queue unattended is a second, separate opt-in on top of that.
+	WebhookIntake *bool `json:"webhook_intake,omitempty"`
+	// WebhookSettleMinutes is how long a Download-triggered intake row
+	// waits before it's eligible to promote; see .WebhookSettleMinutesOn().
+	WebhookSettleMinutes int `json:"webhook_settle_minutes,omitempty"`
+}
+
+// WebhookIntakeOn reports the effective setting (default OFF).
+func (a ArrInstance) WebhookIntakeOn() bool {
+	return a.WebhookIntake != nil && *a.WebhookIntake
+}
+
+// WebhookSettleMinutesOn reports the effective delay (default 30).
+func (a ArrInstance) WebhookSettleMinutesOn() int {
+	if a.WebhookSettleMinutes > 0 {
+		return a.WebhookSettleMinutes
+	}
+	return 30
 }
 
 // RescanAfterReplaceOn reports the effective setting (default on).

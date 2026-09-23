@@ -146,6 +146,17 @@ func (s *Store) SetIntakeQueued(id, jobID int64) error {
 	return err
 }
 
+// DismissOpenIntakeForFile dismisses fileID's open (waiting or
+// needs_confirmation) row, if it has one — used when a webhook reports
+// the file itself was deleted, so a stale row doesn't try to
+// queue an encode for a file that's gone.
+func (s *Store) DismissOpenIntakeForFile(fileID int64) error {
+	_, err := s.dbW.Exec(`UPDATE intake SET state=?, hold_reason='file deleted', updated_at=?
+		WHERE file_id=? AND state IN ('waiting','needs_confirmation')`,
+		IntakeDismissed, nowRFC(), fileID)
+	return err
+}
+
 // CountIntakeNeedsConfirmation is a cheap count for the nav badge.
 func (s *Store) CountIntakeNeedsConfirmation() (int, error) {
 	var n int

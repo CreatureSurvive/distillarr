@@ -700,6 +700,44 @@ func (s *Store) GetFileByPath(p string) (*File, error) {
 	return f, err
 }
 
+// MarkMissingByPath flags a file gone without deleting its row — same
+// convention as the scanner's own missing-file handling, used by the
+// arr webhook when Sonarr/Radarr reports a file deleted, and by
+// ClearOldPath for a rename's old path.
+func (s *Store) MarkMissingByPath(path string) error {
+	_, err := s.dbW.Exec(`UPDATE files SET missing=1, updated_at=? WHERE path=?`, nowRFC(), path)
+	return err
+}
+
+// RenameFilePath re-keys a file row in place after Sonarr/Radarr reports
+// a rename (Rename webhook), so the file's id, history and
+// arr_items linkage survive instead of waiting for the next scan to
+// notice a "new" file at the new path. A row already sitting at newPath
+// is dropped first so the rename can't collide with the path PRIMARY
+// KEY — same convention as the Jellyfin cache's own RenamePath. Also
+// re-keys the Jellyfin cache row, since Jellyfin's own scan lags behind.
+func (s *Store) RenameFilePath(oldPath, newPath string) error {
+	if oldPath == "" || newPath == "" || oldPath == newPath {
+		return nil
+	}
+	tx, err := s.dbW.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := tx.Exec(`DELETE FROM files WHERE path=?`, newPath); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`UPDATE files SET path=?, updated_at=? WHERE path=?`, newPath, nowRFC(), oldPath); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	_ = s.RenamePath(oldPath, newPath)
+	return nil
+}
+
 // Streams returns the stream rows for a file.
 func (s *Store) Streams(fileID int64) ([]Stream, error) {
 	rows, err := s.dbR.Query(`SELECT id, file_id, kind, stream_index, codec, lang, title,

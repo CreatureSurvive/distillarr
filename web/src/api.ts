@@ -454,6 +454,9 @@ export type Config = {
   jellyfin_key_set?: boolean;
   jellyfin_path_map: string;
   arr_instances: ArrInstance[];
+  // Override for the host:port Settings shows in front of each webhook
+  // path. Blank = use the browser's own origin.
+  webhook_base_url?: string;
 };
 
 // One connected Sonarr or Radarr. api_key is never sent by the server
@@ -477,12 +480,22 @@ export type ArrInstance = {
   tag_after_reencode?: boolean;
   reencode_tag?: string;
   unmonitor_after_reencode?: boolean;
+
+  // Webhook. webhook_token is never sent by a plain save (see
+  // webhook_token_set) — it's revealed only once, in
+  // api.arrRegenerateWebhookToken()'s response. webhook_intake is off by
+  // default: connecting the webhook and letting it queue unattended are
+  // two separate opt-ins.
+  webhook_token_set?: boolean;
+  webhook_intake?: boolean;
+  webhook_settle_minutes?: number;
 };
 
 export type ArrPenalty = { profile: string; custom_format: string; score: number; matches: string; terms: string[] };
 export type ArrNamingWarning = { field: string; template: string };
 export type ArrPenaltyReport = { penalties: ArrPenalty[] | null; naming_warnings: ArrNamingWarning[] | null };
-export type ArrInfo = { id: string; penalties: ArrPenaltyReport; penalty_ack: boolean };
+export type ArrWebhookInfo = { last_received?: string; auth_fails: number };
+export type ArrInfo = { id: string; penalties: ArrPenaltyReport; penalty_ack: boolean; webhook: ArrWebhookInfo };
 
 export type ArrFileInfo = {
   instance_id: string;
@@ -712,6 +725,7 @@ export const api = {
   arrSync: () => post<{ started: boolean; syncing?: boolean }>("/api/v1/arr/sync"),
   arrRenameTag: (id: string, oldName: string, newName: string) =>
     post<{ ok: boolean; renamed?: boolean; error?: string }>(`/api/v1/arr/${id}/rename-tag`, { old_name: oldName, new_name: newName }),
+  arrRegenerateWebhookToken: (id: string) => post<{ ok: boolean; token: string }>(`/api/v1/arr/${id}/regenerate-webhook-token`),
 
   preview: (id: string) => req<Preview>(`/api/v1/previews/${id}`),
   previews: () => req<{ previews: Preview[] }>("/api/v1/previews"),

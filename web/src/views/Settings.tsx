@@ -1,6 +1,6 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { api, subscribe, type ArrInfo, type ArrInstance, type ArrTestResult, type Config, type HwInfo, type JfStatus, type JfTest, type TrashItem } from "../api";
-import { Seg, Toggle, toast } from "../components";
+import { Copyable, Seg, Toggle, toast } from "../components";
 import { ago, backendLabel, bytes } from "../format";
 import { qualityWord } from "../options";
 import type { LiveState } from "../App";
@@ -275,6 +275,37 @@ type ArrDraft = ArrInstance & { keyInput: string };
 // fields locally; Save/Remove always sends the whole list, since the
 // server's PUT replaces arr_instances wholesale (an id left out is
 // removed) — a blank key on an existing id keeps what's already saved.
+// Lets Settings show the right host:port in front of a webhook path when
+// this container's own visible address differs from what the browser is
+// loaded from (e.g. Sonarr/Radarr reach it under a Docker-network
+// hostname). Blank keeps the default (the browser's own origin).
+function WebhookBaseURLField({ cfg, setCfg }: { cfg: Config; setCfg: (c: Config) => void }) {
+  const [v, setV] = useState(cfg.webhook_base_url || "");
+  const [saving, setSaving] = useState(false);
+  useEffect(() => setV(cfg.webhook_base_url || ""), [cfg.webhook_base_url]);
+  const save = async () => {
+    setSaving(true);
+    try {
+      setCfg(await api.saveConfig({ webhook_base_url: v }));
+      toast("Saved");
+    } catch (e: any) {
+      toast(e.message, "err");
+    } finally {
+      setSaving(false);
+    }
+  };
+  return (
+    <label className="field" style={{ marginBottom: 14 }}>
+      <span>Webhook base URL override <span className="dim">(blank = use this browser's own address)</span></span>
+      <div className="toolbar" style={{ marginTop: 0 }}>
+        <input className="input mono" value={v} onChange={(e) => setV(e.target.value)}
+          placeholder={window.location.origin} spellCheck={false} style={{ flex: 1 }} />
+        <button className="btn mini" onClick={save} disabled={saving || v === (cfg.webhook_base_url || "")}>Save</button>
+      </div>
+    </label>
+  );
+}
+
 function ArrSection({ cfg, setCfg }: { cfg: Config; setCfg: (c: Config) => void }) {
   const [drafts, setDrafts] = useState<ArrDraft[]>(() => cfg.arr_instances.map((a) => ({ ...a, keyInput: "" })));
   const [results, setResults] = useState<Record<number, ArrTestResult | null>>({});
@@ -286,6 +317,10 @@ function ArrSection({ cfg, setCfg }: { cfg: Config; setCfg: (c: Config) => void 
   // it in Sonarr/Radarr too when the user edits reencode_tag.
   const [savedTags, setSavedTags] = useState<Record<string, string>>({});
   const [renaming, setRenaming] = useState<Record<string, boolean>>({});
+  // Revealed webhook tokens, in-memory only — the server never echoes
+  // one back except right after (re)generating it.
+  const [revealedTokens, setRevealedTokens] = useState<Record<string, string>>({});
+  const [generatingToken, setGeneratingToken] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
     setDrafts(cfg.arr_instances.map((a) => ({ ...a, keyInput: "" })));
@@ -316,7 +351,23 @@ function ArrSection({ cfg, setCfg }: { cfg: Config; setCfg: (c: Config) => void 
     api_key: d.keyInput || undefined, path_map: d.path_map, enabled: d.enabled,
     tag_after_reencode: d.tag_after_reencode, reencode_tag: d.reencode_tag,
     unmonitor_after_reencode: d.unmonitor_after_reencode,
+    webhook_intake: d.webhook_intake, webhook_settle_minutes: d.webhook_settle_minutes,
   });
+
+  const generateWebhookToken = async (id: string) => {
+    setGeneratingToken((g) => ({ ...g, [id]: true }));
+    try {
+      const r = await api.arrRegenerateWebhookToken(id);
+      setRevealedTokens((m) => ({ ...m, [id]: r.token }));
+      const info = await api.arrGet(id);
+      setInfo((m) => ({ ...m, [id]: info }));
+      toast("New webhook token generated — copy it now, Distillarr won't show it again");
+    } catch (e: any) {
+      toast(e.message, "err");
+    } finally {
+      setGeneratingToken((g) => ({ ...g, [id]: false }));
+    }
+  };
 
   const renameTag = async (id: string, oldName: string, newName: string) => {
     setRenaming((r) => ({ ...r, [id]: true }));
@@ -387,9 +438,10 @@ function ArrSection({ cfg, setCfg }: { cfg: Config; setCfg: (c: Config) => void 
       <p className="dim small">
         Optional. Connect any number of Sonarr and Radarr instances (a 4K
         Radarr fits fine alongside a regular one) to see what they know
-        about a file, and later — nothing yet — to tell them about
-        replaced files.
+        about a file, rescan them after a replace, and optionally tag,
+        unmonitor or auto-queue imports through a webhook.
       </p>
+      {drafts.some((d) => d.id) && <WebhookBaseURLField cfg={cfg} setCfg={setCfg} />}
       {drafts.map((d, i) => {
         const test = results[i];
         const inst = d.id ? info[d.id] : undefined;
@@ -475,6 +527,53 @@ function ArrSection({ cfg, setCfg }: { cfg: Config; setCfg: (c: Config) => void 
                 creates the tag there if it doesn't exist yet. Unmonitoring targets the specific episode/movie, never
                 the whole series.
               </div>
+            </div>
+            <div className="panel" style={{ marginTop: 10, marginBottom: 0 }}>
+              <h4 style={{ margin: "0 0 8px", fontSize: 13 }}>Webhook <span className="dim">(optional — off by default)</span></h4>
+              {!d.id ? (
+                <div className="small dim">Save this instance first to get its webhook URL and token.</div>
+              ) : (
+                <>
+                  <div className="field">
+                    <span>URL to paste into {d.kind === "sonarr" ? "Sonarr" : "Radarr"} → Settings → Connect → Webhook</span>
+                    <Copyable text={`${cfg.webhook_base_url || window.location.origin}/api/v1/hooks/arr/${d.id}`} />
+                  </div>
+                  <div className="small dim">Username: anything. Password: the token below.</div>
+                  <div className="field" style={{ marginTop: 8 }}>
+                    <span>Token</span>
+                    {revealedTokens[d.id] ? (
+                      <Copyable text={revealedTokens[d.id]} />
+                    ) : (
+                      <div className="toolbar" style={{ marginTop: 0 }}>
+                        <span className="dim small">{d.webhook_token_set ? "Generated · hidden" : "Not generated yet"}</span>
+                        <button className="btn mini" disabled={generatingToken[d.id]} onClick={() => d.id && generateWebhookToken(d.id)}>
+                          {generatingToken[d.id] ? "Generating…" : d.webhook_token_set ? "Regenerate" : "Generate"}
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                  <div className="form-grid" style={{ marginTop: 8 }}>
+                    <div className="field">
+                      <Toggle on={!!d.webhook_intake} onChange={(v) => update(i, { webhook_intake: v })}
+                        label="Auto-queue imports after a settle delay" />
+                    </div>
+                    <label className="field"><span>Settle delay (minutes)</span>
+                      <input className="input" type="number" min={0} value={d.webhook_settle_minutes ?? 30}
+                        onChange={(e) => update(i, { webhook_settle_minutes: parseInt(e.target.value) || 0 })}
+                        disabled={!d.webhook_intake} style={{ width: 100 }} />
+                    </label>
+                  </div>
+                  <div className="small dim" style={{ marginTop: 6 }}>
+                    An import/upgrade always refreshes that file's recommendation. With auto-queue on, it also opens a
+                    settling entry in the Queue page's intake panel, which becomes eligible to run once the delay
+                    passes (see Queue → Needs confirmation / Waiting). Last webhook received:{" "}
+                    {inst?.webhook.last_received ? ago(inst.webhook.last_received) : "never"}.
+                    {(inst?.webhook.auth_fails || 0) > 0 && (
+                      <span className="warm"> · {inst!.webhook.auth_fails} failed auth attempt{inst!.webhook.auth_fails === 1 ? "" : "s"} since restart</span>
+                    )}
+                  </div>
+                </>
+              )}
             </div>
             <div className="toolbar">
               <button className="btn" onClick={() => testOne(i)} disabled={testing[i]}>{testing[i] ? "Testing…" : "Test connection"}</button>

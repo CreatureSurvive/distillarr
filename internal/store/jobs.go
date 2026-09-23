@@ -430,6 +430,28 @@ func (s *Store) HasQueuedForFile(path string) (bool, error) {
 	return n > 0, err
 }
 
+// OpenJobIDsForFile lists every non-terminal job for a file (by id, not
+// path — a webhook delete resolves to a file row first), for a caller to
+// cancel one by one through jobs.Engine.Cancel (which needs to reach the
+// engine's own in-flight cancel funcs, not just flip a status column).
+func (s *Store) OpenJobIDsForFile(fileID int64) ([]int64, error) {
+	rows, err := s.dbR.Query(`SELECT id FROM jobs WHERE file_id=? AND status IN
+		('queued','running','verifying','replacing')`, fileID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		out = append(out, id)
+	}
+	return out, rows.Err()
+}
+
 // RetryJob requeues a failed/canceled job with fresh attempts.
 func (s *Store) RetryJob(id int64) error {
 	res, err := s.dbW.Exec(`UPDATE jobs SET status='queued', attempts=0, error='', error_tail='',
@@ -446,6 +468,5 @@ func (s *Store) RetryJob(id int64) error {
 // ClearOldPath hides the row for a path that was renamed by a
 // container change (the new path has its own row).
 func (s *Store) ClearOldPath(path string) error {
-	_, err := s.dbW.Exec(`UPDATE files SET missing=1, updated_at=? WHERE path=?`, nowRFC(), path)
-	return err
+	return s.MarkMissingByPath(path)
 }
