@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"mediatrans/internal/config"
+	"mediatrans/internal/encode"
 	"mediatrans/internal/issues"
 	"mediatrans/internal/recs"
 	"mediatrans/internal/res"
@@ -40,7 +41,10 @@ type Decision struct {
 	Action  string `json:"action"` // queue | queue_override | quick_fix | ignore
 	Codec   string `json:"codec,omitempty"`
 	Quality int    `json:"quality,omitempty"`
-	Reason  string `json:"reason"`
+	// AudioRules is the rule's audio-policy override (per-rule
+	// override, RuleAction.AudioRules); nil means "use the global policy".
+	AudioRules map[string]encode.AudioRule `json:"audio_rules,omitempty"`
+	Reason     string                      `json:"reason"`
 }
 
 // Evaluate walks rules in order and returns the first enabled match.
@@ -55,7 +59,7 @@ func Evaluate(f *store.File, rec recs.Recommendation, policy *recs.Policy, ctx C
 		if matches(f, rec, policy, ctx, r.When) {
 			return Decision{
 				RuleID: r.ID, Rule: r.Name, Action: r.Then.Kind,
-				Codec: r.Then.Codec, Quality: r.Then.Quality,
+				Codec: r.Then.Codec, Quality: r.Then.Quality, AudioRules: r.Then.AudioRules,
 				Reason: fmt.Sprintf("rule %q matched", r.Name),
 			}
 		}

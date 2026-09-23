@@ -178,6 +178,9 @@ func (p *intakePromoter) promoteOne(st *store.Store, row store.Intake) {
 				if d.Quality > 0 {
 					settings.Quality = d.Quality
 				}
+				if d.AudioRules != nil {
+					settings.AudioRules = d.AudioRules
+				}
 			}
 			// The rule engine decided this, not whatever put the row in
 			// intake, so the job says so — also what MoveJob keys

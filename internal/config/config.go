@@ -75,6 +75,10 @@ type Config struct {
 	// only AudioPCMTarget and the built-in MP4-safety fallback apply, as
 	// before audio rules existed. See encode.AudioRule.
 	AudioRules map[string]encode.AudioRule `json:"audio_rules,omitempty"`
+	// AddStereoCompat adds an AAC 2.0 track, downmixed with a
+	// centre-weighted pan filter, whenever a file would otherwise keep no
+	// stereo/mono track at all. Off by default. See encode.Settings.AddStereoCompat.
+	AddStereoCompat bool `json:"add_stereo_compat,omitempty"`
 	// CropBars crops detected black bars out of the output. Off by
 	// default: films that switch aspect ratio (IMAX scenes) could lose
 	// picture if the sampled frames missed the wider scenes.
@@ -179,6 +183,11 @@ type RuleAction struct {
 	Kind    string `json:"kind"` // queue | queue_override | quick_fix | ignore
 	Codec   string `json:"codec,omitempty"`
 	Quality int    `json:"quality,omitempty"`
+	// AudioRules overrides the global audio policy for files this rule
+	// matches, same shape as Config.AudioRules/encode.Settings.AudioRules
+	// (keyed by source codec_name, plus the virtual "pcm" key). Only applies
+	// with Kind == "queue_override"; nil means "use the global policy".
+	AudioRules map[string]encode.AudioRule `json:"audio_rules,omitempty"`
 }
 
 // AutoRule is one ordered entry in Config.AutoRules.

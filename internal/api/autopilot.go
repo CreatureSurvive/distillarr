@@ -155,6 +155,9 @@ func (s *Server) autopilotBacklog(w http.ResponseWriter, r *http.Request) {
 			if d.Quality > 0 {
 				settings.Quality = d.Quality
 			}
+			if d.AudioRules != nil {
+				settings.AudioRules = d.AudioRules
+			}
 		}
 		if blocked, _ := s.codecPenaltyBlocked(f, settings); blocked {
 			return nil // would just land in needs_confirmation, not real backlog work
