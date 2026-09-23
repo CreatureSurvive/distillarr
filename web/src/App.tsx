@@ -22,6 +22,7 @@ export type LiveState = {
   previewVersion: number;
   jfVersion: number;
   arrVersion: number;
+  intakeVersion: number;
   notes: Record<number, string>;
 };
 
@@ -35,9 +36,10 @@ const NAV = [
 
 export default function App() {
   const [live, setLive] = useState<LiveState>({
-    progress: {}, activeJobs: [], scan: null, queueVersion: 0, hwVersion: 0, previewVersion: 0, jfVersion: 0, arrVersion: 0, notes: {},
+    progress: {}, activeJobs: [], scan: null, queueVersion: 0, hwVersion: 0, previewVersion: 0, jfVersion: 0, arrVersion: 0, intakeVersion: 0, notes: {},
   });
   const [jf, setJf] = useState<JfStatus | null>(null);
+  const [needsConfirmation, setNeedsConfirmation] = useState(0);
 
   useEffect(() => {
     const refresh = () => api.jobs("running,verifying,replacing").then(({ jobs }) => setLive((l) => ({ ...l, activeJobs: jobs }))).catch(() => {});
@@ -68,6 +70,8 @@ export default function App() {
         if (data?.done || data?.error) setLive((l) => ({ ...l, jfVersion: l.jfVersion + 1 }));
       } else if (event === "arr") {
         if (data?.done) setLive((l) => ({ ...l, arrVersion: l.arrVersion + 1 }));
+      } else if (event === "intake") {
+        setLive((l) => ({ ...l, intakeVersion: l.intakeVersion + 1 }));
       }
     });
     return () => {
@@ -79,6 +83,10 @@ export default function App() {
   useEffect(() => {
     api.jellyfinStatus().then(setJf).catch(() => setJf(null));
   }, [live.jfVersion]);
+
+  useEffect(() => {
+    api.intake("needs_confirmation").then((r) => setNeedsConfirmation(r.rows.length)).catch(() => {});
+  }, [live.intakeVersion]);
 
   const running = live.activeJobs.length;
 
@@ -97,7 +105,10 @@ export default function App() {
             <NavLink key={n.to} to={n.to} end={n.end} className={({ isActive }) => `nav-link${isActive ? " active" : ""}`}>
               <span className="nav-glyph" aria-hidden>{n.icon}</span>
               <span className="nav-text">{n.label}</span>
-              {n.to === "/queue" && running > 0 && <span className="nav-badge">{running}</span>}
+              {n.to === "/queue" && needsConfirmation > 0 && (
+                <span className="nav-badge nav-badge-warn" title="Needs confirmation">{needsConfirmation}</span>
+              )}
+              {n.to === "/queue" && needsConfirmation === 0 && running > 0 && <span className="nav-badge">{running}</span>}
             </NavLink>
           ))}
         </nav>

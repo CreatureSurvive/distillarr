@@ -127,6 +127,13 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/v1/queue/resume", s.queueResume)
 	mux.HandleFunc("POST /api/v1/queue/clear", s.queueClear)
 
+	// intake: settle delay + needs-confirmation holding area
+	mux.HandleFunc("GET /api/v1/intake", s.intakeList)
+	mux.HandleFunc("POST /api/v1/intake/{id}/approve", s.intakeApprove)
+	mux.HandleFunc("POST /api/v1/intake/{id}/dismiss", s.intakeDismiss)
+	mux.HandleFunc("POST /api/v1/intake/approve", s.intakeApproveBulk)
+	mux.HandleFunc("POST /api/v1/intake/dismiss", s.intakeDismissBulk)
+
 	// trash
 	mux.HandleFunc("GET /api/v1/trash", s.listTrash)
 	mux.HandleFunc("POST /api/v1/trash/{id}/restore", s.restoreTrash)

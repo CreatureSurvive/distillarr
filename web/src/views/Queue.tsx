@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactNode } from "react";
-import { api, subscribe, type Config, type Job, type MeasureStatus, type Schedule } from "../api";
+import { api, subscribe, type Config, type IntakeRow, type Job, type MeasureStatus, type Schedule } from "../api";
 import { Copyable, Empty, Seg, Toggle, toast } from "../components";
 import { HistoryStatsPanel } from "./Stats";
 import { ago, backendLabel, bytes, DAY_LABELS, dur, minutesToHM } from "../format";
@@ -65,6 +65,8 @@ export default function Queue({ live }: { live: LiveState }) {
             ? "Processing: new encodes start as workers free up."
             : "Outside your processing window. Queued jobs wait; “Run now” skips the wait."}
       </div>
+
+      <IntakePanel live={live} />
 
       {config && <ScheduleTimeline config={config} onSaved={setConfig} />}
       {config && <MeasurePanel config={config} onSaved={setConfig} live={live} />}
@@ -157,6 +159,108 @@ export default function Queue({ live }: { live: LiveState }) {
         </ul>
       )}
     </div>
+  );
+}
+
+// holding area: files waiting out a settle delay before an
+// unattended queue, or waiting on a human because something needs
+// confirming first (currently only "hardlinked"). Nothing creates these
+// rows yet — that's the webhook — so this is normally empty.
+function IntakePanel({ live }: { live: LiveState }) {
+  const [needsConfirmation, setNeedsConfirmation] = useState<IntakeRow[]>([]);
+  const [waiting, setWaiting] = useState<IntakeRow[]>([]);
+  const [waitingOpen, setWaitingOpen] = useState(false);
+  const [busy, setBusy] = useState<Record<number, boolean>>({});
+
+  const load = () => {
+    api.intake("needs_confirmation").then((r) => setNeedsConfirmation(r.rows)).catch(() => {});
+    api.intake("waiting").then((r) => setWaiting(r.rows)).catch(() => {});
+  };
+  useEffect(load, [live.intakeVersion]);
+  useEffect(() => {
+    const t = setInterval(load, 30000); // waiting countdowns drift otherwise
+    return () => clearInterval(t);
+  }, []);
+
+  const act = async (id: number, fn: () => Promise<unknown>, msg: string) => {
+    setBusy((b) => ({ ...b, [id]: true }));
+    try {
+      await fn();
+      toast(msg);
+      load();
+    } catch (e: any) {
+      toast(e.message, "err");
+    } finally {
+      setBusy((b) => ({ ...b, [id]: false }));
+    }
+  };
+
+  if (needsConfirmation.length === 0 && waiting.length === 0) return null;
+
+  return (
+    <section className="panel">
+      {needsConfirmation.length > 0 && (
+        <>
+          <div className="panel-head">
+            <h2 className="panel-title" style={{ fontSize: 15 }}>Needs confirmation <span className="count">{needsConfirmation.length}</span></h2>
+            <button className="btn mini"
+              onClick={() => Promise.all(needsConfirmation.map((r) => api.intakeApprove(r.id))).then(() => { toast("Approved all"); load(); }).catch((e) => toast(e.message, "err"))}>
+              Approve all
+            </button>
+          </div>
+          <ul className="jobs">
+            {needsConfirmation.map((r) => (
+              <li key={r.id} className="job">
+                <div className="job-main">
+                  <div className="job-title">
+                    <a href={`#/file/${r.file_id}`}>{r.file_title || r.file_path?.split("/").pop() || `file ${r.file_id}`}</a>
+                    <span className="tag" title={r.reason || r.origin}>{r.origin}</span>
+                  </div>
+                  <div className="job-meta mono dim">
+                    <span className="warm">{r.hold_reason === "hardlinked" ? "shares its data with another link (likely still seeding)" : r.hold_reason}</span>
+                  </div>
+                </div>
+                <div className="job-actions">
+                  <button className="btn mini" disabled={busy[r.id]} onClick={() => act(r.id, () => api.intakeApprove(r.id), "Queued")}>Approve</button>
+                  <button className="btn mini btn-danger" disabled={busy[r.id]} onClick={() => act(r.id, () => api.intakeDismiss(r.id), "Dismissed")}>Dismiss</button>
+                </div>
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
+      {waiting.length > 0 && (
+        <div style={{ marginTop: needsConfirmation.length > 0 ? 14 : 0 }}>
+          <button className="btn mini" onClick={() => setWaitingOpen((o) => !o)}>
+            {waitingOpen ? "▾" : "▸"} Waiting <span className="count">{waiting.length}</span>
+          </button>
+          {waitingOpen && (
+            <ul className="jobs" style={{ marginTop: 8 }}>
+              {waiting.map((r) => {
+                const secLeft = r.not_before ? (Date.parse(r.not_before) - Date.now()) / 1000 : 0;
+                return (
+                  <li key={r.id} className="job">
+                    <div className="job-main">
+                      <div className="job-title">
+                        <a href={`#/file/${r.file_id}`}>{r.file_title || r.file_path?.split("/").pop() || `file ${r.file_id}`}</a>
+                        <span className="tag" title={r.reason || r.origin}>{r.origin}</span>
+                      </div>
+                      <div className="job-meta mono dim">
+                        <span>{secLeft > 0 ? `settling · ${dur(secLeft)} left` : "settling · due any moment"}</span>
+                      </div>
+                    </div>
+                    <div className="job-actions">
+                      <button className="btn mini" disabled={busy[r.id]} onClick={() => act(r.id, () => api.intakeApprove(r.id), "Queued")}>Queue now</button>
+                      <button className="btn mini btn-danger" disabled={busy[r.id]} onClick={() => act(r.id, () => api.intakeDismiss(r.id), "Dismissed")}>Dismiss</button>
+                    </div>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </div>
+      )}
+    </section>
   );
 }
 

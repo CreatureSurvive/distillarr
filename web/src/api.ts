@@ -350,6 +350,24 @@ export type Job = {
   reason?: string;
 };
 
+// A candidate waiting for a settle delay or a human decision before
+// it's queued unattended.
+export type IntakeRow = {
+  id: number;
+  file_id: number;
+  origin: string;
+  reason?: string;
+  settings_json?: string;
+  state: "waiting" | "needs_confirmation" | "queued" | "dismissed";
+  not_before?: string;
+  hold_reason?: string;
+  job_id?: number;
+  created_at: string;
+  updated_at: string;
+  file_path?: string;
+  file_title?: string;
+};
+
 export type Progress = {
   job_id: number;
   pct: number;
@@ -663,6 +681,12 @@ export const api = {
   retryJob: (id: number, confirm_hardlinked = false) =>
     post<{ ok: boolean }>(`/api/v1/jobs/${id}/retry`, confirm_hardlinked ? { confirm_hardlinked } : undefined),
   runNowJob: (id: number) => post<{ ok: boolean }>(`/api/v1/jobs/${id}/run-now`),
+
+  intake: (state?: string) => req<{ rows: IntakeRow[] }>(`/api/v1/intake?${qs({ state })}`),
+  intakeApprove: (id: number) => post<{ ok: boolean }>(`/api/v1/intake/${id}/approve`),
+  intakeDismiss: (id: number) => post<{ ok: boolean }>(`/api/v1/intake/${id}/dismiss`),
+  intakeApproveBulk: (ids: number[]) => post<{ approved: number; failed: number }>("/api/v1/intake/approve", { ids }),
+  intakeDismissBulk: (ids: number[]) => post<{ dismissed: number }>("/api/v1/intake/dismiss", { ids }),
   moveJob: (id: number, before: number) => post<{ ok: boolean }>(`/api/v1/jobs/${id}/move`, { before }),
   queueSummary: () =>
     req<{ counts: Record<string, number>; realized_saved: number; jobs_done: number; window_open: boolean; paused: boolean }>(

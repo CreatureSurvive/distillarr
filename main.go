@@ -159,6 +159,12 @@ func main() {
 	cropStop := make(chan struct{})
 	defer close(cropStop)
 	go sc.CropLoop(cropStop)
+	// Intake promotion: a settle delay or a human decision before
+	// something unattended gets queued. Rows come from the arr
+	// webhook and autopilot.
+	intakeStop := make(chan struct{})
+	defer close(intakeStop)
+	go srv.IntakeLoop(intakeStop)
 	// Recommendations depend on settings + hardware + calibration;
 	// recompute once at boot so cached ones never go stale.
 	go func() {

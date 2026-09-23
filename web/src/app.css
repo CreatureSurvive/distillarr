@@ -22,6 +22,7 @@
   font: 600 10px/16px var(--font-mono); min-width: 16px; text-align: center;
   color: var(--bg-deep); background: var(--teal); border-radius: 8px; padding: 0 4px;
 }
+.nav-badge-warn { background: var(--amber); }
 
 .main { flex: 1; padding: 16px 14px 96px; min-width: 0; }
 .shell:has(.deck) .main { padding-bottom: 150px; }

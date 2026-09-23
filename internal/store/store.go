@@ -233,6 +233,18 @@ var alters = []string{
 		scene_name TEXT NOT NULL DEFAULT '',
 		synced_at TEXT NOT NULL)`,
 	`CREATE INDEX IF NOT EXISTS arr_items_instance ON arr_items(instance_id)`,
+	`CREATE TABLE IF NOT EXISTS intake(
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		file_id INTEGER NOT NULL REFERENCES files(id) ON DELETE CASCADE,
+		origin TEXT NOT NULL, reason TEXT NOT NULL DEFAULT '',
+		settings_json TEXT NOT NULL DEFAULT '',
+		state TEXT NOT NULL,
+		not_before TEXT NOT NULL DEFAULT '',
+		hold_reason TEXT NOT NULL DEFAULT '',
+		job_id INTEGER NOT NULL DEFAULT 0,
+		created_at TEXT NOT NULL, updated_at TEXT NOT NULL)`,
+	`CREATE INDEX IF NOT EXISTS intake_file ON intake(file_id)`,
+	`CREATE INDEX IF NOT EXISTS intake_state ON intake(state)`,
 }
 
 func (s *Store) migrate() error {
