@@ -118,8 +118,13 @@ func (c autopilotBacklogFile) valuePerSec() float64 {
 func (s *Server) autopilotBacklog(w http.ResponseWriter, r *http.Request) {
 	dryRun := r.URL.Query().Get("dry_run") != "false"
 	cfg := s.cfg.Get()
-	budgetBytes := int64(cfg.AutopilotBudgetGB * (1 << 30))
-	budgetSecs := cfg.AutopilotBudgetHours * 3600
+	pressure := s.diskPressure.Load()
+	mult := 1.0
+	if pressure {
+		mult = cfg.PressureBudgetX()
+	}
+	budgetBytes := int64(cfg.AutopilotBudgetGB * mult * (1 << 30))
+	budgetSecs := cfg.AutopilotBudgetHours * mult * 3600
 
 	var candidates []autopilotBacklogFile
 	err := s.st.EachFile(func(f *store.File) error {
@@ -168,7 +173,18 @@ func (s *Server) autopilotBacklog(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Under disk pressure, quick fixes (remuxes, done in seconds) sort
+	// ahead of everything else regardless of value per GPU-second — see
+	// — with value per GPU-second still
+	// deciding order within each group.
 	sort.SliceStable(candidates, func(i, j int) bool {
+		if pressure {
+			qi := candidates[i].Action == "quick_fix"
+			qj := candidates[j].Action == "quick_fix"
+			if qi != qj {
+				return qi
+			}
+		}
 		return candidates[i].valuePerSec() > candidates[j].valuePerSec()
 	})
 
@@ -203,14 +219,16 @@ func (s *Server) autopilotBacklog(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{
-		"dry_run":          dryRun,
-		"budget_gb":        cfg.AutopilotBudgetGB,
-		"budget_hours":     cfg.AutopilotBudgetHours,
-		"total_candidates": len(candidates),
-		"selected_count":   len(picked),
-		"est_saved_gb":     float64(spentBytes) / (1 << 30),
-		"est_hours":        spentSecs / 3600,
-		"queued_intake":    queued,
-		"selected":         picked,
+		"dry_run":           dryRun,
+		"budget_gb":         cfg.AutopilotBudgetGB,
+		"budget_hours":      cfg.AutopilotBudgetHours,
+		"disk_pressure":     pressure,
+		"budget_multiplier": mult,
+		"total_candidates":  len(candidates),
+		"selected_count":    len(picked),
+		"est_saved_gb":      float64(spentBytes) / (1 << 30),
+		"est_hours":         spentSecs / 3600,
+		"queued_intake":     queued,
+		"selected":          picked,
 	})
 }

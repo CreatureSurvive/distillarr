@@ -43,6 +43,11 @@ type intakePromoter struct {
 	// used only to rank autopilot-origin jobs by value per GPU-second
 	// wired to jobs.Engine.EstimateSeconds.
 	estimateSeconds func(f *store.File, settings encode.Settings) (secs float64, estimated bool)
+	// pressure reports whether disk-pressure mode is currently on
+	// used to bias autopilotPriority toward quick fixes. nil
+	// (as in every older test that builds this struct by literal)
+	// means "not under pressure".
+	pressure func() bool
 }
 
 func (s *Server) newIntakePromoter() *intakePromoter {
@@ -60,6 +65,7 @@ func (s *Server) newIntakePromoter() *intakePromoter {
 		},
 		codecPenaltyBlocked: s.codecPenaltyBlocked,
 		estimateSeconds:     s.eng.EstimateSeconds,
+		pressure:            s.diskPressure.Load,
 	}
 }
 
@@ -179,7 +185,8 @@ func (p *intakePromoter) promoteOne(st *store.Store, row store.Intake) {
 			priority := 0
 			if p.estimateSeconds != nil {
 				secs, _ := p.estimateSeconds(f, settings)
-				priority = autopilotPriority(f.Size-rec.EstOut, secs)
+				pressure := p.pressure != nil && p.pressure()
+				priority = autopilotPriority(f.Size-rec.EstOut, secs, d.Action == "quick_fix", pressure)
 			}
 			p.enqueueNow(st, row, f, settings, "autopilot", priority)
 			return
@@ -204,16 +211,31 @@ const (
 // to autopilotPriorityBase, while every autopilot job still sorts after
 // manual's flat 100000 default. 0 means "no override" — callers
 // treat it as "leave CreateJob's default alone".
-func autopilotPriority(savedBytes int64, secs float64) int {
+//
+// Under disk pressure, quickFix jobs are confined to the front
+// half of the range and everything else to the back half: a remux
+// frees space in seconds, so it beats a multi-hour re-encode on space
+// freed *now*, regardless of value per GPU-second. Outside pressure,
+// quickFix is ignored and the full range is used exactly as before.
+func autopilotPriority(savedBytes int64, secs float64, quickFix, pressure bool) int {
+	lo, hi := autopilotPriorityBase, autopilotPriorityMax
+	if pressure {
+		mid := lo + (hi-lo)/2
+		if quickFix {
+			hi = mid
+		} else {
+			lo = mid + 1
+		}
+	}
 	if savedBytes <= 0 || secs <= 0 {
-		return autopilotPriorityMax
+		return hi
 	}
-	p := autopilotPriorityBase + int(1e9/(float64(savedBytes)/secs))
-	if p <= autopilotPriorityBase {
-		p = autopilotPriorityBase + 1
+	p := lo + int(1e9/(float64(savedBytes)/secs))
+	if p <= lo {
+		p = lo + 1
 	}
-	if p > autopilotPriorityMax {
-		p = autopilotPriorityMax
+	if p > hi {
+		p = hi
 	}
 	return p
 }

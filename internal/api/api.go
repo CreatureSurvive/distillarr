@@ -27,14 +27,14 @@ import (
 
 // Server wires every subsystem into HTTP routes.
 type Server struct {
-	st   *store.Store
-	cfg  *config.Manager
-	scan *scan.Scanner
-	eng  *jobs.Engine
+	st    *store.Store
+	cfg   *config.Manager
+	scan  *scan.Scanner
+	eng   *jobs.Engine
 	prev  *preview.Manager
 	still *still.Manager
 	hub   *Hub
-	ui   fs.FS // embedded frontend (web/dist)
+	ui    fs.FS // embedded frontend (web/dist)
 
 	// scanWasRunning is scan.Stats.Running as of the last Progress call,
 	// used to fire the post-scan arr sync on the true->false transition
@@ -43,6 +43,13 @@ type Server struct {
 	// detection here, that fires a full arr sync on every job completion
 	// instead of once per actual library scan.
 	scanWasRunning atomic.Bool
+
+	// diskPressure is the last state DiskPressureLoop computed:
+	// true once any library's filesystem is at or below
+	// Config.DiskPressurePct. Read by autopilotBacklog (budget
+	// multiplier, quick-fix-first ordering) and the intake promoter
+	// (job priority), and reported by GET /api/v1/system.
+	diskPressure atomic.Bool
 }
 
 func NewServer(st *store.Store, cfg *config.Manager, sc *scan.Scanner,
@@ -234,11 +241,12 @@ func (s *Server) system(w http.ResponseWriter, r *http.Request) {
 	}
 	checked, total, bars := s.st.CropProgress()
 	writeJSON(w, http.StatusOK, map[string]any{
-		"crop":        map[string]int{"checked": checked, "total": total, "with_bars": bars},
-		"media":       diskUsage("/srv/media"),
-		"config":      diskUsage("/config"),
-		"trash_bytes": trashBytes,
-		"trash_count": len(items),
+		"crop":          map[string]int{"checked": checked, "total": total, "with_bars": bars},
+		"media":         diskUsage("/srv/media"),
+		"config":        diskUsage("/config"),
+		"trash_bytes":   trashBytes,
+		"trash_count":   len(items),
+		"disk_pressure": s.diskPressure.Load(),
 	})
 }
 

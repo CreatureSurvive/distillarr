@@ -453,7 +453,7 @@ func TestAutopilotPriority(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			if got := autopilotPriority(c.savedBytes, c.secs); got != c.want {
+			if got := autopilotPriority(c.savedBytes, c.secs, false, false); got != c.want {
 				t.Errorf("autopilotPriority(%d, %v) = %d, want %d", c.savedBytes, c.secs, got, c.want)
 			}
 		})
@@ -461,10 +461,32 @@ func TestAutopilotPriority(t *testing.T) {
 
 	// Higher value per GPU-second must sort first (a smaller priority
 	// number, since ClaimNext orders ascending).
-	better := autopilotPriority(10<<30, 60)  // 10 GiB saved in a minute
-	worse := autopilotPriority(1<<30, 3600)  // 1 GiB saved over an hour
+	better := autopilotPriority(10<<30, 60, false, false) // 10 GiB saved in a minute
+	worse := autopilotPriority(1<<30, 3600, false, false) // 1 GiB saved over an hour
 	if !(autopilotPriorityBase < better && better < worse && worse <= autopilotPriorityMax) {
 		t.Errorf("want base < better(%d) < worse(%d) <= max, got out of order", better, worse)
+	}
+}
+
+// TestAutopilotPriorityUnderPressureQuickFixFirst: under disk
+// pressure, a quick fix must outrank a real re-encode even when the
+// re-encode's value per GPU-second is far higher — freeing space now
+// matters more than value per GPU-second while the disk is tight.
+func TestAutopilotPriorityUnderPressureQuickFixFirst(t *testing.T) {
+	quickFix := autopilotPriority(1<<20, 5, true, true)       // tiny savings, a few seconds
+	bigReencode := autopilotPriority(50<<30, 60, false, true) // huge value per GPU-second
+	if !(quickFix < bigReencode) {
+		t.Errorf("under pressure, quick fix (%d) must outrank a big re-encode (%d)", quickFix, bigReencode)
+	}
+	if !(autopilotPriorityBase < quickFix && bigReencode <= autopilotPriorityMax) {
+		t.Errorf("both must still stay within (base, max]: quickFix=%d bigReencode=%d", quickFix, bigReencode)
+	}
+	// Outside pressure, the same two jobs sort purely by value per
+	// GPU-second, so the big re-encode now wins.
+	quickFixNoPressure := autopilotPriority(1<<20, 5, true, false)
+	bigReencodeNoPressure := autopilotPriority(50<<30, 60, false, false)
+	if !(bigReencodeNoPressure < quickFixNoPressure) {
+		t.Errorf("without pressure, value per GPU-second must decide: bigReencode=%d quickFix=%d", bigReencodeNoPressure, quickFixNoPressure)
 	}
 }
 

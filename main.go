@@ -164,6 +164,10 @@ func main() {
 	intakeStop := make(chan struct{})
 	defer close(intakeStop)
 	go srv.IntakeLoop(intakeStop)
+	// Disk-pressure mode: off unless the user sets a threshold.
+	pressureStop := make(chan struct{})
+	defer close(pressureStop)
+	go srv.DiskPressureLoop(pressureStop)
 	// Recommendations depend on settings + hardware + calibration;
 	// recompute once at boot so cached ones never go stale.
 	go func() {
