@@ -39,6 +39,18 @@ const (
 	EvHW       = "hardware"
 )
 
+// Hidden-file naming: new installs use the Distillarr-branded prefix;
+// existing installs may still have files under the old mediatrans one
+// (temp files get swept either way, and an existing manual-hold
+// directory keeps being used rather than splitting one folder's held
+// files across two names).
+const (
+	tempPrefixNew    = ".distillarr-"
+	tempPrefixLegacy = ".mediatrans-"
+	manualDirNew     = ".distillarr-manual"
+	manualDirLegacy  = ".mediatrans-manual"
+)
+
 // Engine owns the queue runtime.
 type Engine struct {
 	st   *store.Store
@@ -369,7 +381,7 @@ func (e *Engine) runJob(j *store.Job, resume bool) {
 			e.fail(j, err.Error(), "")
 			return
 		}
-		tempPath = filepath.Join(filepath.Dir(j.SrcPath), fmt.Sprintf(".mediatrans-%d.%s.tmp", j.ID, c))
+		tempPath = filepath.Join(filepath.Dir(j.SrcPath), fmt.Sprintf("%s%d.%s.tmp", tempPrefixNew, j.ID, c))
 	}
 	// A neural job is not one ffmpeg command (see encode.PlanNeural): its
 	// "primary" is the final mux, which carries the container and stream counts
@@ -936,6 +948,13 @@ func (e *Engine) housekeepingLoop() {
 	}
 }
 
+// isStaleTempName matches a temp encode's filename under either prefix
+// (see the naming constants above).
+func isStaleTempName(name string) bool {
+	return (strings.HasPrefix(name, tempPrefixNew) || strings.HasPrefix(name, tempPrefixLegacy)) &&
+		strings.HasSuffix(name, ".tmp")
+}
+
 func (e *Engine) sweepStaleTemps() {
 	keep := map[string]bool{}
 	if active, err := e.st.ActiveJobs(); err == nil {
@@ -948,10 +967,10 @@ func (e *Engine) sweepStaleTemps() {
 			if err != nil {
 				return nil
 			}
-			if d.IsDir() && d.Name() == ".mediatrans-manual" {
+			if d.IsDir() && (d.Name() == manualDirNew || d.Name() == manualDirLegacy) {
 				return filepath.SkipDir
 			}
-			if !d.IsDir() && strings.HasPrefix(d.Name(), ".mediatrans-") && strings.HasSuffix(d.Name(), ".tmp") && !keep[path] {
+			if !d.IsDir() && isStaleTempName(d.Name()) && !keep[path] {
 				removeTemp(path)
 			}
 			return nil
@@ -1045,11 +1064,22 @@ func removeTemp(p string) {
 	}
 }
 
+// manualDirFor picks the manual-hold subdirectory for a file's directory:
+// an already-existing legacy one is reused, so one folder's held files
+// never get split across both names; otherwise the new name is used.
+func manualDirFor(dir string) string {
+	if fi, err := os.Stat(filepath.Join(dir, manualDirLegacy)); err == nil && fi.IsDir() {
+		return manualDirLegacy
+	}
+	return manualDirNew
+}
+
 func moveToManual(p string) {
 	if p == "" {
 		return
 	}
-	dst := filepath.Join(filepath.Dir(p), ".mediatrans-manual", filepath.Base(p))
+	dir := filepath.Dir(p)
+	dst := filepath.Join(dir, manualDirFor(dir), filepath.Base(p))
 	_ = os.MkdirAll(filepath.Dir(dst), 0o755)
 	_ = os.Rename(p, dst)
 }

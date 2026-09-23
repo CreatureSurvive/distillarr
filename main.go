@@ -40,9 +40,14 @@ func webFS() fs.FS {
 }
 
 func main() {
-	listen := envOr("MEDIIATRANS_LISTEN", ":8080")
-	dbPath := envOr("MEDIIATRANS_DB", "/config/mediatrans.db")
-	prevRoot := envOr("MEDIIATRANS_PREVIEWS", "/config/previews")
+	listen := envOrLegacy("DISTILLARR_LISTEN", "MEDIIATRANS_LISTEN", ":8080")
+	dbPath := envOrLegacy("DISTILLARR_DB", "MEDIIATRANS_DB", "")
+	if dbPath == "" {
+		_, legacyErr := os.Stat("/config/mediatrans.db")
+		dbPath = chooseDefaultDB(legacyErr == nil)
+	}
+	log.Printf("database: %s", dbPath)
+	prevRoot := envOrLegacy("DISTILLARR_PREVIEWS", "MEDIIATRANS_PREVIEWS", "/config/previews")
 
 	if err := os.MkdirAll(filepath.Dir(dbPath), 0o755); err != nil {
 		log.Fatalf("config dir: %v", err)
@@ -191,4 +196,27 @@ func envOr(k, def string) string {
 		return v
 	}
 	return def
+}
+
+// envOrLegacy reads a Distillarr-named env var, falling back to the old
+// mediiatrans-named one (existing installs), then to def.
+func envOrLegacy(newKey, legacyKey, def string) string {
+	if v := os.Getenv(newKey); v != "" {
+		return v
+	}
+	if v := os.Getenv(legacyKey); v != "" {
+		return v
+	}
+	return def
+}
+
+// chooseDefaultDB picks the DB path for a fresh install: distillarr.db,
+// unless an existing mediatrans.db is already there (an upgrade), in
+// which case that one keeps being used so the app never forks into two
+// separate databases on the same host.
+func chooseDefaultDB(legacyExists bool) string {
+	if legacyExists {
+		return "/config/mediatrans.db"
+	}
+	return "/config/distillarr.db"
 }

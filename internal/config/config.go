@@ -99,7 +99,7 @@ func Default() Config {
 		AudioPCMTarget:     "flac",
 		TrashEnabled:       true,
 		TrashDays:          14,
-		TrashDir:           "/srv/media/.mediatrans-trash",
+		TrashDir:           "/srv/media/.distillarr-trash",
 		DefaultSpeed:       "medium",
 		JellyfinPathMap:    "/data=/srv/media",
 		MaxAttempts:        3,

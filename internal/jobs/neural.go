@@ -20,6 +20,9 @@ import (
 // NeuralRoot holds each neural job's chunks between runs. It sits on the config
 // volume: chunks must survive a container restart, that being the point.
 var NeuralRoot = func() string {
+	if v := os.Getenv("DISTILLARR_UPSCALE_WORK"); v != "" {
+		return v
+	}
 	if v := os.Getenv("MEDIIATRANS_UPSCALE_WORK"); v != "" {
 		return v
 	}

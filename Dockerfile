@@ -1,5 +1,5 @@
 # ============================================================
-# mediiatrans — media analysis & transcoding platform
+# Distillarr — media analysis & transcoding platform
 # ============================================================
 # Stage 1: React/Vite frontend  → static dist
 # Stage 2: Go backend           → static binary with embedded UI
@@ -113,8 +113,10 @@ RUN echo "=== ffmpeg ===" && ffmpeg -version | head -1 && \
 
 ENV LIBVA_DRIVERS_PATH="/usr/lib/x86_64-linux-gnu/dri" \
     LIBVA_DRIVER_NAME="iHD" \
-    MEDIIATRANS_LISTEN=":8080" \
-    MEDIIATRANS_DB="/config/mediatrans.db"
+    DISTILLARR_LISTEN=":8080"
+# No baked-in DB path: main.go picks distillarr.db for a fresh /config,
+# or keeps using an existing mediatrans.db (upgrades). Don't reintroduce
+# a hardcoded MEDIIATRANS_DB/DISTILLARR_DB default here.
 
 COPY --from=build /out/mediatrans /usr/local/bin/mediatrans
 COPY --from=vmaf /ffmpeg-vmaf /usr/local/bin/ffmpeg-vmaf
