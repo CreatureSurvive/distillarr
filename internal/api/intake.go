@@ -7,7 +7,9 @@ import (
 	"net/http"
 	"time"
 
+	"mediatrans/internal/autopilot"
 	"mediatrans/internal/encode"
+	"mediatrans/internal/issues"
 	"mediatrans/internal/recs"
 	"mediatrans/internal/store"
 )
@@ -22,6 +24,14 @@ type intakePromoter struct {
 	getFile func(fileID int64) (*store.File, error)
 	resolve func(f *store.File, override *encode.Settings) (encode.Settings, recs.Recommendation)
 	enqueue func(f *store.File, st encode.Settings, origin, reason string) (*store.Job, error)
+	// autopilot returns nil when autopilot is off (the plain
+	// recommendation-only behavior below applies); non-nil is the
+	// autopilot rule engine's decision for this file (the codec-penalty
+	// gate must also be respected).
+	autopilot func(f *store.File, rec recs.Recommendation, origin string) *autopilot.Decision
+	// quickFix builds the video-copy/remux settings for an autopilot
+	// "quick_fix" action.
+	quickFix func(f *store.File) encode.Settings
 }
 
 func (s *Server) newIntakePromoter() *intakePromoter {
@@ -33,13 +43,41 @@ func (s *Server) newIntakePromoter() *intakePromoter {
 		enqueue: func(f *store.File, st encode.Settings, origin, reason string) (*store.Job, error) {
 			return s.enqueue(f, st, false, origin, reason)
 		},
+		autopilot: s.autopilotDecision,
+		quickFix: func(f *store.File) encode.Settings {
+			return issues.QuickFix(f, s.cfg.Get())
+		},
 	}
 }
 
-// promoteOne re-probes the row's file, then walks the same three gates
-// for both a waiting row past its settle delay and a needs_confirmation
-// row being rechecked: hardlinked -> needs_confirmation, the
-// recommendation says skip -> dismissed, otherwise -> queued.
+// autopilotDecision returns nil when autopilot is off; otherwise
+// resolves the file's arr policy and tag names (autopilot.Evaluate is
+// pure and DB-free, so that resolution has to happen here) and runs the
+// rule engine.
+func (s *Server) autopilotDecision(f *store.File, rec recs.Recommendation, origin string) *autopilot.Decision {
+	cfg := s.cfg.Get()
+	if !cfg.AutopilotEnabled {
+		return nil
+	}
+	policy := recs.ArrPolicy(f.ID)
+	var tagNames []string
+	if item, err := s.st.ArrItemByFileID(f.ID); err == nil && item != nil {
+		names := s.st.ArrTags(item.InstanceID)
+		for _, id := range item.TagIDs() {
+			if n, ok := names[id]; ok {
+				tagNames = append(tagNames, n)
+			}
+		}
+	}
+	d := autopilot.Evaluate(f, rec, policy, autopilot.Context{Origin: origin, TagNames: tagNames}, cfg.AutoRules, cfg.MinSavingsPct)
+	return &d
+}
+
+// promoteOne re-probes the row's file, then walks the same gates for
+// both a waiting row past its settle delay and a needs_confirmation row
+// being rechecked: file gone -> dismissed; hardlinked -> needs_confirmation;
+// otherwise autopilot (if on) or the plain recommendation decides
+// queue / queue_override / quick_fix / ignore.
 func (p *intakePromoter) promoteOne(st *store.Store, row store.Intake) {
 	f, err := p.getFile(row.FileID)
 	if err != nil || f == nil {
@@ -68,11 +106,36 @@ func (p *intakePromoter) promoteOne(st *store.Store, row store.Intake) {
 		}
 	}
 	settings, rec := p.resolve(f, override)
+
+	if p.autopilot != nil {
+		if d := p.autopilot(f, rec, row.Origin); d != nil {
+			switch d.Action {
+			case "ignore":
+				_ = st.SetIntakeState(row.ID, store.IntakeDismissed, d.Reason)
+				return
+			case "quick_fix":
+				settings = p.quickFix(f)
+			case "queue_override":
+				if d.Codec != "" {
+					settings.Codec = encode.Codec(d.Codec)
+				}
+				if d.Quality > 0 {
+					settings.Quality = d.Quality
+				}
+			}
+			p.enqueueNow(st, row, f, settings)
+			return
+		}
+	}
+
 	if rec.Action == "skip" {
 		_ = st.SetIntakeState(row.ID, store.IntakeDismissed, rec.Reason)
 		return
 	}
+	p.enqueueNow(st, row, f, settings)
+}
 
+func (p *intakePromoter) enqueueNow(st *store.Store, row store.Intake, f *store.File, settings encode.Settings) {
 	j, err := p.enqueue(f, settings, row.Origin, row.Reason)
 	if err != nil {
 		log.Printf("intake: enqueue %s: %v", f.Path, err)

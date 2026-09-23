@@ -92,6 +92,47 @@ type Config struct {
 	// needed when that's wrong for Sonarr/Radarr, e.g. they see this
 	// container under a different Docker-network hostname.
 	WebhookBaseURL string `json:"webhook_base_url,omitempty"`
+
+	// AutopilotEnabled turns on rule-driven unattended queueing,
+	// off by default. AutoRules are evaluated in order, first match
+	// wins; see internal/autopilot.Evaluate, which takes these directly
+	// (the types live here, not in internal/autopilot, since autopilot
+	// imports internal/recs which imports this package — the types
+	// can't live on the far side of that edge without a cycle).
+	AutopilotEnabled bool       `json:"autopilot_enabled,omitempty"`
+	AutoRules        []AutoRule `json:"auto_rules,omitempty"`
+}
+
+// RuleMatch: every set field must match (AND) for the rule to apply. An
+// empty/zero field means "don't care" — except Animation, which is a
+// real tri-state (nil = don't care, non-nil = must equal).
+type RuleMatch struct {
+	Libraries     []string `json:"libraries,omitempty"`  // "movies" | "tvshows"
+	Instances     []string `json:"instances,omitempty"`  // arr instance display names
+	Tags          []string `json:"tags,omitempty"`       // resolved arr tag names
+	Origins       []string `json:"origins,omitempty"`    // intake origin: webhook | autopilot | playback | manual
+	SrcCodecs     []string `json:"src_codecs,omitempty"` // h264, hevc, ...
+	ResClasses    []int    `json:"res_classes,omitempty"` // 480/576/720/1080/2160
+	MinSavingsPct int      `json:"min_savings_pct,omitempty"`
+	MinAgeDays    int      `json:"min_age_days,omitempty"`
+	IssueKeys     []string `json:"issue_keys,omitempty"`
+	Animation     *bool    `json:"animation,omitempty"`
+}
+
+// RuleAction: what to do once When matches.
+type RuleAction struct {
+	Kind    string `json:"kind"` // queue | queue_override | quick_fix | ignore
+	Codec   string `json:"codec,omitempty"`
+	Quality int    `json:"quality,omitempty"`
+}
+
+// AutoRule is one ordered entry in Config.AutoRules.
+type AutoRule struct {
+	ID      string    `json:"id"`
+	Name    string    `json:"name"`
+	Enabled bool      `json:"enabled"`
+	When    RuleMatch `json:"when"`
+	Then    RuleAction `json:"then"`
 }
 
 // ArrInstance is one connected Sonarr or Radarr.

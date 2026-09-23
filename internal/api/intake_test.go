@@ -5,6 +5,8 @@ import (
 	"testing"
 	"time"
 
+	"mediatrans/internal/autopilot"
+	"mediatrans/internal/config"
 	"mediatrans/internal/encode"
 	"mediatrans/internal/recs"
 	"mediatrans/internal/store"
@@ -253,6 +255,175 @@ var errFakeReprobe = fakeErr("reprobe failed")
 type fakeErr string
 
 func (e fakeErr) Error() string { return string(e) }
+
+// ---- autopilot hook ----
+
+func TestPromoteOneAutopilotIgnoreDismisses(t *testing.T) {
+	st := newTestServer(t).st
+	row := newIntakeRow(t, st, store.IntakeWaiting, time.Now().Add(-time.Minute))
+
+	enqueueCalled := false
+	p := &intakePromoter{
+		now:     time.Now,
+		reprobe: func(string) error { return nil },
+		getFile: func(id int64) (*store.File, error) { return fakeFile(id, 1), nil },
+		resolve: func(f *store.File, override *encode.Settings) (encode.Settings, recs.Recommendation) {
+			return encode.Settings{}, recs.Recommendation{Action: "transcode"}
+		},
+		enqueue: func(f *store.File, st encode.Settings, origin, reason string) (*store.Job, error) {
+			enqueueCalled = true
+			return &store.Job{ID: 1}, nil
+		},
+		autopilot: func(f *store.File, rec recs.Recommendation, origin string) *autopilot.Decision {
+			return &autopilot.Decision{Action: "ignore", Reason: "rule X says skip"}
+		},
+	}
+	p.promoteOne(st, row)
+
+	got, err := st.IntakeByID(row.ID)
+	if err != nil || got == nil {
+		t.Fatalf("IntakeByID: %v", err)
+	}
+	if got.State != store.IntakeDismissed || got.HoldReason != "rule X says skip" {
+		t.Fatalf("got %+v, want dismissed with the autopilot reason", got)
+	}
+	if enqueueCalled {
+		t.Error("an autopilot ignore decision must never enqueue")
+	}
+}
+
+func TestPromoteOneAutopilotQueueOverrideAppliesCodecAndQuality(t *testing.T) {
+	st := newTestServer(t).st
+	row := newIntakeRow(t, st, store.IntakeWaiting, time.Now().Add(-time.Minute))
+
+	var gotSettings encode.Settings
+	p := &intakePromoter{
+		now:     time.Now,
+		reprobe: func(string) error { return nil },
+		getFile: func(id int64) (*store.File, error) { return fakeFile(id, 1), nil },
+		resolve: func(f *store.File, override *encode.Settings) (encode.Settings, recs.Recommendation) {
+			return encode.Settings{Codec: "hevc", Quality: 50}, recs.Recommendation{Action: "transcode"}
+		},
+		enqueue: func(f *store.File, st encode.Settings, origin, reason string) (*store.Job, error) {
+			gotSettings = st
+			return &store.Job{ID: 9}, nil
+		},
+		autopilot: func(f *store.File, rec recs.Recommendation, origin string) *autopilot.Decision {
+			return &autopilot.Decision{Action: "queue_override", Codec: "av1", Quality: 80, Reason: "rule Y forces AV1"}
+		},
+	}
+	p.promoteOne(st, row)
+
+	if gotSettings.Codec != "av1" || gotSettings.Quality != 80 {
+		t.Fatalf("got settings %+v, want the override codec/quality applied", gotSettings)
+	}
+	got, err := st.IntakeByID(row.ID)
+	if err != nil || got == nil {
+		t.Fatalf("IntakeByID: %v", err)
+	}
+	if got.State != store.IntakeQueued {
+		t.Fatalf("state = %v, want queued", got.State)
+	}
+}
+
+func TestPromoteOneAutopilotQuickFixUsesQuickFixSettings(t *testing.T) {
+	st := newTestServer(t).st
+	row := newIntakeRow(t, st, store.IntakeWaiting, time.Now().Add(-time.Minute))
+
+	quickFixCalled := false
+	var gotSettings encode.Settings
+	p := &intakePromoter{
+		now:     time.Now,
+		reprobe: func(string) error { return nil },
+		getFile: func(id int64) (*store.File, error) { return fakeFile(id, 1), nil },
+		resolve: func(f *store.File, override *encode.Settings) (encode.Settings, recs.Recommendation) {
+			return encode.Settings{Codec: "hevc"}, recs.Recommendation{Action: "transcode"}
+		},
+		enqueue: func(f *store.File, st encode.Settings, origin, reason string) (*store.Job, error) {
+			gotSettings = st
+			return &store.Job{ID: 3}, nil
+		},
+		autopilot: func(f *store.File, rec recs.Recommendation, origin string) *autopilot.Decision {
+			return &autopilot.Decision{Action: "quick_fix", Reason: "rule Z quick-fixes"}
+		},
+		quickFix: func(f *store.File) encode.Settings {
+			quickFixCalled = true
+			return encode.Settings{VideoCopy: true}
+		},
+	}
+	p.promoteOne(st, row)
+
+	if !quickFixCalled {
+		t.Fatal("a quick_fix decision must call the quickFix builder")
+	}
+	if !gotSettings.VideoCopy {
+		t.Fatalf("got settings %+v, want VideoCopy from the quick-fix builder", gotSettings)
+	}
+}
+
+// When autopilot is off (the function field returns nil, matching the
+// production wiring's AutopilotEnabled=false case), behavior must be
+// exactly the older recommendation-only path.
+func TestPromoteOneAutopilotOffFallsBackToPlainRecommendation(t *testing.T) {
+	st := newTestServer(t).st
+	row := newIntakeRow(t, st, store.IntakeWaiting, time.Now().Add(-time.Minute))
+
+	p := &intakePromoter{
+		now:     time.Now,
+		reprobe: func(string) error { return nil },
+		getFile: func(id int64) (*store.File, error) { return fakeFile(id, 1), nil },
+		resolve: func(f *store.File, override *encode.Settings) (encode.Settings, recs.Recommendation) {
+			return encode.Settings{}, recs.Recommendation{Action: "skip", Reason: "not worth it"}
+		},
+		enqueue: func(f *store.File, st encode.Settings, origin, reason string) (*store.Job, error) {
+			t.Fatal("must not enqueue: a skip recommendation with autopilot off")
+			return nil, nil
+		},
+		autopilot: func(f *store.File, rec recs.Recommendation, origin string) *autopilot.Decision { return nil },
+	}
+	p.promoteOne(st, row)
+
+	got, err := st.IntakeByID(row.ID)
+	if err != nil || got == nil {
+		t.Fatalf("IntakeByID: %v", err)
+	}
+	if got.State != store.IntakeDismissed || got.HoldReason != "not worth it" {
+		t.Fatalf("got %+v, want the plain-recommendation dismiss path", got)
+	}
+}
+
+// GET /api/v1/files/{id} includes an autopilot preview when enabled.
+func TestFileDetailIncludesAutopilotWhenEnabled(t *testing.T) {
+	s := newTestServer(t)
+	f := mustUpsert(t, s.st, &store.File{
+		Path: "/m/a.mkv", Library: "movies", Title: "A", VideoCodec: "h264",
+		Size: 4_000_000_000, Duration: 3600, Width: 1920, Height: 1080,
+	})
+	if err := s.cfg.Update(func(c *config.Config) { c.AutopilotEnabled = true }); err != nil {
+		t.Fatal(err)
+	}
+
+	rec := doJSON(t, s, "GET", "/api/v1/files/"+strconv.FormatInt(f.ID, 10), nil)
+	if rec.Code != 200 {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	if !contains(rec.Body.String(), `"autopilot"`) {
+		t.Errorf("body = %s, want an autopilot field with autopilot_enabled=true", rec.Body.String())
+	}
+}
+
+func TestFileDetailOmitsAutopilotWhenDisabled(t *testing.T) {
+	s := newTestServer(t)
+	f := mustUpsert(t, s.st, &store.File{Path: "/m/a.mkv", Library: "movies", Title: "A"})
+
+	rec := doJSON(t, s, "GET", "/api/v1/files/"+strconv.FormatInt(f.ID, 10), nil)
+	if rec.Code != 200 {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	if contains(rec.Body.String(), `"autopilot"`) {
+		t.Error("autopilot_enabled defaults off: the field must be absent, not just empty")
+	}
+}
 
 // ---- HTTP handlers ----
 

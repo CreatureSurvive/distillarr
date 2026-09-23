@@ -461,7 +461,17 @@ func (s *Server) fileDetail(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"file": fo, "streams": streams})
+	resp := map[string]any{"file": fo, "streams": streams}
+	if s.cfg.Get().AutopilotEnabled {
+		_, rec := s.resolve(f, nil)
+		// "manual" here just means "not evaluated as part of an intake
+		// row" — this is a file-page preview of what autopilot would
+		// decide, not a real promotion.
+		if d := s.autopilotDecision(f, rec, "manual"); d != nil {
+			resp["autopilot"] = d
+		}
+	}
+	writeJSON(w, http.StatusOK, resp)
 }
 
 // planReq is used by plan/queue/preview: nil settings = recommendation.
