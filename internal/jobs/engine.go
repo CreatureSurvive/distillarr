@@ -866,6 +866,37 @@ func (e *Engine) ResolveFor(pref string, c encode.Codec) encode.Backend {
 	return e.resolveBackend(e.Report(), encode.Settings{Backend: encode.Backend(pref), Codec: c}, pref)
 }
 
+// defaultRealtimeFactor is EstimateSeconds's fallback "source seconds
+// encoded per wall-clock second" when there's no speed history yet for a
+// bucket — deliberately worse than any real encoder on this host, so a
+// cold estimate never promises autopilot more GPU-time than it has.
+const defaultRealtimeFactor = 0.15
+
+// EstimateSeconds predicts wall-clock encode time for f under settings,
+// from this (backend, device, codec, resolution class) bucket's realized
+// speed history (see RecordSpeedSample in runJob). estimated is true when
+// there was no history and the conservative fallback was used instead —
+// callers should show that distinction rather than presenting a guess as
+// a measured figure.
+func (e *Engine) EstimateSeconds(f *store.File, settings encode.Settings) (secs float64, estimated bool) {
+	if f == nil || f.Duration <= 0 {
+		return 0, true
+	}
+	rep := e.Report()
+	if !settings.VideoCopy {
+		settings.Backend = e.resolveBackend(rep, settings, "")
+	}
+	device := ""
+	if rep != nil {
+		device = rep.ActiveDevice(settings.Backend, settings.Codec).Name
+	}
+	key := store.SpeedKey(string(settings.Backend), device, string(settings.Codec), res.Class(f.Width, f.Height))
+	if median, _, ok := e.st.SpeedMedian(key); ok && median > 0 {
+		return f.Duration / median, false
+	}
+	return f.Duration / defaultRealtimeFactor, true
+}
+
 func resolveBackend(rep *hwprobe.Report, s encode.Settings, jobBackend string) encode.Backend {
 	b := s.Backend
 	if b == "" || b == "auto" {

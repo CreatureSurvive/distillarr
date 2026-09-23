@@ -392,6 +392,82 @@ func TestPromoteOneAutopilotOffFallsBackToPlainRecommendation(t *testing.T) {
 	}
 }
 
+// An autopilot-driven queue decision must relabel the job "autopilot"
+// (not the intake row's own origin) and give it a priority above the
+// manual 100000 default, so MoveJob's origin!='autopilot' exclusion and
+// the value-per-GPU-second ordering both actually apply.
+func TestPromoteOneAutopilotQueueSetsAutopilotOriginAndPriority(t *testing.T) {
+	realStore := newTestServer(t).st
+	row := newIntakeRow(t, realStore, store.IntakeWaiting, time.Now().Add(-time.Minute))
+
+	var enqueuedOrigin string
+	p := &intakePromoter{
+		now:     time.Now,
+		reprobe: func(string) error { return nil },
+		getFile: func(id int64) (*store.File, error) { return fakeFile(id, 1), nil },
+		resolve: func(f *store.File, override *encode.Settings) (encode.Settings, recs.Recommendation) {
+			// fakeFile's Size is 0, so EstOut < f.Size never holds — this
+			// exercises the "no real savings signal" branch of
+			// autopilotPriority, still asserting it lands above the base.
+			return encode.Settings{Codec: "hevc"}, recs.Recommendation{Action: "transcode", EstOut: 1 << 30}
+		},
+		enqueue: func(f *store.File, settings encode.Settings, origin, reason string) (*store.Job, error) {
+			enqueuedOrigin = origin
+			j := &store.Job{FileID: f.ID, SrcPath: f.Path, Priority: 100000, Backend: "sw", MaxAttempts: 1, Origin: origin, Reason: reason}
+			return j, realStore.CreateJob(j)
+		},
+		autopilot: func(f *store.File, rec recs.Recommendation, origin string) *autopilot.Decision {
+			return &autopilot.Decision{Action: "queue", Reason: "rule matched"}
+		},
+		estimateSeconds: func(f *store.File, settings encode.Settings) (float64, bool) { return 120, false },
+	}
+	p.promoteOne(realStore, row)
+
+	if enqueuedOrigin != "autopilot" {
+		t.Errorf("enqueue origin = %q, want autopilot", enqueuedOrigin)
+	}
+	got, err := realStore.IntakeByID(row.ID)
+	if err != nil || got == nil || got.State != store.IntakeQueued {
+		t.Fatalf("IntakeByID: %+v, %v", got, err)
+	}
+	j, err := realStore.GetJob(got.JobID)
+	if err != nil || j == nil {
+		t.Fatalf("GetJob: %v", err)
+	}
+	if j.Priority <= autopilotPriorityBase {
+		t.Errorf("job priority = %d, want > %d (manual's default)", j.Priority, autopilotPriorityBase)
+	}
+}
+
+func TestAutopilotPriority(t *testing.T) {
+	cases := []struct {
+		name       string
+		savedBytes int64
+		secs       float64
+		want       int
+	}{
+		{"no savings", 0, 120, autopilotPriorityMax},
+		{"no time", 1 << 30, 0, autopilotPriorityMax},
+		{"negative savings", -100, 120, autopilotPriorityMax},
+		{"clamped to base+1", 1 << 40, 1, autopilotPriorityBase + 1},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := autopilotPriority(c.savedBytes, c.secs); got != c.want {
+				t.Errorf("autopilotPriority(%d, %v) = %d, want %d", c.savedBytes, c.secs, got, c.want)
+			}
+		})
+	}
+
+	// Higher value per GPU-second must sort first (a smaller priority
+	// number, since ClaimNext orders ascending).
+	better := autopilotPriority(10<<30, 60)  // 10 GiB saved in a minute
+	worse := autopilotPriority(1<<30, 3600)  // 1 GiB saved over an hour
+	if !(autopilotPriorityBase < better && better < worse && worse <= autopilotPriorityMax) {
+		t.Errorf("want base < better(%d) < worse(%d) <= max, got out of order", better, worse)
+	}
+}
+
 // GET /api/v1/files/{id} includes an autopilot preview when enabled.
 func TestFileDetailIncludesAutopilotWhenEnabled(t *testing.T) {
 	s := newTestServer(t)

@@ -39,6 +39,10 @@ type intakePromoter struct {
 	// re-encode (not a remux). Never gates approveIntakeRow — that's an
 	// explicit human decision, same as manual queueing elsewhere.
 	codecPenaltyBlocked func(f *store.File, settings encode.Settings) (blocked bool, instanceName string)
+	// estimateSeconds predicts wall-clock encode time from speed history,
+	// used only to rank autopilot-origin jobs by value per GPU-second
+	// wired to jobs.Engine.EstimateSeconds.
+	estimateSeconds func(f *store.File, settings encode.Settings) (secs float64, estimated bool)
 }
 
 func (s *Server) newIntakePromoter() *intakePromoter {
@@ -55,6 +59,7 @@ func (s *Server) newIntakePromoter() *intakePromoter {
 			return issues.QuickFix(f, s.cfg.Get())
 		},
 		codecPenaltyBlocked: s.codecPenaltyBlocked,
+		estimateSeconds:     s.eng.EstimateSeconds,
 	}
 }
 
@@ -168,7 +173,15 @@ func (p *intakePromoter) promoteOne(st *store.Store, row store.Intake) {
 					settings.Quality = d.Quality
 				}
 			}
-			p.enqueueNow(st, row, f, settings)
+			// The rule engine decided this, not whatever put the row in
+			// intake, so the job says so — also what MoveJob keys
+			// off to keep autopilot's ordering out of manual reordering.
+			priority := 0
+			if p.estimateSeconds != nil {
+				secs, _ := p.estimateSeconds(f, settings)
+				priority = autopilotPriority(f.Size-rec.EstOut, secs)
+			}
+			p.enqueueNow(st, row, f, settings, "autopilot", priority)
 			return
 		}
 	}
@@ -177,20 +190,48 @@ func (p *intakePromoter) promoteOne(st *store.Store, row store.Intake) {
 		_ = st.SetIntakeState(row.ID, store.IntakeDismissed, rec.Reason)
 		return
 	}
-	p.enqueueNow(st, row, f, settings)
+	p.enqueueNow(st, row, f, settings, row.Origin, 0)
 }
 
-func (p *intakePromoter) enqueueNow(st *store.Store, row store.Intake, f *store.File, settings encode.Settings) {
+const (
+	autopilotPriorityBase = 100000 // manual jobs' flat default (see Server.enqueue)
+	autopilotPriorityMax  = 199999
+)
+
+// autopilotPriority ranks an autopilot-origin job by estimated value per
+// GPU-second (bytes saved / estimated encode seconds): within autopilot's
+// own share of the queue, the best value gets the priority number closest
+// to autopilotPriorityBase, while every autopilot job still sorts after
+// manual's flat 100000 default. 0 means "no override" — callers
+// treat it as "leave CreateJob's default alone".
+func autopilotPriority(savedBytes int64, secs float64) int {
+	if savedBytes <= 0 || secs <= 0 {
+		return autopilotPriorityMax
+	}
+	p := autopilotPriorityBase + int(1e9/(float64(savedBytes)/secs))
+	if p <= autopilotPriorityBase {
+		p = autopilotPriorityBase + 1
+	}
+	if p > autopilotPriorityMax {
+		p = autopilotPriorityMax
+	}
+	return p
+}
+
+func (p *intakePromoter) enqueueNow(st *store.Store, row store.Intake, f *store.File, settings encode.Settings, origin string, priority int) {
 	if p.codecPenaltyBlocked != nil {
 		if blocked, _ := p.codecPenaltyBlocked(f, settings); blocked {
 			_ = st.SetIntakeState(row.ID, store.IntakeNeedsConfirmation, "codec_penalty")
 			return
 		}
 	}
-	j, err := p.enqueue(f, settings, row.Origin, row.Reason)
+	j, err := p.enqueue(f, settings, origin, row.Reason)
 	if err != nil {
 		log.Printf("intake: enqueue %s: %v", f.Path, err)
 		return
+	}
+	if priority > 0 {
+		_ = st.SetJobPriority(j.ID, priority)
 	}
 	_ = st.SetIntakeQueued(row.ID, j.ID)
 }
