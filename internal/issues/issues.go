@@ -38,6 +38,7 @@ var Types = []Type{
 	{"interlaced", "Interlaced video", Reencode, "Interlaced video shows combing on modern screens unless the player deinterlaces it. Re-encoding deinterlaces once, properly.", "file"},
 	{"worth_reencoding", "Worth re-encoding", Reencode, "Would shrink by at least your savings threshold at your quality target.", "file"},
 	{"quality_limited", "Can't reach quality target", Info, "Measured: no tested setting reached your VMAF target, usually because the source is already heavily compressed. Best left as is.", "file"},
+	{"upgrade_pending", "Upgrade pending", Info, "A connected Sonarr/Radarr instance monitors this file and its quality cutoff isn't met yet, so a better release is probably coming. Skipped so a re-encode isn't wasted on a file about to be replaced.", "file"},
 	{"mixed_season", "Mixed formats in a season", Reencode, "Episodes in the same season use different codecs, containers or resolutions, which can cause inconsistent playback or transcoding.", "season"},
 }
 
@@ -68,7 +69,7 @@ func isMP4(container string) bool {
 
 // Detect returns the issue keys for one file. worth/measuredMiss come
 // from its current recommendation.
-func Detect(f *store.File, worth, measuredMiss bool) []string {
+func Detect(f *store.File, worth, measuredMiss, upgradePending bool) []string {
 	var out []string
 	// Any tag other than hvc1 (hev1, blank-in-MP4 "[0][0][0][0]", ...);
 	// "" means the tag couldn't be read, so don't guess.
@@ -98,6 +99,9 @@ func Detect(f *store.File, worth, measuredMiss bool) []string {
 	}
 	if measuredMiss {
 		out = append(out, "quality_limited")
+	}
+	if upgradePending {
+		out = append(out, "upgrade_pending")
 	}
 	return out
 }

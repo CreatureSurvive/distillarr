@@ -105,6 +105,76 @@ type ArrInstance struct {
 	// codec-penalty warning and wants autopilot to proceed anyway
 	// once autopilot exists. Never set automatically.
 	PenaltyAck bool `json:"penalty_ack,omitempty"`
+
+	// SkipUpgradePending: when a monitored item hasn't met its quality
+	// cutoff, this instance probably expects a better release soon, so
+	// don't spend GPU time on it. Default on; see .SkipUpgradePendingOn().
+	SkipUpgradePending *bool `json:"skip_upgrade_pending,omitempty"`
+	// TagPolicyEnabled: read the tag names below from items synced from
+	// this instance. Default on; see .TagPolicyOn(). Only ever reads
+	// tags the user already set in Sonarr/Radarr — never writes one
+	// (write-back is opt-in).
+	TagPolicyEnabled *bool `json:"tag_policy_enabled,omitempty"`
+	// SkipTag/AV1Tag/HEVCTag/RemuxOnlyTag name the tags that steer a
+	// file's recommendation (see recs.Policy). Blank means "use the
+	// default name"; the defaults are Distillarr-specific ("mt-" for
+	// this project's original name) so they can't collide with a tag the
+	// user already uses for something else in Sonarr/Radarr.
+	SkipTag      string `json:"skip_tag,omitempty"`
+	AV1Tag       string `json:"av1_tag,omitempty"`
+	HEVCTag      string `json:"hevc_tag,omitempty"`
+	RemuxOnlyTag string `json:"remux_only_tag,omitempty"`
+}
+
+// Default tag names for the tag policy; see ArrInstance's tag
+// fields — each is blank until the user overrides it.
+const (
+	DefaultSkipTag      = "mt-skip"
+	DefaultAV1Tag       = "mt-av1"
+	DefaultHEVCTag      = "mt-hevc"
+	DefaultRemuxOnlyTag = "mt-remux-only"
+)
+
+// SkipUpgradePendingOn reports the effective setting (default on).
+func (a ArrInstance) SkipUpgradePendingOn() bool {
+	return a.SkipUpgradePending == nil || *a.SkipUpgradePending
+}
+
+// TagPolicyOn reports the effective setting (default on).
+func (a ArrInstance) TagPolicyOn() bool {
+	return a.TagPolicyEnabled == nil || *a.TagPolicyEnabled
+}
+
+func (a ArrInstance) skipTagName() string {
+	if a.SkipTag != "" {
+		return a.SkipTag
+	}
+	return DefaultSkipTag
+}
+func (a ArrInstance) av1TagName() string {
+	if a.AV1Tag != "" {
+		return a.AV1Tag
+	}
+	return DefaultAV1Tag
+}
+func (a ArrInstance) hevcTagName() string {
+	if a.HEVCTag != "" {
+		return a.HEVCTag
+	}
+	return DefaultHEVCTag
+}
+func (a ArrInstance) remuxOnlyTagName() string {
+	if a.RemuxOnlyTag != "" {
+		return a.RemuxOnlyTag
+	}
+	return DefaultRemuxOnlyTag
+}
+
+// TagNames returns the four policy tag names in a fixed order (skip,
+// av1, hevc, remux-only), for a caller that needs to check membership by
+// name without importing each accessor individually.
+func (a ArrInstance) TagNames() (skip, av1, hevc, remuxOnly string) {
+	return a.skipTagName(), a.av1TagName(), a.hevcTagName(), a.remuxOnlyTagName()
 }
 
 // On reports whether the instance is enabled (default true, so existing

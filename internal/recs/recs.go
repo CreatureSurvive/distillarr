@@ -47,12 +47,29 @@ type Recommendation struct {
 	Samples  int             `json:"calibration_samples"` // real results behind the estimate
 	Measured bool            `json:"measured"`            // quality + size come from a VMAF search on this file
 	Limited  bool            `json:"limited,omitempty"`   // measured: the quality target can't be reached
+	// UpgradePending: a connected Sonarr/Radarr instance monitors this
+	// file and its quality cutoff isn't met yet, so it's skipped rather
+	// than spending GPU time on a file about to be replaced.
+	UpgradePending bool `json:"upgrade_pending,omitempty"`
 }
 
 // JSON serializes for files.rec_json caching.
 func (r Recommendation) JSON() string {
 	b, _ := json.Marshal(r)
 	return string(b)
+}
+
+// Policy is one file's Sonarr/Radarr-derived steering, built from its
+// arr_items row plus the owning instance's config (tag names, toggles).
+// Every field defaults to "no opinion" (Skip/UpgradePending/RemuxOnly
+// false, Codec ""), so a file with no connected instance, or one with
+// tag policy turned off, behaves exactly as it always has.
+type Policy struct {
+	Instance       string // display name, for the recommendation reason
+	UpgradePending bool   // monitored + quality cutoff not met
+	Skip           bool   // tagged with the configured skip tag
+	Codec          string // "hevc" | "av1" | "" — tagged codec override
+	RemuxOnly      bool   // tagged with the configured remux-only tag
 }
 
 // Hooks wired by main.
@@ -66,6 +83,9 @@ var (
 	}
 	// Genres returns Jellyfin genres for a path (nil when unknown).
 	Genres = func(path string) []string { return nil }
+	// ArrPolicy returns a file's Sonarr/Radarr-derived policy, or nil if
+	// no connected instance manages it.
+	ArrPolicy = func(fileID int64) *Policy { return nil }
 )
 
 // ---- size model ----
@@ -280,6 +300,26 @@ func Recommend(f *store.File, cfg config.Config) Recommendation {
 	if f == nil || f.Size <= 0 || f.Duration <= 0 || f.VideoCodec == "" {
 		r.Reason = "No readable video stream."
 		return r
+	}
+	if p := ArrPolicy(f.ID); p != nil {
+		switch {
+		case p.Skip:
+			r.Reason = fmt.Sprintf("Tagged to skip in %s.", p.Instance)
+			return r
+		case p.UpgradePending:
+			r.Reason = fmt.Sprintf("%s expects a better release (quality cutoff not met yet); skipped so a re-encode isn't wasted on a file about to be replaced.", p.Instance)
+			r.UpgradePending = true
+			return r
+		case p.RemuxOnly:
+			r.Reason = fmt.Sprintf("Tagged for quick fixes only in %s.", p.Instance)
+			return r
+		}
+		switch p.Codec {
+		case "hevc":
+			s.Codec = encode.HEVC
+		case "av1":
+			s.Codec = encode.AV1
+		}
 	}
 	if f.HDR == "dolby_vision" {
 		r.Action = "caution"

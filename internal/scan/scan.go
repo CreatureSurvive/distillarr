@@ -229,7 +229,7 @@ func (s *Scanner) probeOne(path string, cfg config.Config) {
 	rec := recs.Recommend(f, cfg)
 	f.TranscodeScore = rec.Score
 	f.RecJSON = rec.JSON()
-	f.Issues = issues.Encode(issues.Detect(f, rec.Action == "transcode", rec.Limited))
+	f.Issues = issues.Encode(issues.Detect(f, rec.Action == "transcode", rec.Limited, rec.UpgradePending))
 
 	if err := s.st.UpsertFile(f, buildStreams(f.ID, p)); err != nil {
 		log.Printf("scan: upsert %s: %v", path, err)
@@ -402,7 +402,7 @@ func (s *Scanner) RefreshRecs() {
 	_ = s.st.EachFile(func(f *store.File) error {
 		r := recs.Recommend(f, cfg)
 		batch[f.ID] = store.RecUpdate{Score: r.Score, Rec: r.JSON(),
-			Issues: issues.Encode(issues.Detect(f, r.Action == "transcode", r.Limited))}
+			Issues: issues.Encode(issues.Detect(f, r.Action == "transcode", r.Limited, r.UpgradePending))}
 		if len(batch) >= 500 {
 			flush()
 		}

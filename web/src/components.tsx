@@ -91,6 +91,7 @@ export const ISSUE_SHORT: Record<string, { label: string; fix: "quick" | "reenco
   interlaced: { label: "interlaced", fix: "reencode" },
   worth_reencoding: { label: "worth re-encoding", fix: "reencode" },
   quality_limited: { label: "can't reach target", fix: "info" },
+  upgrade_pending: { label: "upgrade pending", fix: "info" },
 };
 
 export function issueKeys(f: FileItem): string[] {
