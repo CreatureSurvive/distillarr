@@ -107,6 +107,15 @@ type Config struct {
 	// needed the way the default-on settings above need one.
 	AutopilotBudgetGB    float64 `json:"autopilot_budget_gb,omitempty"`
 	AutopilotBudgetHours float64 `json:"autopilot_budget_hours,omitempty"`
+
+	// DiskPressurePct turns on disk-pressure mode once any
+	// library's filesystem free space drops to this percentage or
+	// below; 0 (the zero-value default) is off.
+	DiskPressurePct float64 `json:"disk_pressure_pct,omitempty"`
+	// DiskPressureBudgetX multiplies the autopilot budget while under
+	// pressure. nil uses the default of 2x — a default-on multiplier,
+	// so it needs the pointer+accessor pattern like PreferMP4/VMAFTarget.
+	DiskPressureBudgetX *float64 `json:"disk_pressure_budget_x,omitempty"`
 }
 
 // RuleMatch: every set field must match (AND) for the rule to apply. An
@@ -483,6 +492,15 @@ func (c Config) VMAF() float64 {
 
 // MP4 reports the effective prefer-MP4 setting (default on).
 func (c Config) MP4() bool { return c.PreferMP4 == nil || *c.PreferMP4 }
+
+// PressureBudgetX reports the effective disk-pressure budget
+// multiplier (default 2x).
+func (c Config) PressureBudgetX() float64 {
+	if c.DiskPressureBudgetX == nil {
+		return 2
+	}
+	return *c.DiskPressureBudgetX
+}
 
 // MapJellyfinPath rewrites a Jellyfin-side path to the local view.
 // JellyfinPathMap is "from=to" where from is Jellyfin's path, i.e. pathmap's

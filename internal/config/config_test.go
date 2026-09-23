@@ -25,3 +25,14 @@ func TestJellyfinPathMapBothWays(t *testing.T) {
 		t.Errorf("no mapping configured means no rewrite, got %q", got)
 	}
 }
+
+func TestPressureBudgetXDefault(t *testing.T) {
+	if got := (Config{}).PressureBudgetX(); got != 2 {
+		t.Errorf("default PressureBudgetX() = %v, want 2", got)
+	}
+	x := 3.5
+	c := Config{DiskPressureBudgetX: &x}
+	if got := c.PressureBudgetX(); got != 3.5 {
+		t.Errorf("PressureBudgetX() = %v, want 3.5", got)
+	}
+}
