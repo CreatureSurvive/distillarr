@@ -173,6 +173,42 @@ func TestMetadata(t *testing.T) {
 	}
 }
 
+func TestSessions(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/status/sessions" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"MediaContainer":{"Metadata":[
+			{"ratingKey":"100","Media":[{"Part":[{"file":"/data/movies/Movie/Movie.mkv"}]}],
+			 "TranscodeSession":{"videoDecision":"transcode"}},
+			{"ratingKey":"200","Media":[{"Part":[{"file":"/data/movies/Direct/Direct.mp4"}]}]},
+			{"ratingKey":"300","Media":[{"Part":[{"file":"/data/movies/AudioOnly/A.mkv"}]}],
+			 "TranscodeSession":{"videoDecision":"copy"}}
+		]}}`))
+	}))
+	defer srv.Close()
+
+	c := New(srv.URL, "tok")
+	sessions, err := c.Sessions(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(sessions) != 3 {
+		t.Fatalf("got %d sessions, want 3", len(sessions))
+	}
+	if sessions[0].TranscodeSession == nil || sessions[0].TranscodeSession.VideoDecision != "transcode" {
+		t.Errorf("expected a video transcode, got %+v", sessions[0].TranscodeSession)
+	}
+	if sessions[1].TranscodeSession != nil {
+		t.Errorf("direct play must have no TranscodeSession, got %+v", sessions[1].TranscodeSession)
+	}
+	if sessions[2].Media[0].Part[0].File != "/data/movies/AudioOnly/A.mkv" {
+		t.Errorf("wrong file: %+v", sessions[2])
+	}
+}
+
 func TestSetAddedAt(t *testing.T) {
 	var gotPath string
 	var gotQuery url.Values

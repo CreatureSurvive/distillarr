@@ -143,14 +143,25 @@ type Media struct {
 	Part []Part `json:"Part"`
 }
 
+// TranscodeSession is present on a session Item only while it's
+// transcoding (absent for direct play); VideoDecision is "transcode"
+// when the video stream itself is being converted (GPU-competing), vs.
+// "copy" for an audio-only/container transcode with video passed through.
+type TranscodeSession struct {
+	VideoDecision string `json:"videoDecision"`
+}
+
 // Item is the subset of a Plex library item we cache: a movie, or (with
-// section-level type=4) an episode flattened out of its show/season.
+// section-level type=4) an episode flattened out of its show/season. The
+// same shape doubles as a /status/sessions entry, where
+// TranscodeSession is set.
 type Item struct {
-	RatingKey string  `json:"ratingKey"`
-	Title     string  `json:"title"`
-	Type      string  `json:"type"`
-	AddedAt   int64   `json:"addedAt"` // unix seconds
-	Media     []Media `json:"Media"`
+	RatingKey        string            `json:"ratingKey"`
+	Title            string            `json:"title"`
+	Type             string            `json:"type"`
+	AddedAt          int64             `json:"addedAt"` // unix seconds
+	Media            []Media           `json:"Media"`
+	TranscodeSession *TranscodeSession `json:"TranscodeSession,omitempty"`
 }
 
 type itemsResp struct {
@@ -197,6 +208,18 @@ func (c *Client) WalkSection(ctx context.Context, sectionKey string, typ int, fn
 // path must be Plex's view of the directory.
 func (c *Client) Refresh(ctx context.Context, sectionKey, path string) error {
 	return c.get(ctx, nil, "/library/sections/"+sectionKey+"/refresh", url.Values{"path": {path}})
+}
+
+// Sessions lists current playback sessions: the dispatcher's
+// don't-compete-with-viewers gate and the replace-hold check both read
+// from it. Each Media[].Part[].file gives the file path, same as
+// a library listing.
+func (c *Client) Sessions(ctx context.Context) ([]Item, error) {
+	var r itemsResp
+	if err := c.get(ctx, &r, "/status/sessions", nil); err != nil {
+		return nil, err
+	}
+	return r.MediaContainer.Metadata, nil
 }
 
 // Metadata fetches one item by rating key (used to read its current

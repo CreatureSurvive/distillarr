@@ -209,6 +209,35 @@ func (c *Client) FetchImage(ctx context.Context, itemID, kind string, maxW int) 
 	return b, resp.Header.Get("Content-Type"), err
 }
 
+// TranscodingInfo is present on a Session only while its video is being
+// transcoded (absent for direct play/stream); IsVideoDirect distinguishes
+// an audio-only transcode (container remux, subtitle burn-in with the
+// video otherwise copied) from a real GPU-competing video transcode.
+type TranscodingInfo struct {
+	IsVideoDirect             bool     `json:"IsVideoDirect"`
+	HardwareAccelerationType  string   `json:"HardwareAccelerationType"`
+	TranscodeReasons          []string `json:"TranscodeReasons"`
+}
+
+// Session is one active playback session.
+type Session struct {
+	NowPlayingItem *struct {
+		Path string `json:"Path"`
+	} `json:"NowPlayingItem"`
+	TranscodingInfo *TranscodingInfo `json:"TranscodingInfo"`
+}
+
+// Sessions lists current playback sessions: the dispatcher's
+// don't-compete-with-viewers gate and the replace-hold check both read
+// from it.
+func (c *Client) Sessions(ctx context.Context) ([]Session, error) {
+	var s []Session
+	if err := c.get(ctx, &s, "/Sessions", url.Values{}); err != nil {
+		return nil, err
+	}
+	return s, nil
+}
+
 // Refresh triggers a metadata refresh for an item (used after a
 // replace so Jellyfin re-reads the new file).
 func (c *Client) Refresh(ctx context.Context, itemID string) error {
