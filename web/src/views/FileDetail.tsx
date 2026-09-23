@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { api, hardlinkedFiles, type FileItem, type HwReport, type Plan, type Settings, type Stream } from "../api";
+import { api, hardlinkedFiles, type AutopilotDecision, type FileItem, type HwReport, type Plan, type Settings, type Stream } from "../api";
 import { Art, Copyable, Empty, FileChips, IssueChips, SavingsGauge, hasQuickFix, toast, useHardlinkedConfirm } from "../components";
 import EncodeOptions, { hasBars } from "../options";
 import { backendLabel, bitrate, bytes, channelsLabel, codecLabel, dur, resClass, se } from "../format";
@@ -19,6 +19,8 @@ export default function FileDetail({ live }: { live: LiveState }) {
   const [settings, setSettings] = useState<Settings | null>(null);
   const [custom, setCustom] = useState(false);
   const [busy, setBusy] = useState("");
+  const [autopilot, setAutopilot] = useState<AutopilotDecision | null>(null);
+  const [codecPenaltyWarning, setCodecPenaltyWarning] = useState("");
   const { ask: askHardlinked, dialog: hardlinkedDialog } = useHardlinkedConfirm();
   const planReq = useRef(0);
 
@@ -26,7 +28,12 @@ export default function FileDetail({ live }: { live: LiveState }) {
     setFile(null);
     setSettings(null);
     setCustom(false);
-    api.file(id).then((r) => { setFile(r.file); setStreams(r.streams); }).catch((e) => setErr(e.message));
+    api.file(id).then((r) => {
+      setFile(r.file);
+      setStreams(r.streams);
+      setAutopilot(r.autopilot || null);
+      setCodecPenaltyWarning(r.codec_penalty_warning || "");
+    }).catch((e) => setErr(e.message));
     api.hw().then((h) => { setHw(h.report); setAuto(h.auto); setDevices(h.devices || {}); }).catch(() => {});
   }, [id]);
 
@@ -200,6 +207,21 @@ export default function FileDetail({ live }: { live: LiveState }) {
             )}
             {rec?.notes && rec.notes.length > 0 && (
               <ul className="notes">{rec.notes.map((n) => <li key={n}>{n}</li>)}</ul>
+            )}
+            {autopilot && (
+              <div className="dim small" style={{ marginTop: 6 }}>
+                Autopilot: {autopilot.rule ? <>rule "{autopilot.rule}"</> : "default"} → {autopilot.action}
+                {autopilot.action === "queue_override" && autopilot.codec ? ` (${autopilot.codec}${autopilot.quality ? ` q${autopilot.quality}` : ""})` : ""}
+              </div>
+            )}
+            {codecPenaltyWarning && (
+              <div className="alert" style={{ marginTop: 8 }}>
+                <div className="small">
+                  <b>{codecPenaltyWarning}</b> scores re-encoded files as worth replacing again (an unacknowledged
+                  codec-penalty warning). Queueing this is still allowed — autopilot and webhook auto-queue are the
+                  only things this blocks. See its card in <a href="#/settings" onClick={(e) => { e.preventDefault(); location.hash = "#/settings"; setTimeout(() => document.getElementById("s-arr")?.scrollIntoView({ behavior: "smooth" }), 50); }}>Settings → Sonarr / Radarr</a>.
+                </div>
+              </div>
             )}
             <div className="actions">
               <button className="btn" disabled={!!busy} onClick={() => act("preview")}>

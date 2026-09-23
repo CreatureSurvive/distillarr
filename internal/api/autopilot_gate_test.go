@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"strconv"
 	"testing"
 	"time"
 
@@ -151,6 +152,45 @@ func TestPromoteOneRespectsCodecPenaltyGateEndToEnd(t *testing.T) {
 	}
 	if got.State != store.IntakeNeedsConfirmation || got.HoldReason != "codec_penalty" {
 		t.Fatalf("got %+v, want needs_confirmation/codec_penalty", got)
+	}
+}
+
+func TestFileDetailIncludesCodecPenaltyWarning(t *testing.T) {
+	s := newTestServer(t)
+	f := mustUpsert(t, s.st, &store.File{
+		Path: "/m/a.mkv", Library: "movies", Title: "A", VideoCodec: "h264",
+		Size: 4_000_000_000, Duration: 3600, Width: 1920, Height: 1080,
+	})
+	if err := s.cfg.Update(func(c *config.Config) {
+		c.ArrInstances = []config.ArrInstance{{ID: "radarr", Name: "Radarr", Kind: "radarr"}}
+		c.DefaultCodec = "hevc"
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.st.UpsertArrItems([]store.ArrItem{{FileID: f.ID, InstanceID: "radarr", Kind: "radarr", ItemID: 1}}); err != nil {
+		t.Fatal(err)
+	}
+	setPenaltyReport(t, s, "radarr", onePenalty())
+
+	rec := doJSON(t, s, "GET", "/api/v1/files/"+strconv.FormatInt(f.ID, 10), nil)
+	if rec.Code != 200 {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	if !contains(rec.Body.String(), `"codec_penalty_warning":"Radarr"`) {
+		t.Errorf("body = %s, want the codec_penalty_warning field naming the instance", rec.Body.String())
+	}
+}
+
+func TestFileDetailOmitsCodecPenaltyWarningWhenClear(t *testing.T) {
+	s := newTestServer(t)
+	f := mustUpsert(t, s.st, &store.File{Path: "/m/a.mkv", Library: "movies", Title: "A"})
+
+	rec := doJSON(t, s, "GET", "/api/v1/files/"+strconv.FormatInt(f.ID, 10), nil)
+	if rec.Code != 200 {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	if contains(rec.Body.String(), `codec_penalty_warning`) {
+		t.Error("an unmanaged file must never carry a codec_penalty_warning")
 	}
 }
 

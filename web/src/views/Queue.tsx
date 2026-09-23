@@ -164,8 +164,23 @@ export default function Queue({ live }: { live: LiveState }) {
 
 // holding area: files waiting out a settle delay before an
 // unattended queue, or waiting on a human because something needs
-// confirming first (currently only "hardlinked"). Nothing creates these
-// rows yet — that's the webhook — so this is normally empty.
+// confirming first: "hardlinked" or "codec_penalty" (
+// the owning arr instance hasn't acknowledged a codec-penalty warning).
+function holdReasonText(r: IntakeRow): ReactNode {
+  if (r.hold_reason === "hardlinked") return "shares its data with another link (likely still seeding)";
+  if (r.hold_reason === "codec_penalty") {
+    return (
+      <>
+        {r.instance_name || "an instance"} hasn't acknowledged a codec-penalty warning — see{" "}
+        <a href="#/settings" onClick={(e) => { e.preventDefault(); location.hash = "#/settings"; setTimeout(() => document.getElementById("s-arr")?.scrollIntoView({ behavior: "smooth" }), 50); }}>
+          Settings → Sonarr / Radarr
+        </a>
+      </>
+    );
+  }
+  return r.hold_reason;
+}
+
 function IntakePanel({ live }: { live: LiveState }) {
   const [needsConfirmation, setNeedsConfirmation] = useState<IntakeRow[]>([]);
   const [waiting, setWaiting] = useState<IntakeRow[]>([]);
@@ -217,7 +232,7 @@ function IntakePanel({ live }: { live: LiveState }) {
                     <span className="tag" title={r.reason || r.origin}>{r.origin}</span>
                   </div>
                   <div className="job-meta mono dim">
-                    <span className="warm">{r.hold_reason === "hardlinked" ? "shares its data with another link (likely still seeding)" : r.hold_reason}</span>
+                    <span className="warm">{holdReasonText(r)}</span>
                   </div>
                 </div>
                 <div className="job-actions">

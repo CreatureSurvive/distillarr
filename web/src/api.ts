@@ -366,6 +366,52 @@ export type IntakeRow = {
   updated_at: string;
   file_path?: string;
   file_title?: string;
+  instance_id?: string; // set when a connected Sonarr/Radarr instance manages the file
+  instance_name?: string;
+};
+
+// the ordered rule engine that decides what an unattended
+// candidate does. RuleMatch fields are all AND'd; an empty/absent field
+// means "don't care" except animation, a real tri-state.
+export type RuleMatch = {
+  libraries?: string[]; // "movies" | "tvshows"
+  instances?: string[]; // arr instance display names
+  tags?: string[]; // resolved arr tag names
+  origins?: string[]; // intake origin: webhook | autopilot | playback | manual
+  src_codecs?: string[];
+  res_classes?: number[]; // 480/576/720/1080/2160
+  min_savings_pct?: number;
+  min_age_days?: number;
+  issue_keys?: string[];
+  animation?: boolean | null;
+};
+export type RuleAction = {
+  kind: "queue" | "queue_override" | "quick_fix" | "ignore";
+  codec?: string;
+  quality?: number;
+};
+export type AutoRule = {
+  id: string;
+  name: string;
+  enabled: boolean;
+  when: RuleMatch;
+  then: RuleAction;
+};
+export type AutopilotDecision = {
+  rule_id?: string;
+  rule?: string;
+  action: "queue" | "queue_override" | "quick_fix" | "ignore";
+  codec?: string;
+  quality?: number;
+  reason: string;
+};
+export type AutopilotPreviewGroup = {
+  rule_id?: string;
+  rule?: string;
+  action: string;
+  count: number;
+  est_saved_gb: number;
+  sample: { id: number; title: string; path: string }[];
 };
 
 export type Progress = {
@@ -457,6 +503,10 @@ export type Config = {
   // Override for the host:port Settings shows in front of each webhook
   // path. Blank = use the browser's own origin.
   webhook_base_url?: string;
+  // off by default. Rules are evaluated in order, first
+  // match wins.
+  autopilot_enabled?: boolean;
+  auto_rules?: AutoRule[];
 };
 
 // One connected Sonarr or Radarr. api_key is never sent by the server
@@ -668,7 +718,9 @@ export const api = {
     skip_hardlinked?: boolean;
   }) => post<{ created: number; skipped: number }>("/api/v1/show/queue", body),
 
-  file: (id: number) => req<{ file: FileItem; streams: Stream[] }>(`/api/v1/files/${id}`),
+  file: (id: number) =>
+    req<{ file: FileItem; streams: Stream[]; autopilot?: AutopilotDecision; codec_penalty_warning?: string }>(`/api/v1/files/${id}`),
+  autopilotPreview: () => req<{ groups: AutopilotPreviewGroup[] }>("/api/v1/autopilot/preview"),
   plan: (id: number, settings?: Settings) => post<Plan>(`/api/v1/files/${id}/plan`, { settings }),
   queueFile: (id: number, body: { settings?: Settings; run_now?: boolean; confirm_hardlinked?: boolean }) =>
     post<Job>(`/api/v1/files/${id}/queue`, body),

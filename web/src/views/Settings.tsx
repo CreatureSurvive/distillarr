@@ -1,7 +1,7 @@
 import { useEffect, useState, type ReactNode } from "react";
-import { api, subscribe, type ArrInfo, type ArrInstance, type ArrTestResult, type Config, type HwInfo, type JfStatus, type JfTest, type TrashItem } from "../api";
-import { Copyable, Seg, Toggle, toast } from "../components";
-import { ago, backendLabel, bytes } from "../format";
+import { api, subscribe, type ArrInfo, type ArrInstance, type ArrTestResult, type AutopilotPreviewGroup, type AutoRule, type Config, type HwInfo, type JfStatus, type JfTest, type RuleAction, type RuleMatch, type TrashItem } from "../api";
+import { Copyable, ISSUE_SHORT, Seg, Toggle, toast } from "../components";
+import { ago, backendLabel, bytes, codecLabel } from "../format";
 import { qualityWord } from "../options";
 import type { LiveState } from "../App";
 import { ScheduleTimeline } from "./Queue";
@@ -44,6 +44,7 @@ export default function SettingsView({ live, onJellyfin }: { live: LiveState; on
       <nav className="settings-nav">
         <a href="#/settings" onClick={(e) => { e.preventDefault(); document.getElementById("s-jf")?.scrollIntoView({ behavior: "smooth" }); }}>Jellyfin</a>
         <a href="#/settings" onClick={(e) => { e.preventDefault(); document.getElementById("s-arr")?.scrollIntoView({ behavior: "smooth" }); }}>Sonarr / Radarr</a>
+        <a href="#/settings" onClick={(e) => { e.preventDefault(); document.getElementById("s-auto")?.scrollIntoView({ behavior: "smooth" }); }}>Autopilot</a>
         <a href="#/settings" onClick={(e) => { e.preventDefault(); document.getElementById("s-enc")?.scrollIntoView({ behavior: "smooth" }); }}>Encoding</a>
         <a href="#/settings" onClick={(e) => { e.preventDefault(); document.getElementById("s-up")?.scrollIntoView({ behavior: "smooth" }); }}>Upscaling</a>
         <a href="#/settings" onClick={(e) => { e.preventDefault(); document.getElementById("s-hw")?.scrollIntoView({ behavior: "smooth" }); }}>Hardware</a>
@@ -54,6 +55,8 @@ export default function SettingsView({ live, onJellyfin }: { live: LiveState; on
       <JellyfinSection cfg={cfg} setCfg={setCfg} live={live} onJellyfin={onJellyfin} />
 
       <ArrSection cfg={cfg} setCfg={setCfg} />
+
+      <AutopilotSection cfg={cfg} setCfg={setCfg} />
 
       <section className="panel" id="s-enc">
         <h2 className="panel-title">Encoding defaults</h2>
@@ -611,6 +614,286 @@ function ArrSection({ cfg, setCfg }: { cfg: Config; setCfg: (c: Config) => void 
         <button className="btn" onClick={() => addInstance("sonarr")}>+ Add Sonarr</button>
         <button className="btn" onClick={() => addInstance("radarr")}>+ Add Radarr</button>
       </div>
+    </section>
+  );
+}
+
+const RULE_LIBRARIES = [{ value: "movies", label: "Movies" }, { value: "tvshows", label: "Shows" }];
+const RULE_ORIGINS = [{ value: "webhook", label: "webhook" }, { value: "autopilot", label: "autopilot" }, { value: "playback", label: "playback" }, { value: "manual", label: "manual" }];
+const RULE_RES_CLASSES = [480, 576, 720, 1080, 2160];
+const RULE_CODECS = ["h264", "hevc", "av1", "mpeg2video", "vc1", "mpeg4", "vp9"];
+const RULE_ACTIONS: { value: RuleAction["kind"]; label: string }[] = [
+  { value: "queue", label: "Queue (recommended settings)" },
+  { value: "queue_override", label: "Queue with an override" },
+  { value: "quick_fix", label: "Quick fix (remux)" },
+  { value: "ignore", label: "Ignore" },
+];
+
+// Chip-style toggle group for a RuleMatch string-array field.
+function ChipMultiSelect({ options, value, onChange }: { options: { value: string; label: string }[]; value: string[]; onChange: (v: string[]) => void }) {
+  return (
+    <div className="chips">
+      {options.map((o) => (
+        <button key={o.value} type="button" className={`chip chip-btn${value.includes(o.value) ? " c-hevc" : ""}`}
+          aria-pressed={value.includes(o.value)}
+          onClick={() => onChange(value.includes(o.value) ? value.filter((v) => v !== o.value) : [...value, o.value])}>
+          {o.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function summarizeRule(r: AutoRule): string {
+  const parts: string[] = [];
+  const w = r.when || {};
+  if (w.libraries?.length) parts.push(w.libraries.join("/"));
+  if (w.instances?.length) parts.push(`instance: ${w.instances.join(", ")}`);
+  if (w.tags?.length) parts.push(`tags: ${w.tags.join(", ")}`);
+  if (w.origins?.length) parts.push(`origin: ${w.origins.join(", ")}`);
+  if (w.src_codecs?.length) parts.push(w.src_codecs.join("/").toUpperCase());
+  if (w.res_classes?.length) parts.push(w.res_classes.map((c) => (c === 2160 ? "4K" : `${c}p`)).join("/"));
+  if (w.min_savings_pct) parts.push(`≥${w.min_savings_pct}% savings`);
+  if (w.min_age_days) parts.push(`≥${w.min_age_days}d old`);
+  if (w.issue_keys?.length) parts.push(w.issue_keys.map((k) => ISSUE_SHORT[k]?.label || k).join(", "));
+  if (w.animation === true) parts.push("animation");
+  if (w.animation === false) parts.push("not animation");
+  const when = parts.length ? parts.join(" · ") : "matches everything";
+  const action = RULE_ACTIONS.find((a) => a.value === r.then?.kind)?.label || r.then?.kind;
+  return `${when} → ${action}${r.then?.kind === "queue_override" && r.then.codec ? ` (${r.then.codec}${r.then.quality ? ` q${r.then.quality}` : ""})` : ""}`;
+}
+
+function csvField(label: string, value: string[] | undefined, onChange: (v: string[]) => void, placeholder = "") {
+  return (
+    <label className="field"><span>{label}</span>
+      <input className="input" value={(value || []).join(", ")} placeholder={placeholder}
+        onChange={(e) => onChange(e.target.value.split(",").map((s) => s.trim()).filter(Boolean))} />
+    </label>
+  );
+}
+
+function RuleEditor({ rule, instanceNames, onClose, onSave, onDelete }: {
+  rule: AutoRule; instanceNames: string[]; onClose: () => void; onSave: (r: AutoRule) => void; onDelete?: () => void;
+}) {
+  const [r, setR] = useState<AutoRule>(rule);
+  const w = r.when || {};
+  const setWhen = (patch: Partial<RuleMatch>) => setR({ ...r, when: { ...w, ...patch } });
+
+  return (
+    <div className="modal-backdrop" onClick={(e) => e.target === e.currentTarget && onClose()}>
+      <div className="modal" role="dialog" aria-label="Autopilot rule" style={{ maxWidth: 560 }}>
+        <h2 className="panel-title">{rule.id ? "Edit rule" : "New rule"}</h2>
+        <label className="field"><span>Name</span>
+          <input className="input" value={r.name} onChange={(e) => setR({ ...r, name: e.target.value })} placeholder="e.g. Anime, gentle quality" />
+        </label>
+        <Toggle on={r.enabled} onChange={(v) => setR({ ...r, enabled: v })} label="Enabled" />
+
+        <h3 className="panel-title" style={{ fontSize: 13, marginTop: 14 }}>When (every set condition must match)</h3>
+        <div className="field"><span>Library</span>
+          <ChipMultiSelect options={RULE_LIBRARIES} value={w.libraries || []} onChange={(v) => setWhen({ libraries: v })} />
+        </div>
+        {instanceNames.length > 0 && (
+          <div className="field"><span>Sonarr/Radarr instance</span>
+            <ChipMultiSelect options={instanceNames.map((n) => ({ value: n, label: n }))} value={w.instances || []} onChange={(v) => setWhen({ instances: v })} />
+          </div>
+        )}
+        {csvField("Tags (comma-separated, as set in Sonarr/Radarr)", w.tags, (v) => setWhen({ tags: v }), "distilled, anime")}
+        <div className="field"><span>Where the candidate came from</span>
+          <ChipMultiSelect options={RULE_ORIGINS} value={w.origins || []} onChange={(v) => setWhen({ origins: v })} />
+        </div>
+        <div className="field"><span>Source codec</span>
+          <ChipMultiSelect options={RULE_CODECS.map((c) => ({ value: c, label: codecLabel(c) }))} value={w.src_codecs || []} onChange={(v) => setWhen({ src_codecs: v })} />
+        </div>
+        <div className="field"><span>Resolution</span>
+          <ChipMultiSelect options={RULE_RES_CLASSES.map((c) => ({ value: String(c), label: c === 2160 ? "4K" : `${c}p` }))}
+            value={(w.res_classes || []).map(String)} onChange={(v) => setWhen({ res_classes: v.map(Number) })} />
+        </div>
+        <div className="field-pair">
+          <label className="field"><span>Min savings %</span>
+            <input className="input" type="number" min={0} max={100} value={w.min_savings_pct || 0}
+              onChange={(e) => setWhen({ min_savings_pct: parseInt(e.target.value) || 0 })} />
+          </label>
+          <label className="field"><span>Min age (days)</span>
+            <input className="input" type="number" min={0} value={w.min_age_days || 0}
+              onChange={(e) => setWhen({ min_age_days: parseInt(e.target.value) || 0 })} />
+          </label>
+        </div>
+        <div className="field"><span>Issue</span>
+          <ChipMultiSelect options={Object.entries(ISSUE_SHORT).map(([k, v]) => ({ value: k, label: v.label }))}
+            value={w.issue_keys || []} onChange={(v) => setWhen({ issue_keys: v })} />
+        </div>
+        <label className="field"><span>Animation</span>
+          <Seg value={w.animation === true ? "yes" : w.animation === false ? "no" : "any"}
+            onChange={(v) => setWhen({ animation: v === "any" ? null : v === "yes" })}
+            options={[{ value: "any", label: "Any" }, { value: "yes", label: "Animation only" }, { value: "no", label: "Not animation" }]} />
+        </label>
+
+        <h3 className="panel-title" style={{ fontSize: 13, marginTop: 14 }}>Then</h3>
+        <label className="field"><span>Action</span>
+          <Seg value={r.then?.kind || "queue"} onChange={(v) => setR({ ...r, then: { ...r.then, kind: v as RuleAction["kind"] } })} options={RULE_ACTIONS} />
+        </label>
+        {r.then?.kind === "queue_override" && (
+          <div className="field-pair">
+            <label className="field"><span>Codec</span>
+              <Seg value={r.then.codec || "hevc"} onChange={(v) => setR({ ...r, then: { ...r.then, codec: v } })}
+                options={[{ value: "hevc", label: "HEVC" }, { value: "av1", label: "AV1" }, { value: "h264", label: "H.264" }]} />
+            </label>
+            <label className="field"><span>Quality (0 = recommended)</span>
+              <input className="input" type="number" min={0} max={100} value={r.then.quality || 0}
+                onChange={(e) => setR({ ...r, then: { ...r.then, quality: parseInt(e.target.value) || 0 } })} />
+            </label>
+          </div>
+        )}
+
+        <div className="toolbar" style={{ marginTop: 14 }}>
+          <button className="btn btn-primary" onClick={() => onSave(r)} disabled={!r.name.trim()}>Save rule</button>
+          {onDelete && <button className="btn btn-danger" onClick={onDelete}>Delete</button>}
+          <button className="btn" onClick={onClose}>Cancel</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function AutopilotPreviewResults({ groups }: { groups: AutopilotPreviewGroup[] }) {
+  if (groups.length === 0) return <div className="dim small" style={{ marginTop: 10 }}>No candidates found right now.</div>;
+  const totalGB = groups.reduce((a, g) => a + g.est_saved_gb, 0);
+  return (
+    <div className="panel" style={{ marginTop: 10, marginBottom: 0 }}>
+      <div className="dim small" style={{ marginBottom: 8 }}>
+        {groups.reduce((a, g) => a + g.count, 0).toLocaleString()} candidate{groups.reduce((a, g) => a + g.count, 0) === 1 ? "" : "s"} · about {totalGB.toFixed(1)} GB estimated
+      </div>
+      {groups.map((g, i) => (
+        <div key={i} style={{ marginBottom: 10 }}>
+          <div className="small">
+            <b>{g.rule || "Default"}</b> → {g.action} · {g.count.toLocaleString()} file{g.count === 1 ? "" : "s"} · ~{g.est_saved_gb.toFixed(1)} GB
+          </div>
+          <ul className="mono small dim" style={{ margin: "4px 0 0 16px" }}>
+            {g.sample.map((f) => <li key={f.id}>{f.title || f.path.split("/").pop()}</li>)}
+            {g.count > g.sample.length && <li>…and {(g.count - g.sample.length).toLocaleString()} more</li>}
+          </ul>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function AutopilotSection({ cfg, setCfg }: { cfg: Config; setCfg: (c: Config) => void }) {
+  const [rules, setRules] = useState<AutoRule[]>(cfg.auto_rules || []);
+  const [editing, setEditing] = useState<AutoRule | null>(null);
+  const [preview, setPreview] = useState<AutopilotPreviewGroup[] | null>(null);
+  const [previewing, setPreviewing] = useState(false);
+
+  useEffect(() => setRules(cfg.auto_rules || []), [cfg.auto_rules]);
+
+  const saveRules = async (next: AutoRule[]) => {
+    try {
+      setCfg(await api.saveConfig({ auto_rules: next }));
+    } catch (e: any) {
+      toast(e.message, "err");
+      setRules(cfg.auto_rules || []); // roll back the optimistic reorder/remove
+    }
+  };
+
+  const toggleAutopilot = async (on: boolean) => {
+    try {
+      setCfg(await api.saveConfig({ autopilot_enabled: on }));
+      toast(on ? "Autopilot is on" : "Autopilot is off");
+    } catch (e: any) {
+      toast(e.message, "err");
+    }
+  };
+
+  const move = (i: number, dir: -1 | 1) => {
+    const j = i + dir;
+    if (j < 0 || j >= rules.length) return;
+    const next = [...rules];
+    [next[i], next[j]] = [next[j], next[i]];
+    setRules(next);
+    saveRules(next);
+  };
+
+  const removeRule = (i: number) => {
+    const next = rules.filter((_, j) => j !== i);
+    setRules(next);
+    saveRules(next);
+  };
+
+  const saveRule = (r: AutoRule) => {
+    const id = r.id || `rule-${Date.now().toString(36)}`;
+    const withID = { ...r, id };
+    const exists = rules.some((x) => x.id === id);
+    const next = exists ? rules.map((x) => (x.id === id ? withID : x)) : [...rules, withID];
+    setRules(next);
+    saveRules(next);
+    setEditing(null);
+  };
+
+  const runPreview = async () => {
+    setPreviewing(true);
+    try {
+      const r = await api.autopilotPreview();
+      setPreview(r.groups);
+    } catch (e: any) {
+      toast(e.message, "err");
+    } finally {
+      setPreviewing(false);
+    }
+  };
+
+  const instanceNames = (cfg.arr_instances || []).map((a) => a.name).filter(Boolean);
+
+  return (
+    <section className="panel" id="s-auto">
+      <div className="panel-head">
+        <h2 className="panel-title">Autopilot</h2>
+        <Toggle on={!!cfg.autopilot_enabled} onChange={toggleAutopilot} label={cfg.autopilot_enabled ? "On" : "Off"} />
+      </div>
+      <p className="dim small">
+        Optional, off by default. Ordered rules decide what an unattended candidate (a webhook import that opted into
+        auto-queue) does: queue with the recommendation, queue with an override, quick-fix, or ignore. The first
+        matching rule wins; with no match, the built-in default queues anything recommended that clears your savings
+        floor below. Manual queueing from the library is never affected by any of this.
+        {" "}An instance with an unacknowledged codec-penalty warning never gets an autopilot-queued HEVC/AV1
+        re-encode — those go to Queue → Needs confirmation instead.
+      </p>
+
+      {rules.length === 0 ? (
+        <p className="dim small">No rules yet — every candidate falls through to the built-in default.</p>
+      ) : (
+        <ul className="jobs">
+          {rules.map((r, i) => (
+            <li key={r.id} className="job">
+              <div className="job-main">
+                <div className="job-title">
+                  <span className="mono dim">{i + 1}</span>
+                  <span>{r.name || "Unnamed rule"}</span>
+                  {!r.enabled && <span className="tag dim">disabled</span>}
+                </div>
+                <div className="job-meta mono dim small">{summarizeRule(r)}</div>
+              </div>
+              <div className="job-actions">
+                <button className="btn mini" disabled={i === 0} title="Move up" onClick={() => move(i, -1)}>↑</button>
+                <button className="btn mini" disabled={i === rules.length - 1} title="Move down" onClick={() => move(i, 1)}>↓</button>
+                <button className="btn mini" onClick={() => setEditing(r)}>Edit</button>
+                <button className="btn mini btn-danger" onClick={() => removeRule(i)}>Remove</button>
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      <div className="toolbar" style={{ marginTop: 12 }}>
+        <button className="btn" onClick={() => setEditing({ id: "", name: "", enabled: true, when: {}, then: { kind: "queue" } })}>+ Add rule</button>
+        <button className="btn" disabled={previewing} onClick={runPreview}>{previewing ? "Running…" : "Dry run"}</button>
+      </div>
+
+      {preview && <AutopilotPreviewResults groups={preview} />}
+
+      {editing && (
+        <RuleEditor rule={editing} instanceNames={instanceNames} onClose={() => setEditing(null)} onSave={saveRule}
+          onDelete={editing.id ? () => { removeRule(rules.findIndex((x) => x.id === editing.id)); setEditing(null); } : undefined} />
+      )}
     </section>
   );
 }

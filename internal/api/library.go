@@ -462,14 +462,20 @@ func (s *Server) fileDetail(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	resp := map[string]any{"file": fo, "streams": streams}
+	settings, rec := s.resolve(f, nil)
 	if s.cfg.Get().AutopilotEnabled {
-		_, rec := s.resolve(f, nil)
 		// "manual" here just means "not evaluated as part of an intake
 		// row" — this is a file-page preview of what autopilot would
 		// decide, not a real promotion.
 		if d := s.autopilotDecision(f, rec, "manual"); d != nil {
 			resp["autopilot"] = d
 		}
+	}
+	// Informational only: manual queueing is never blocked by the
+	// codec-penalty gate, but the file page still warns before the user
+	// clicks Queue — the gate itself only holds autopilot/webhook-intake.
+	if blocked, instName := s.codecPenaltyBlocked(f, settings); blocked {
+		resp["codec_penalty_warning"] = instName
 	}
 	writeJSON(w, http.StatusOK, resp)
 }
