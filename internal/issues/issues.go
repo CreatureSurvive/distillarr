@@ -123,12 +123,18 @@ func Detect(f *store.File, worth, measuredMiss, upgradePending, forcesTranscode 
 //     an audio rule conversion) resolves it;
 //   - video_codec, video_profile, video_level, bit_depth: needs a
 //     re-encode;
-//   - subtitle: image-subtitle burn-in, not automated yet (P4.x).
+//   - subtitle: image-subtitle burn-in, not automated yet (P4.x);
+//   - bitrate: the client's own bitrate cap forced a transcode
+//     (Jellyfin's ContainerBitrateExceedsLimit) — not a container
+//     incompatibility, so it must not be lumped in with "container"; no
+//     fix here re-encodes to a lower bitrate on request, not proactively.
 func ReasonCategory(raw string) string {
 	r := strings.ToLower(raw)
 	switch {
 	case strings.Contains(r, "subtitle"):
 		return "subtitle"
+	case strings.Contains(r, "bitrateexceedslimit"), strings.Contains(r, "containerbitrate"):
+		return "bitrate"
 	case strings.Contains(r, "container"):
 		return "container"
 	case strings.Contains(r, "audiochannel"):

@@ -99,6 +99,7 @@ export const ISSUE_SHORT: Record<string, { label: string; fix: "quick" | "reenco
 // display label, for the forces_transcode detail.
 export const REASON_LABEL: Record<string, string> = {
   container: "container",
+  bitrate: "bitrate limit",
   audio_codec: "audio codec",
   audio_channels: "audio channels",
   video_codec: "video codec",

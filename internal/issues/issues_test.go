@@ -42,18 +42,19 @@ func TestDetect(t *testing.T) {
 
 func TestReasonCategory(t *testing.T) {
 	cases := map[string]string{
-		"ContainerNotSupported":       "container",
-		"AudioCodecNotSupported":      "audio_codec",
-		"AudioChannelsNotSupported":   "audio_channels",
-		"AudioBitrateNotSupported":    "audio_codec",
-		"VideoCodecNotSupported":      "video_codec",
-		"VideoProfileNotSupported":    "video_profile",
-		"VideoLevelNotSupported":      "video_level",
-		"VideoBitDepthNotSupported":   "bit_depth",
-		"VideoResolutionNotSupported": "video_codec",
-		"SubtitleCodecNotSupported":   "subtitle",
-		"DirectPlayError":             "video_codec",
-		"SomethingUnknown":            "other",
+		"ContainerNotSupported":        "container",
+		"ContainerBitrateExceedsLimit": "bitrate",
+		"AudioCodecNotSupported":       "audio_codec",
+		"AudioChannelsNotSupported":    "audio_channels",
+		"AudioBitrateNotSupported":     "audio_codec",
+		"VideoCodecNotSupported":       "video_codec",
+		"VideoProfileNotSupported":     "video_profile",
+		"VideoLevelNotSupported":       "video_level",
+		"VideoBitDepthNotSupported":    "bit_depth",
+		"VideoResolutionNotSupported":  "video_codec",
+		"SubtitleCodecNotSupported":    "subtitle",
+		"DirectPlayError":              "video_codec",
+		"SomethingUnknown":             "other",
 	}
 	for raw, want := range cases {
 		if got := ReasonCategory(raw); got != want {
