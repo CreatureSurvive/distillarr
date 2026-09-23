@@ -81,7 +81,31 @@ type Config struct {
 	// JellyfinPathMap rewrites Jellyfin's view of paths to ours,
 	// "from=to" (e.g. "/data=/srv/media" when Jellyfin mounts the library as /data).
 	JellyfinPathMap string `json:"jellyfin_path_map"`
+
+	// ArrInstances: any number of Sonarr and Radarr connections. See
+	// internal/arr for the client and for the design.
+	ArrInstances []ArrInstance `json:"arr_instances"`
 }
+
+// ArrInstance is one connected Sonarr or Radarr.
+type ArrInstance struct {
+	// ID is a stable generated slug: it keys webhook URLs and arr_items
+	// rows, so it must never change once assigned, even if Name does.
+	ID   string `json:"id"`
+	Name string `json:"name"` // "Radarr 4K"
+	Kind string `json:"kind"` // "sonarr" | "radarr"
+	URL  string `json:"url"`
+	// APIKey is a secret: masked by the same convention as
+	// JellyfinAPIKey (never returned by GET /config; a blank value on
+	// PUT keeps the stored key).
+	APIKey  string `json:"api_key"`
+	PathMap string `json:"path_map,omitempty"` // pathmap format; "" = identical paths
+	Enabled *bool  `json:"enabled,omitempty"`  // default on; see (ArrInstance).On()
+}
+
+// On reports whether the instance is enabled (default true, so existing
+// stored instances without the field keep working).
+func (a ArrInstance) On() bool { return a.Enabled == nil || *a.Enabled }
 
 // Default returns the initial configuration for a new install.
 func Default() Config {

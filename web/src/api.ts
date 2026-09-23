@@ -434,6 +434,22 @@ export type Config = {
   jellyfin_api_key?: string;
   jellyfin_key_set?: boolean;
   jellyfin_path_map: string;
+  arr_instances: ArrInstance[];
+};
+
+// One connected Sonarr or Radarr. api_key is never sent by the server
+// (api_key_set says whether one is stored); a blank api_key on save
+// keeps the stored one. id is a stable slug: never edit it after
+// creation, since webhook URLs (later phases) key on it.
+export type ArrInstance = {
+  id: string;
+  name: string;
+  kind: "sonarr" | "radarr";
+  url: string;
+  api_key?: string;
+  api_key_set?: boolean;
+  path_map?: string;
+  enabled?: boolean;
 };
 
 export type JfStatus = {

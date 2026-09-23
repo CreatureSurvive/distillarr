@@ -206,14 +206,19 @@ func (s *Server) system(w http.ResponseWriter, r *http.Request) {
 
 type configOut struct {
 	config.Config
-	JellyfinKeySet bool `json:"jellyfin_key_set"`
+	JellyfinKeySet bool             `json:"jellyfin_key_set"`
+	ArrInstances   []arrInstanceOut `json:"arr_instances"`
 }
 
 func (s *Server) getConfig(w http.ResponseWriter, r *http.Request) {
 	c := s.cfg.Get()
 	keySet := c.JellyfinAPIKey != ""
 	c.JellyfinAPIKey = ""
-	writeJSON(w, http.StatusOK, configOut{Config: c, JellyfinKeySet: keySet})
+	arrOuts := make([]arrInstanceOut, len(c.ArrInstances))
+	for i, inst := range c.ArrInstances {
+		arrOuts[i] = arrOut(inst)
+	}
+	writeJSON(w, http.StatusOK, configOut{Config: c, JellyfinKeySet: keySet, ArrInstances: arrOuts})
 }
 
 // putConfig merges a partial JSON object into the config: only the
@@ -234,6 +239,15 @@ func (s *Server) putConfig(w http.ResponseWriter, r *http.Request) {
 	delete(patch, "jellyfin_key_set")
 	var perr error
 	err := s.cfg.Update(func(cur *config.Config) {
+		if raw, ok := patch["arr_instances"]; ok {
+			merged, err := mergeArrInstances(cur.ArrInstances, raw)
+			if err != nil {
+				perr = err
+				return
+			}
+			b, _ := json.Marshal(merged)
+			patch["arr_instances"] = b
+		}
 		b, _ := json.Marshal(cur)
 		var merged map[string]json.RawMessage
 		_ = json.Unmarshal(b, &merged)
