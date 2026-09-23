@@ -579,6 +579,7 @@ func (s *Server) filePlan(w http.ResponseWriter, r *http.Request) {
 		} else {
 			out["command"] = encode.CommandString(prim.Args)
 			out["container"] = prim.Container
+			out["warnings"] = encode.AudioWarnings(cst.AudioRules, src.Audios(), prim.Container)
 			if fb != nil {
 				out["fallback_command"] = encode.CommandString(fb.Args)
 			}
