@@ -31,6 +31,7 @@ type Stream struct {
 	ColorSpace     string            `json:"color_space,omitempty"`
 	FieldOrder     string            `json:"field_order,omitempty"` // progressive|tt|bb|tb|bt
 	Channels       int               `json:"channels,omitempty"`
+	Profile        string            `json:"profile,omitempty"` // e.g. "DTS-HD MA", "Dolby TrueHD + Dolby Atmos"
 	BitRate        string            `json:"bit_rate,omitempty"`   // ffprobe emits a string
 	AvgFrameRate   string            `json:"avg_frame_rate,omitempty"` // "24000/1001"
 	Duration       string            `json:"duration,omitempty"`

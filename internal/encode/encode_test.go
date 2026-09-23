@@ -98,16 +98,16 @@ func TestSplitArgs(t *testing.T) {
 
 func TestPreferMP4(t *testing.T) {
 	mkv := probe("/m/a.mkv", "h264", "yuv420p", "", []string{"ac3", "aac"}, []string{"subrip"})
-	a, prim, _ := joined(t, Settings{Codec: HEVC, Backend: SW, PreferMP4: true}, mkv, nil)
+	a, prim, _ := joined(t, Settings{Codec: HEVC, Backend: SW, ContainerGoal: "prefer_mp4"}, mkv, nil)
 	if prim.Container != "mp4" || !strings.Contains(a, "-tag:v hvc1") || !strings.Contains(a, "+faststart") || !strings.Contains(a, "-c:s mov_text") {
 		t.Errorf("MKV with MP4-safe tracks should become MP4 + hvc1 + faststart: %s", a)
 	}
 	pgs := probe("/m/b.mkv", "h264", "yuv420p", "", []string{"ac3"}, []string{"hdmv_pgs_subtitle"})
-	if _, prim, _ = joined(t, Settings{Codec: HEVC, Backend: SW, PreferMP4: true}, pgs, nil); prim.Container != "mkv" {
+	if _, prim, _ = joined(t, Settings{Codec: HEVC, Backend: SW, ContainerGoal: "prefer_mp4"}, pgs, nil); prim.Container != "mkv" {
 		t.Error("image subtitles must keep MKV")
 	}
 	thd := probe("/m/c.mkv", "h264", "yuv420p", "", []string{"truehd"}, nil)
-	if _, prim, _ = joined(t, Settings{Codec: HEVC, Backend: SW, PreferMP4: true}, thd, nil); prim.Container != "mkv" {
+	if _, prim, _ = joined(t, Settings{Codec: HEVC, Backend: SW, ContainerGoal: "prefer_mp4"}, thd, nil); prim.Container != "mkv" {
 		t.Error("copied TrueHD must keep MKV")
 	}
 }
@@ -164,7 +164,7 @@ func TestH264AndCopy(t *testing.T) {
 		t.Errorf("quick fix should copy video, tag hvc1, faststart, pcm→alac: %s", a)
 	}
 	avi := probe("/m/c.avi", "vc1", "yuv420p", "", []string{"ac3"}, nil)
-	if _, prim, _ = joined(t, Settings{VideoCopy: true, PreferMP4: true}, avi, nil); prim.Container != "mkv" {
+	if _, prim, _ = joined(t, Settings{VideoCopy: true, ContainerGoal: "prefer_mp4"}, avi, nil); prim.Container != "mkv" {
 		t.Errorf("VC-1 can't be copied into MP4: %s", prim.Container)
 	}
 }
@@ -376,5 +376,114 @@ func TestUpscaleSettings(t *testing.T) {
 	p := probe("/m/a.mkv", "h264", "yuv420p", "", []string{"ac3"}, nil)
 	if _, _, err := Build(Settings{VideoCopy: true, UpscaleTo: 1080}, p, "/out.tmp", nil); err == nil {
 		t.Error("video copy + upscale must be rejected")
+	}
+}
+
+func TestIsMP4AudioSafeTable(t *testing.T) {
+	cases := map[string]bool{
+		"aac": true, "mp3": true, "ac3": true, "eac3": true, "alac": true, "opus": true,
+		"flac": false, "truehd": false, "dts": false, "vorbis": false, "pcm_s24le": false,
+	}
+	for codec, want := range cases {
+		if got := isMP4AudioSafe(codec); got != want {
+			t.Errorf("isMP4AudioSafe(%q) = %v, want %v", codec, got, want)
+		}
+	}
+}
+
+// TestAudioRuleActions covers every AudioRule action: copy is a
+// no-op (falls through to the generic default), convert always fires,
+// convert_if_needed only fires once the container can't carry the
+// codec, and remove drops the track outright.
+func TestAudioRuleActions(t *testing.T) {
+	rules := map[string]AudioRule{
+		"dts":    {Action: "convert", Target: "eac3", BitrateByChannels: map[int]int{6: 640}},
+		"truehd": {Action: "convert_if_needed", Target: "eac3", BitrateByChannels: map[int]int{6: 640, 8: 1024}},
+		"flac":   {Action: "remove"},
+		"aac":    {Action: "copy"},
+	}
+	p := probe("/m/a.mkv", "h264", "yuv420p", "", []string{"dts", "truehd", "flac", "aac"}, nil)
+	s := Settings{Codec: HEVC, Backend: SW, Container: "mkv", AudioRules: rules}
+	s.Normalize()
+	a, prim, _ := joined(t, s, p, nil)
+	if !strings.Contains(a, "-c:a:0 eac3") || !strings.Contains(a, "-b:a:0 640k") {
+		t.Errorf("dts convert rule should hit eac3 640k: %s", a)
+	}
+	if !strings.Contains(a, "-c:a:1 copy") {
+		t.Errorf("convert_if_needed must not fire in MKV, which already carries TrueHD: %s", a)
+	}
+	if strings.Contains(a, "-map 0:3") {
+		t.Error("flac remove rule should drop the track (source index 3)")
+	}
+	if prim.ExpectAudio != 3 {
+		t.Errorf("want 3 kept audio tracks after the remove rule: %d", prim.ExpectAudio)
+	}
+
+	s2 := s
+	s2.Container = "mp4"
+	a2, _, _ := joined(t, s2, p, nil)
+	if !strings.Contains(a2, "-c:a:1 eac3") {
+		t.Errorf("convert_if_needed should fire once MP4 can't carry TrueHD: %s", a2)
+	}
+}
+
+func TestAC3Caps51(t *testing.T) {
+	p := probe("/m/a.mkv", "h264", "yuv420p", "", []string{"dts"}, nil)
+	p.Streams[1].Channels = 8 // 7.1 source
+	s := Settings{Codec: HEVC, Backend: SW, Container: "mkv",
+		AudioRules: map[string]AudioRule{"dts": {Action: "convert", Target: "ac3"}}}
+	s.Normalize()
+	a, _, _ := joined(t, s, p, nil)
+	if !strings.Contains(a, "-c:a:0 ac3") || !strings.Contains(a, "-ac:a:0 6") {
+		t.Errorf("AC3 target must downmix a 7.1 source to 5.1: %s", a)
+	}
+}
+
+func TestContainerGoalKeepAndRequired(t *testing.T) {
+	mkvThd := probe("/m/a.mkv", "h264", "yuv420p", "", []string{"truehd"}, nil)
+	if _, prim, _ := joined(t, Settings{Codec: HEVC, Backend: SW, ContainerGoal: "keep"}, mkvThd, nil); prim.Container != "mkv" {
+		t.Errorf("keep: a non-MP4 source must stay non-MP4 even if MP4 would fit: %s", prim.Container)
+	}
+	if _, prim, _ := joined(t, Settings{Codec: HEVC, Backend: SW}, mkvThd, nil); prim.Container != "mkv" {
+		t.Errorf("a zero-value ContainerGoal should behave like keep, the old PreferMP4=false default: %s", prim.Container)
+	}
+	mp4Aac := probe("/m/b.mp4", "h264", "yuv420p", "", []string{"aac"}, nil)
+	if _, prim, _ := joined(t, Settings{Codec: HEVC, Backend: SW, ContainerGoal: "keep"}, mp4Aac, nil); prim.Container != "mp4" {
+		t.Errorf("keep: an MP4 source that still fits stays MP4: %s", prim.Container)
+	}
+	thd := probe("/m/c.mkv", "h264", "yuv420p", "", []string{"truehd"}, nil)
+	if _, prim, _ := joined(t, Settings{Codec: HEVC, Backend: SW, ContainerGoal: "mp4_required"}, thd, nil); prim.Container != "mp4" {
+		t.Errorf("mp4_required always picks MP4, converting TrueHD to AAC by the generic fallback with no rule configured: %s", prim.Container)
+	}
+}
+
+func TestAudioWarnings(t *testing.T) {
+	atmos := media.Stream{Index: 1, CodecType: "audio", CodecName: "truehd", Channels: 8, Profile: "Dolby TrueHD + Dolby Atmos Audio"}
+	dtsma := media.Stream{Index: 2, CodecType: "audio", CodecName: "dts", Channels: 6, Profile: "DTS-HD MA"}
+	dtscore := media.Stream{Index: 3, CodecType: "audio", CodecName: "dts", Channels: 6, Profile: "DTS"}
+	ac3 := media.Stream{Index: 4, CodecType: "audio", CodecName: "ac3", Channels: 6}
+	rules := map[string]AudioRule{
+		"truehd": {Action: "convert", Target: "eac3"},
+		"dts":    {Action: "convert", Target: "eac3"},
+		"ac3":    {Action: "convert", Target: "aac"},
+	}
+	warns := AudioWarnings(rules, []media.Stream{atmos, dtsma, dtscore, ac3}, "mp4")
+	if len(warns) != 4 {
+		t.Fatalf("want 4 warnings, got %d: %v", len(warns), warns)
+	}
+	if !strings.Contains(warns[0], "Atmos") {
+		t.Errorf("TrueHD+Atmos warning should name Atmos: %s", warns[0])
+	}
+	if !strings.Contains(warns[1], "lossless") {
+		t.Errorf("DTS-HD MA warning should call out lossless -> lossy: %s", warns[1])
+	}
+	if !strings.Contains(warns[2], "second lossy") {
+		t.Errorf("plain DTS core -> EAC3 is lossy -> lossy: %s", warns[2])
+	}
+	if !strings.Contains(warns[3], "second lossy") {
+		t.Errorf("AC3 -> AAC is lossy -> lossy: %s", warns[3])
+	}
+	if got := AudioWarnings(rules, []media.Stream{{Index: 5, CodecType: "audio", CodecName: "aac", Channels: 2}}, "mp4"); len(got) != 0 {
+		t.Errorf("a track with no matching rule (or copy) needs no warning: %v", got)
 	}
 }

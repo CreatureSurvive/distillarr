@@ -133,7 +133,7 @@ func TestNeuralDecodeArgs(t *testing.T) {
 
 func TestNeuralMux(t *testing.T) {
 	src := probe("/m/a.mkv", "h264", "yuv420p", "", []string{"ac3", "aac"}, []string{"subrip"})
-	spec, err := BuildNeuralMux(Settings{Codec: HEVC, PreferMP4: false, UpscaleTo: 1080, UpscalePreset: "neural-anime"}, src, "/w/list.txt", "/o.mkv")
+	spec, err := BuildNeuralMux(Settings{Codec: HEVC, UpscaleTo: 1080, UpscalePreset: "neural-anime"}, src, "/w/list.txt", "/o.mkv")
 	if err != nil {
 		t.Fatal(err)
 	}

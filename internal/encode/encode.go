@@ -50,6 +50,21 @@ type AudioTrack struct {
 	Channels int    `json:"channels,omitempty"` // 0 keep, 2 = downmix to stereo
 }
 
+// AudioRule is a source-codec-wide audio policy, keyed in
+// Settings.AudioRules by a source codec family: real ffprobe codec_name
+// values ("truehd", "dts", "eac3", "opus", "vorbis", ...) plus the
+// virtual key "pcm" covering every PCM variant (pcm_s16le, pcm_s24le,
+// lpcm, ...; see isPCMCodec) — this is what lets Config.AudioPCMTarget
+// keep working as a single knob instead of one entry per PCM subtype.
+// A per-track explicit override in Settings.Audio always wins over the
+// rule for its Index; see audioPolicy.
+type AudioRule struct {
+	Action            string      `json:"action"`                       // copy | convert_if_needed | convert | remove
+	Target            string      `json:"target,omitempty"`             // eac3 | ac3 | aac | alac | flac | opus
+	BitrateByChannels map[int]int `json:"bitrate_by_channels,omitempty"` // channels -> kbps
+	MaxChannels       int         `json:"max_channels,omitempty"`
+}
+
 // SubTrack is a per-source-stream subtitle decision.
 type SubTrack struct {
 	Index  int    `json:"index"`
@@ -74,8 +89,19 @@ type Settings struct {
 	Audio          []AudioTrack `json:"audio,omitempty"` // nil = policy default
 	Subs           []SubTrack   `json:"subs,omitempty"`  // nil = keep all
 	ExtraArgs      string       `json:"extra_args,omitempty"` // appended output options
-	PreferMP4      bool         `json:"prefer_mp4,omitempty"` // auto container: MP4 whenever tracks fit
-	Crop           string       `json:"crop,omitempty"`       // "w:h:x:y" black-bar crop ("" = none)
+	// ContainerGoal drives "auto" container choice: prefer_mp4 (default:
+	// MP4 whenever every kept track fits, else MKV) | mp4_required
+	// (always MP4; audio_rules/the generic MP4-safety fallback convert
+	// whatever would otherwise force MKV) | keep (MP4 stays MP4 if it
+	// still fits, any other source container stays non-MP4). Only
+	// matters when Container == "auto"; a zero value normalizes to
+	// "keep" (Normalize), matching the old PreferMP4 bool's zero value.
+	ContainerGoal string `json:"container_goal,omitempty"`
+	// AudioRules is the per-source-codec policy; nil/empty means
+	// only AudioPCMTarget and the generic MP4-safety fallback apply, as
+	// before. See AudioRule and audioPolicy.
+	AudioRules map[string]AudioRule `json:"audio_rules,omitempty"`
+	Crop       string                `json:"crop,omitempty"` // "w:h:x:y" black-bar crop ("" = none)
 	// VideoCopy keeps the video bitstream as-is: a quick fix (remux,
 	// hvc1 tag, faststart, audio conversion) with no re-encode.
 	VideoCopy bool `json:"video_copy,omitempty"`
@@ -192,6 +218,9 @@ func (s *Settings) Normalize() {
 	}
 	if s.AudioPCMTarget == "" {
 		s.AudioPCMTarget = "flac"
+	}
+	if s.ContainerGoal == "" {
+		s.ContainerGoal = "keep"
 	}
 	if s.UpscaleTo > 0 {
 		s.VMAFTarget = 0
@@ -693,25 +722,151 @@ type streamPlan struct {
 
 // AudioDecision resolves what happens to one source audio stream.
 func AudioDecision(s Settings, a media.Stream, container string) AudioTrack {
+	if t, ok := audioPolicy(s, a, container); ok {
+		return t
+	}
+	if container == "mp4" && !isMP4AudioSafe(a.CodecName) {
+		return AudioTrack{Index: a.Index, Action: "convert", Codec: "aac"}
+	}
+	return AudioTrack{Index: a.Index, Action: "copy"}
+}
+
+// audioPolicy resolves everything that overrides the plain-copy default:
+// an explicit per-track override, then Settings.AudioRules, then the
+// legacy AudioPCMTarget knob — in that order, independent of the
+// generic MP4-safety fallback (which AudioDecision applies last, only
+// when nothing here fired). ok is false when none of these apply, so
+// the caller falls back to its own container-dependent default.
+// fitsMP4 also calls this directly (with container="mp4") to judge
+// whether a container_goal of "prefer_mp4"/"keep" should pick MP4 at
+// all — a convert_if_needed rule must be evaluated against the
+// container MP4 would actually use, not a stand-in like "mkv".
+func audioPolicy(s Settings, a media.Stream, container string) (AudioTrack, bool) {
 	for _, t := range s.Audio {
 		if t.Index == a.Index {
 			if t.Action == "" {
 				t.Action = "copy"
 			}
-			return t
+			return t, true
 		}
+	}
+	if t, ok := ResolveAudioRule(s.AudioRules, a.CodecName, a.Channels, container); ok {
+		t.Index = a.Index
+		return t, true
 	}
 	if a.IsPCM() && s.AudioPCMTarget != "copy" {
 		c := s.AudioPCMTarget
 		if c == "flac" && container == "mp4" {
 			c = "alac" // lossless too, and MP4/Apple-native
 		}
-		return AudioTrack{Index: a.Index, Action: "convert", Codec: c}
+		return AudioTrack{Index: a.Index, Action: "convert", Codec: c}, true
 	}
-	if container == "mp4" && !isMP4AudioSafe(a.CodecName) {
-		return AudioTrack{Index: a.Index, Action: "convert", Codec: "aac"}
+	return AudioTrack{}, false
+}
+
+// isPCMCodec is IsPCM's logic on a bare codec name, for callers (like
+// ResolveAudioRule, shared with recs' size estimate) that don't have a
+// media.Stream to call the method on. Keep in sync with
+// (*media.Stream).IsPCM — duplicated on purpose, like the other
+// codec/container lists this app keeps in more than one place.
+func isPCMCodec(codec string) bool {
+	return strings.HasPrefix(codec, "pcm_") || codec == "lpcm" || strings.Contains(codec, "adpcm")
+}
+
+// ResolveAudioRule looks up rules[key] for a source track (key is the
+// codec name, or "pcm" for any PCM variant) and returns the decision it
+// implies. ok is false when no rule matches, or the matching rule is
+// "copy"/unrecognized, or it's "convert_if_needed" and the track
+// already fits container as-is — the caller then falls back to its own
+// default. Shared by encode.Build's stream planner (real tracks) and
+// recs' size/estimate plan (persisted store.AudioStream fields), so a
+// track's estimated action and its real encode never disagree.
+func ResolveAudioRule(rules map[string]AudioRule, codec string, channels int, container string) (AudioTrack, bool) {
+	if len(rules) == 0 {
+		return AudioTrack{}, false
 	}
-	return AudioTrack{Index: a.Index, Action: "copy"}
+	key := codec
+	if isPCMCodec(codec) {
+		key = "pcm"
+	}
+	rule, ok := rules[key]
+	if !ok {
+		return AudioTrack{}, false
+	}
+	switch rule.Action {
+	case "remove":
+		return AudioTrack{Action: "drop"}, true
+	case "convert":
+		return buildConvert(rule, codec, channels), true
+	case "convert_if_needed":
+		if container == "mkv" || isMP4AudioSafe(codec) {
+			return AudioTrack{}, false // fits as-is; let the caller's own default (plain copy) stand
+		}
+		return buildConvert(rule, codec, channels), true
+	}
+	return AudioTrack{}, false // "copy" or an unrecognized action
+}
+
+// buildConvert applies a rule's target/bitrate/channel-cap to one track.
+// AC3 hard-caps at 5.1 regardless of MaxChannels (planStreams enforces
+// this too, for tracks that reach "convert" some other way, e.g. an
+// explicit per-track override).
+func buildConvert(rule AudioRule, codec string, channels int) AudioTrack {
+	target := rule.Target
+	if target == "" {
+		target = "aac"
+	}
+	ch := channels
+	if rule.MaxChannels > 0 && ch > rule.MaxChannels {
+		ch = rule.MaxChannels
+	}
+	if target == "ac3" && ch > 6 {
+		ch = 6
+	}
+	t := AudioTrack{Action: "convert", Codec: target}
+	if ch != channels {
+		t.Channels = ch
+	}
+	if rule.BitrateByChannels != nil {
+		key := ch
+		if key <= 0 {
+			key = channels
+		}
+		if br, ok := rule.BitrateByChannels[key]; ok {
+			t.Bitrate = br
+		}
+	}
+	return t
+}
+
+// AudioWarnings returns user-facing cautions for what AudioRules will do
+// to real tracks — irreversible loss the rule itself doesn't say out
+// loud. Atmos/DTS:X are object-audio layers riding on top of TrueHD /
+// DTS-HD MA; ffprobe exposes them in the stream's "profile" field
+// (confirmed against jellyfin-ffmpeg's ffprobe output — re-check this if
+// a future jellyfin-ffmpeg version reports profile text differently).
+func AudioWarnings(rules map[string]AudioRule, audios []media.Stream, container string) []string {
+	lossy := map[string]bool{"aac": true, "ac3": true, "eac3": true, "mp3": true, "opus": true, "vorbis": true, "wmapro": true, "dts": true}
+	var out []string
+	for _, a := range audios {
+		t, ok := ResolveAudioRule(rules, a.CodecName, a.Channels, container)
+		if !ok || t.Action != "convert" {
+			continue
+		}
+		p := strings.ToLower(a.Profile)
+		switch {
+		case strings.Contains(p, "atmos") || strings.Contains(p, "dts:x") || strings.Contains(p, "dts-x"):
+			out = append(out, fmt.Sprintf("Audio #%d: %s → %s drops Atmos/DTS:X height and object metadata (channel bed only).",
+				a.Index, strings.ToUpper(a.CodecName), strings.ToUpper(t.Codec)))
+		case a.CodecName == "truehd" || (a.CodecName == "dts" && strings.Contains(p, "ma")):
+			out = append(out, fmt.Sprintf("Audio #%d: %s (lossless) → %s (lossy).",
+				a.Index, strings.ToUpper(a.CodecName), strings.ToUpper(t.Codec)))
+		case lossy[a.CodecName]:
+			out = append(out, fmt.Sprintf("Audio #%d: lossy %s → lossy %s, a second lossy generation.",
+				a.Index, strings.ToUpper(a.CodecName), strings.ToUpper(t.Codec)))
+		}
+	}
+	return out
 }
 
 func subKept(s Settings, sub media.Stream, container string) bool {
@@ -761,9 +916,13 @@ func planStreams(s Settings, src *media.Probe, container string, preview bool) s
 			}
 			p.codecs = append(p.codecs, "-c:a:"+k, codec)
 			ch := a.Channels
-			if d.Channels > 0 {
-				ch = d.Channels
-				p.codecs = append(p.codecs, "-ac:a:"+k, itoa(d.Channels))
+			want := d.Channels
+			if codec == "ac3" && (want <= 0 || want > 6) && a.Channels > 6 {
+				want = 6 // AC3 caps at 5.1: downmix a 7.1 source
+			}
+			if want > 0 && want != a.Channels {
+				ch = want
+				p.codecs = append(p.codecs, "-ac:a:"+k, itoa(want))
 			}
 			if codec != "flac" {
 				br := d.Bitrate
@@ -829,11 +988,18 @@ func muxArgsFrom(container string, idx int) []string {
 	return []string{"-map_metadata", i, "-map_chapters", i, "-default_mode", "infer_no_subs", "-f", "matroska"}
 }
 
-// ChooseContainer resolves "auto". With PreferMP4 (Apple-friendly: HEVC
-// tagged hvc1, moov atom first) any source goes to MP4 when every kept
-// track fits; otherwise the source container is kept (MP4 only when the
-// source is MP4). Bitmap subs, styled ASS subs and copied TrueHD/DTS/FLAC
-// audio force MKV rather than being silently degraded.
+// ChooseContainer resolves "auto" per ContainerGoal:
+//   - mp4_required: always MP4. planStreams (via AudioRules and the
+//     generic MP4-safety fallback) converts or drops whatever wouldn't
+//     otherwise fit; there's no MKV fallback.
+//   - prefer_mp4 (Apple-friendly: HEVC tagged hvc1, moov atom first):
+//     MP4 whenever every kept track already fits (fitsMP4), else MKV.
+//   - keep (or an unset/unrecognized goal): MP4 only when the source
+//     already is MP4 and still fits; otherwise MKV.
+//
+// Bitmap subs, styled ASS subs and copied TrueHD/DTS/FLAC/PCM audio
+// (absent a matching AudioRule) force MKV under prefer_mp4/keep rather
+// than being silently degraded.
 func ChooseContainer(s Settings, src *media.Probe) (string, error) {
 	if src.Video() == nil {
 		return "", fmt.Errorf("no video stream")
@@ -844,17 +1010,31 @@ func ChooseContainer(s Settings, src *media.Probe) (string, error) {
 	case "mp4":
 		return "mp4", nil // incompatible streams are converted/dropped by planStreams
 	}
-	name := strings.ToLower(src.Format.Filename)
-	srcMP4 := strings.HasSuffix(name, ".mp4") || strings.HasSuffix(name, ".m4v")
-	if !srcMP4 && !s.PreferMP4 {
-		return "mkv", nil
+	switch s.ContainerGoal {
+	case "mp4_required":
+		return "mp4", nil
+	case "prefer_mp4":
+		if !fitsMP4(s, src) {
+			return "mkv", nil
+		}
+		return "mp4", nil
+	default: // "keep" and anything unrecognized
+		name := strings.ToLower(src.Format.Filename)
+		srcMP4 := strings.HasSuffix(name, ".mp4") || strings.HasSuffix(name, ".m4v")
+		if !srcMP4 || !fitsMP4(s, src) {
+			return "mkv", nil
+		}
+		return "mp4", nil
 	}
-	if !fitsMP4(s, src) {
-		return "mkv", nil
-	}
-	return "mp4", nil
 }
 
+// fitsMP4 judges whether MP4 output would need no incompatible-track
+// fallback: every audio track's *real* mp4-targeted policy decision
+// (audioPolicy, not the generic AudioDecision fallback that would mask
+// the answer by always converting) already copies a safe codec or
+// converts/drops on its own — via an explicit override, an AudioRule
+// (including convert_if_needed, which by definition resolves once MP4
+// is really the target), or the legacy PCM policy.
 func fitsMP4(s Settings, src *media.Probe) bool {
 	if s.VideoCopy {
 		switch src.Video().CodecName {
@@ -874,23 +1054,46 @@ func fitsMP4(s Settings, src *media.Probe) bool {
 		}
 	}
 	for _, a := range src.Audios() {
-		d := AudioDecision(s, a, "mkv")
-		if d.Action == "copy" && !isMP4AudioSafe(a.CodecName) {
-			return false
+		if t, ok := audioPolicy(s, a, "mp4"); ok {
+			if t.Action == "copy" && !isMP4AudioSafe(a.CodecName) {
+				return false
+			}
+			if t.Action == "convert" && t.Codec == "opus" {
+				return false
+			}
+			continue
 		}
-		if d.Action == "convert" && d.Codec == "opus" {
+		if !isMP4AudioSafe(a.CodecName) {
 			return false
 		}
 	}
 	return true
 }
 
+// mp4AudioCompat is the codec × MP4 compatibility table: muxable
+// says ffmpeg can put the codec in an ISO-BMFF/MP4 container at all;
+// apple says shipping Apple devices/QuickTime are known to decode it
+// there. Only apple:true codecs are treated as MP4-safe — muxable alone
+// isn't enough for a target meant to direct-play on Apple gear.
+var mp4AudioCompat = map[string]struct{ muxable, apple bool }{
+	"aac":    {true, true},
+	"mp3":    {true, true},
+	"ac3":    {true, true},
+	"eac3":   {true, true},
+	"alac":   {true, true},
+	// opus: ffmpeg can mux it into MP4 and modern iOS/tvOS/macOS decode
+	// it there, but older Apple hardware and QuickTime don't — treated
+	// as safe (unchanged from before audio rules) since the app already targets
+	// current OS versions elsewhere.
+	"opus": {true, true},
+	"flac": {true, false}, // muxable since ffmpeg 4.3; Apple devices don't decode FLAC-in-MP4
+	"truehd": {false, false},
+	"dts":    {false, false},
+}
+
 func isMP4AudioSafe(codec string) bool {
-	switch codec {
-	case "aac", "mp3", "ac3", "eac3", "alac", "opus":
-		return true
-	}
-	return false
+	c, ok := mp4AudioCompat[codec]
+	return ok && c.apple
 }
 
 // SplitArgs splits user-supplied extra args with simple shell quoting.
