@@ -249,6 +249,17 @@ var alters = []string{
 		key TEXT PRIMARY KEY,
 		samples TEXT NOT NULL DEFAULT '[]',
 		updated_at TEXT NOT NULL)`,
+	// One Plex library item's mapping onto a local file, keyed by
+	// file_id like arr_items (not path like the jellyfin table): a
+	// file's id survives a replace even when its container/extension
+	// changes, so no rename bookkeeping is needed the way
+	// Store.RenamePath does for Jellyfin's path-keyed cache.
+	`CREATE TABLE IF NOT EXISTS plex_items(
+		file_id INTEGER PRIMARY KEY REFERENCES files(id) ON DELETE CASCADE,
+		rating_key TEXT NOT NULL,
+		section_id TEXT NOT NULL,
+		added_at INTEGER NOT NULL DEFAULT 0)`,
+	`CREATE INDEX IF NOT EXISTS plex_items_section ON plex_items(section_id)`,
 }
 
 func (s *Store) migrate() error {
