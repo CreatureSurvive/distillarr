@@ -498,7 +498,7 @@ export type Config = {
   recompress_hevc: boolean;
   max_height: number;
   tonemap_hdr: boolean;
-  prefer_mp4: boolean;
+  container_goal: string; // prefer_mp4 | mp4_required | keep
   crop_bars: boolean;
   vmaf_target: number;
   upscale_output: string;

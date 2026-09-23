@@ -117,7 +117,7 @@ export default function SettingsView({ live, onJellyfin, onPlex }: { live: LiveS
         </div>
         <div className="toggles">
           <Toggle on={cfg.recompress_hevc} onChange={(v) => save({ recompress_hevc: v })} label="Re-encode existing HEVC" hint="Only when its bitrate is unusually high" />
-          <Toggle on={cfg.prefer_mp4} onChange={(v) => save({ prefer_mp4: v })} label="Prefer MP4 for Apple devices"
+          <Toggle on={cfg.container_goal !== "keep"} onChange={(v) => save({ container_goal: v ? "prefer_mp4" : "keep" })} label="Prefer MP4 for Apple devices"
             hint="HEVC tagged hvc1 with the index at the start. MKV is kept only for image subtitles, styled ASS, or TrueHD/DTS/FLAC audio. Changing an extension makes Sonarr/Radarr rescan the file." />
           <Toggle on={cfg.crop_bars} onChange={(v) => save({ crop_bars: v })} label="Crop black bars by default"
             hint="Bars are always left out of size estimates. Cropping them from the output is off by default: a film that switches aspect ratio could lose picture in scenes the detector didn't sample." />
