@@ -136,6 +136,7 @@ func (s *Server) Handler() http.Handler {
 
 	// autopilot
 	mux.HandleFunc("GET /api/v1/autopilot/preview", s.autopilotPreview)
+	mux.HandleFunc("POST /api/v1/autopilot/backlog", s.autopilotBacklog)
 
 	// trash
 	mux.HandleFunc("GET /api/v1/trash", s.listTrash)

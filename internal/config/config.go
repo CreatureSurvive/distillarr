@@ -101,6 +101,12 @@ type Config struct {
 	// can't live on the far side of that edge without a cycle).
 	AutopilotEnabled bool       `json:"autopilot_enabled,omitempty"`
 	AutoRules        []AutoRule `json:"auto_rules,omitempty"`
+	// AutopilotBudgetGB / AutopilotBudgetHours cap what one processing
+	// window occurrence spends on autopilot-origin work; 0 means
+	// unlimited, which is also the zero-value default, so no accessor is
+	// needed the way the default-on settings above need one.
+	AutopilotBudgetGB    float64 `json:"autopilot_budget_gb,omitempty"`
+	AutopilotBudgetHours float64 `json:"autopilot_budget_hours,omitempty"`
 }
 
 // RuleMatch: every set field must match (AND) for the rule to apply. An

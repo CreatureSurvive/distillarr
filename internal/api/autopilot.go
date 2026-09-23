@@ -3,8 +3,12 @@ package api
 import (
 	"encoding/json"
 	"net/http"
+	"sort"
+	"time"
 
 	"mediatrans/internal/autopilot"
+	"mediatrans/internal/encode"
+	"mediatrans/internal/issues"
 	"mediatrans/internal/recs"
 	"mediatrans/internal/store"
 )
@@ -80,4 +84,133 @@ func (s *Server) autopilotPreview(w http.ResponseWriter, r *http.Request) {
 		out = append(out, groups[k])
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"groups": out})
+}
+
+// autopilotBacklogFile is one file the backlog run picked (or would pick).
+type autopilotBacklogFile struct {
+	FileID     int64   `json:"file_id"`
+	Title      string  `json:"title"`
+	Path       string  `json:"path"`
+	RuleID     string  `json:"rule_id,omitempty"`
+	Rule       string  `json:"rule,omitempty"`
+	Action     string  `json:"action"`
+	EstSeconds float64 `json:"est_seconds"`
+	EstSavedGB float64 `json:"est_saved_gb"`
+}
+
+func (c autopilotBacklogFile) valuePerSec() float64 {
+	if c.EstSeconds <= 0 {
+		return 0
+	}
+	return c.EstSavedGB / c.EstSeconds
+}
+
+// POST /api/v1/autopilot/backlog?dry_run=true (the default) — evaluates
+// the whole library against the current rules like autopilotPreview, but
+// sorts by estimated value per GPU-second and greedily selects files
+// until the configured budget (0 = unlimited) runs out, the same way one
+// processing window's autopilot spend should be prioritized. A
+// dry run reports the selection without creating anything; dry_run=false
+// opens one intake row per selected file (origin "autopilot", due now),
+// so the existing intake promotion pass re-checks hardlinks and re-runs
+// the rule engine fresh at the moment it actually queues — this handler
+// never enqueues a job directly.
+func (s *Server) autopilotBacklog(w http.ResponseWriter, r *http.Request) {
+	dryRun := r.URL.Query().Get("dry_run") != "false"
+	cfg := s.cfg.Get()
+	budgetBytes := int64(cfg.AutopilotBudgetGB * (1 << 30))
+	budgetSecs := cfg.AutopilotBudgetHours * 3600
+
+	var candidates []autopilotBacklogFile
+	err := s.st.EachFile(func(f *store.File) error {
+		if f.RecJSON == "" || f.Missing {
+			return nil
+		}
+		var rec recs.Recommendation
+		if json.Unmarshal([]byte(f.RecJSON), &rec) != nil || rec.Action != "transcode" {
+			return nil
+		}
+		if queued, _ := s.st.HasQueuedForFile(f.Path); queued {
+			return nil
+		}
+		policy := recs.ArrPolicy(f.ID)
+		ctx := autopilot.Context{Origin: "autopilot", TagNames: s.arrTagNamesFor(f.ID)}
+		d := autopilot.Evaluate(f, rec, policy, ctx, cfg.AutoRules, cfg.MinSavingsPct)
+		if d.Action == "ignore" {
+			return nil
+		}
+		settings := rec.Settings
+		switch d.Action {
+		case "quick_fix":
+			settings = issues.QuickFix(f, cfg)
+		case "queue_override":
+			if d.Codec != "" {
+				settings.Codec = encode.Codec(d.Codec)
+			}
+			if d.Quality > 0 {
+				settings.Quality = d.Quality
+			}
+		}
+		if blocked, _ := s.codecPenaltyBlocked(f, settings); blocked {
+			return nil // would just land in needs_confirmation, not real backlog work
+		}
+		secs, _ := s.eng.EstimateSeconds(f, settings)
+		saved := f.Size - rec.EstOut
+		candidates = append(candidates, autopilotBacklogFile{
+			FileID: f.ID, Title: f.Title, Path: f.Path,
+			RuleID: d.RuleID, Rule: d.Rule, Action: d.Action,
+			EstSeconds: secs, EstSavedGB: float64(saved) / (1 << 30),
+		})
+		return nil
+	})
+	if err != nil {
+		fail(w, 500, err)
+		return
+	}
+
+	sort.SliceStable(candidates, func(i, j int) bool {
+		return candidates[i].valuePerSec() > candidates[j].valuePerSec()
+	})
+
+	var picked []autopilotBacklogFile
+	var spentBytes int64
+	var spentSecs float64
+	for _, c := range candidates {
+		saved := int64(c.EstSavedGB * (1 << 30))
+		if budgetBytes > 0 && spentBytes+saved > budgetBytes {
+			break
+		}
+		if budgetSecs > 0 && spentSecs+c.EstSeconds > budgetSecs {
+			break
+		}
+		picked = append(picked, c)
+		spentBytes += saved
+		spentSecs += c.EstSeconds
+	}
+
+	queued := 0
+	if !dryRun {
+		now := time.Now()
+		for _, c := range picked {
+			reason := "Backlog: built-in default"
+			if c.Rule != "" {
+				reason = "Backlog: rule '" + c.Rule + "'"
+			}
+			if _, err := s.st.UpsertIntake(c.FileID, "autopilot", reason, "", now); err == nil {
+				queued++
+			}
+		}
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"dry_run":          dryRun,
+		"budget_gb":        cfg.AutopilotBudgetGB,
+		"budget_hours":     cfg.AutopilotBudgetHours,
+		"total_candidates": len(candidates),
+		"selected_count":   len(picked),
+		"est_saved_gb":     float64(spentBytes) / (1 << 30),
+		"est_hours":        spentSecs / 3600,
+		"queued_intake":    queued,
+		"selected":         picked,
+	})
 }
