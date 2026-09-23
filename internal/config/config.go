@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"mediatrans/internal/encode"
 	"mediatrans/internal/pathmap"
 	"mediatrans/internal/store"
 )
@@ -55,9 +56,25 @@ type Config struct {
 	TonemapHDR         bool   `json:"tonemap_hdr"`         // HDR10→SDR profile off by default
 	DefaultSpeed       string `json:"default_speed"`       // faster|fast|medium|slow|slower
 	TrashDir           string `json:"trash_dir"`           // on the media pool → hardlinks, no copy
-	// PreferMP4 makes "auto" output MP4 (HEVC tagged hvc1, moov first)
-	// whenever every kept track fits, for Apple/direct-play clients.
+	// PreferMP4 is deprecated: kept only so normalize() can
+	// migrate an old stored value into ContainerGoal the first time this
+	// config loads after the upgrade (true/nil → prefer_mp4, false →
+	// keep). New code reads ContainerGoal, never this field.
 	PreferMP4 *bool `json:"prefer_mp4"`
+	// ContainerGoal: prefer_mp4 (default: "auto" output goes MP4 — HEVC
+	// tagged hvc1, moov first — whenever every kept track fits, else
+	// MKV) | mp4_required (always MP4; AudioRules convert whatever would
+	// otherwise force MKV) | keep (MP4 stays MP4 if it still fits;
+	// anything else stays non-MP4). Left "" until normalize() resolves
+	// it (from PreferMP4 on first load, "prefer_mp4" after), so an
+	// upgrading host's explicit choice survives.
+	ContainerGoal string `json:"container_goal,omitempty"`
+	// AudioRules is per-source-codec audio policy, keyed by
+	// ffprobe codec_name ("truehd", "dts", "opus", "vorbis", "flac", ...)
+	// plus the virtual key "pcm" covering every PCM variant. Empty means
+	// only AudioPCMTarget and the built-in MP4-safety fallback apply, as
+	// before audio rules existed. See encode.AudioRule.
+	AudioRules map[string]encode.AudioRule `json:"audio_rules,omitempty"`
 	// CropBars crops detected black bars out of the output. Off by
 	// default: films that switch aspect ratio (IMAX scenes) could lose
 	// picture if the sampled frames missed the wider scenes.
@@ -415,6 +432,34 @@ func (m *Manager) normalize() {
 		t := true
 		m.cfg.PreferMP4 = &t
 	}
+	switch m.cfg.ContainerGoal {
+	case "prefer_mp4", "mp4_required", "keep":
+	default:
+		if m.cfg.PreferMP4 != nil && !*m.cfg.PreferMP4 {
+			m.cfg.ContainerGoal = "keep"
+		} else {
+			m.cfg.ContainerGoal = "prefer_mp4"
+		}
+	}
+	if m.cfg.ContainerGoal == "mp4_required" {
+		// Suggested defaults: only fill a rule that doesn't exist
+		// yet, so switching to mp4_required once seeds sane behaviour but
+		// never overwrites something the user already configured.
+		if m.cfg.AudioRules == nil {
+			m.cfg.AudioRules = map[string]encode.AudioRule{}
+		}
+		def := func(k string, r encode.AudioRule) {
+			if _, ok := m.cfg.AudioRules[k]; !ok {
+				m.cfg.AudioRules[k] = r
+			}
+		}
+		def("truehd", encode.AudioRule{Action: "convert", Target: "eac3", BitrateByChannels: map[int]int{6: 640, 8: 1024}})
+		def("dts", encode.AudioRule{Action: "convert", Target: "eac3", BitrateByChannels: map[int]int{6: 640, 8: 1024}})
+		def("flac", encode.AudioRule{Action: "convert", Target: "alac"})
+		def("pcm", encode.AudioRule{Action: "convert", Target: "alac"})
+		def("opus", encode.AudioRule{Action: "convert", Target: "aac"})
+		def("vorbis", encode.AudioRule{Action: "convert", Target: "aac"})
+	}
 	if m.cfg.TrashDir == "" {
 		m.cfg.TrashDir = d.TrashDir
 	}
@@ -524,9 +569,6 @@ func (c Config) VMAF() float64 {
 	}
 	return *c.VMAFTarget
 }
-
-// MP4 reports the effective prefer-MP4 setting (default on).
-func (c Config) MP4() bool { return c.PreferMP4 == nil || *c.PreferMP4 }
 
 // PressureBudgetX reports the effective disk-pressure budget
 // multiplier (default 2x).
