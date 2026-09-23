@@ -147,8 +147,14 @@ type Media struct {
 // transcoding (absent for direct play); VideoDecision is "transcode"
 // when the video stream itself is being converted (GPU-competing), vs.
 // "copy" for an audio-only/container transcode with video passed through.
+// AudioDecision/SubtitleDecision are the same three-value shape for
+// their streams; Plex gives no free-text reason like Jellyfin's
+// TranscodeReasons, so these decisions are what forced-transcode detection synthesizes reason
+// categories from.
 type TranscodeSession struct {
-	VideoDecision string `json:"videoDecision"`
+	VideoDecision    string `json:"videoDecision"`
+	AudioDecision    string `json:"audioDecision"`
+	SubtitleDecision string `json:"subtitleDecision"`
 }
 
 // Item is the subset of a Plex library item we cache: a movie, or (with
