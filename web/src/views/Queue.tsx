@@ -58,12 +58,14 @@ export default function Queue({ live }: { live: LiveState }) {
       </header>
 
       <div className="status-line">
-        <span className={`dot ${summary?.paused ? "d-amber" : summary?.window_open ? "d-teal" : "d-dim"}`} aria-hidden />
+        <span className={`dot ${summary?.paused || (summary?.viewers_transcoding || 0) > 0 ? "d-amber" : summary?.window_open ? "d-teal" : "d-dim"}`} aria-hidden />
         {summary?.paused
           ? "Paused. No new encodes will start."
-          : summary?.window_open
-            ? "Processing: new encodes start as workers free up."
-            : "Outside your processing window. Queued jobs wait; “Run now” skips the wait."}
+          : (summary?.viewers_transcoding || 0) > 0
+            ? `Waiting: ${summary!.viewers_transcoding} viewer${summary!.viewers_transcoding === 1 ? "" : "s"} transcoding.`
+            : summary?.window_open
+              ? "Processing: new encodes start as workers free up."
+              : "Outside your processing window. Queued jobs wait; “Run now” skips the wait."}
       </div>
 
       <IntakePanel live={live} />

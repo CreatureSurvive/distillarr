@@ -123,6 +123,12 @@ export default function SettingsView({ live, onJellyfin, onPlex }: { live: LiveS
             hint="Bars are always left out of size estimates. Cropping them from the output is off by default: a film that switches aspect ratio could lose picture in scenes the detector didn't sample." />
           <CropProgress />
           <Toggle on={cfg.tonemap_hdr} onChange={(v) => save({ tonemap_hdr: v })} label="Tone-map HDR to SDR by default" hint="Off keeps HDR10/HLG intact" />
+          <Toggle on={cfg.defer_while_transcoding} onChange={(v) => save({ defer_while_transcoding: v })}
+            label="Don't start new encodes while someone is transcoding"
+            hint="Applies once Jellyfin and/or Plex is connected below. Encodes already running keep going." />
+          <Toggle on={cfg.hold_replace_while_playing} onChange={(v) => save({ hold_replace_while_playing: v })}
+            label="Don't swap a file in while it's being watched"
+            hint="Holds the finished encode and waits for playback to stop (up to a few hours) before replacing it." />
         </div>
         <Calibration />
       </section>

@@ -504,6 +504,8 @@ export type Config = {
   plex_token_set?: boolean;
   plex_path_map: string;
   plex_keep_added_at: boolean;
+  defer_while_transcoding: boolean;
+  hold_replace_while_playing: boolean;
   arr_instances: ArrInstance[];
   // Override for the host:port Settings shows in front of each webhook
   // path. Blank = use the browser's own origin.
@@ -783,7 +785,7 @@ export const api = {
   intakeDismissBulk: (ids: number[]) => post<{ dismissed: number }>("/api/v1/intake/dismiss", { ids }),
   moveJob: (id: number, before: number) => post<{ ok: boolean }>(`/api/v1/jobs/${id}/move`, { before }),
   queueSummary: () =>
-    req<{ counts: Record<string, number>; realized_saved: number; jobs_done: number; window_open: boolean; paused: boolean }>(
+    req<{ counts: Record<string, number>; realized_saved: number; jobs_done: number; window_open: boolean; paused: boolean; viewers_transcoding: number }>(
       "/api/v1/queue/summary"),
   pauseQueue: () => post<{ paused: boolean }>("/api/v1/queue/pause"),
   resumeQueue: () => post<{ paused: boolean }>("/api/v1/queue/resume"),

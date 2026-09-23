@@ -482,12 +482,14 @@ func (s *Server) jobMove(w http.ResponseWriter, r *http.Request) {
 func (s *Server) queueSummary(w http.ResponseWriter, r *http.Request) {
 	counts, _ := s.st.CountJobsByStatus()
 	realized, jobsDone, _ := s.st.RealizedSavings()
+	cfg := s.cfg.Get()
 	writeJSON(w, http.StatusOK, map[string]any{
-		"counts":         counts,
-		"realized_saved": realized,
-		"jobs_done":      jobsDone,
-		"window_open":    s.cfg.WindowOpen(time.Now()),
-		"paused":         s.cfg.Get().Paused,
+		"counts":              counts,
+		"realized_saved":      realized,
+		"jobs_done":           jobsDone,
+		"window_open":         s.cfg.WindowOpen(time.Now()),
+		"paused":              cfg.Paused,
+		"viewers_transcoding": s.eng.Transcoding(),
 	})
 }
 
