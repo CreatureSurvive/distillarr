@@ -452,6 +452,13 @@ export type ArrInstance = {
   path_map?: string;
   enabled?: boolean;
   penalty_ack?: boolean; // set only via api.arrAck(); a plain save never changes it
+
+  // Write-back, off by default. tag_after_reencode requires a
+  // non-empty reencode_tag: the server rejects a save that enables it
+  // with a blank name.
+  tag_after_reencode?: boolean;
+  reencode_tag?: string;
+  unmonitor_after_reencode?: boolean;
 };
 
 export type ArrPenalty = { profile: string; custom_format: string; score: number; matches: string; terms: string[] };
@@ -679,6 +686,8 @@ export const api = {
   arrGet: (id: string) => req<ArrInfo>(`/api/v1/arr/${id}`),
   arrAck: (id: string) => post<{ ok: boolean }>(`/api/v1/arr/${id}/ack`),
   arrSync: () => post<{ started: boolean; syncing?: boolean }>("/api/v1/arr/sync"),
+  arrRenameTag: (id: string, oldName: string, newName: string) =>
+    post<{ ok: boolean; renamed?: boolean; error?: string }>(`/api/v1/arr/${id}/rename-tag`, { old_name: oldName, new_name: newName }),
 
   preview: (id: string) => req<Preview>(`/api/v1/previews/${id}`),
   previews: () => req<{ previews: Preview[] }>("/api/v1/previews"),

@@ -86,6 +86,9 @@ func mergeArrInstances(stored []config.ArrInstance, patch json.RawMessage) ([]co
 			// no "not sent" state to distinguish from false.
 			inst.PenaltyAck = old.PenaltyAck
 		}
+		if inst.TagAfterReencodeOn() && strings.TrimSpace(inst.ReencodeTag) == "" {
+			return nil, fmt.Errorf("%s: enabling tag-after-reencode needs a tag name", inst.Name)
+		}
 		used[inst.ID] = true
 		out = append(out, inst)
 	}

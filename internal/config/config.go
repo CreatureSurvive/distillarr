@@ -132,11 +132,36 @@ type ArrInstance struct {
 	// something the user should knowingly enable, so it stays a toggle
 	// rather than being silently assumed.
 	RescanAfterReplace *bool `json:"rescan_after_replace,omitempty"`
+
+	// TagAfterReencode: apply ReencodeTag to the series/movie after a
+	// successful encode/remux/upscale-replace, creating the tag
+	// on the instance if it doesn't exist yet. Off by default, unlike
+	// the toggles above — write-back is opt-in, and the API layer
+	// refuses to enable this with a blank ReencodeTag (no silent
+	// default tag name).
+	TagAfterReencode *bool  `json:"tag_after_reencode,omitempty"`
+	ReencodeTag      string `json:"reencode_tag,omitempty"`
+
+	// UnmonitorAfterReencode: unmonitor the specific episode/movie (not
+	// the whole series) after a successful re-encode. Off by
+	// default.
+	UnmonitorAfterReencode *bool `json:"unmonitor_after_reencode,omitempty"`
 }
 
 // RescanAfterReplaceOn reports the effective setting (default on).
 func (a ArrInstance) RescanAfterReplaceOn() bool {
 	return a.RescanAfterReplace == nil || *a.RescanAfterReplace
+}
+
+// TagAfterReencodeOn reports the effective setting (default OFF —
+// write-back is opt-in, unlike the read-only toggles above).
+func (a ArrInstance) TagAfterReencodeOn() bool {
+	return a.TagAfterReencode != nil && *a.TagAfterReencode
+}
+
+// UnmonitorAfterReencodeOn reports the effective setting (default off).
+func (a ArrInstance) UnmonitorAfterReencodeOn() bool {
+	return a.UnmonitorAfterReencode != nil && *a.UnmonitorAfterReencode
 }
 
 // Default tag names for the tag policy; see ArrInstance's tag

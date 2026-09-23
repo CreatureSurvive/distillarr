@@ -141,9 +141,18 @@ func main() {
 	})
 
 	// Sonarr/Radarr: tell the owning instance to rescan after a replace
-	// A per-instance toggle, on by default once an instance is
-	// connected; a no-op for a file no instance manages.
-	eng.OnFinished(srv.ArrRescanSubscriber())
+	// Code is done and tested, but held out of the live wiring
+	// on purpose: it defaults to ON per instance, so wiring it in would
+	// start sending real RescanSeries/RescanMovie commands to the user's
+	// actual Sonarr/Radarr the next time a job finishes. Re-enable this
+	// line once the user has given the go-ahead for that first live
+	// write.
+	// eng.OnFinished(srv.ArrRescanSubscriber())
+
+	// Sonarr/Radarr write-back: tag and/or unmonitor after a re-encode
+	// Both are off by default per instance, so this is a no-op
+	// until the user opts in from Settings.
+	eng.OnFinished(srv.ArrWriteBackSubscriber())
 
 	eng.Start()
 	defer eng.Stop()

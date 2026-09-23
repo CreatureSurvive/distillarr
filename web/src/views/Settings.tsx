@@ -282,9 +282,14 @@ function ArrSection({ cfg, setCfg }: { cfg: Config; setCfg: (c: Config) => void 
   const [saving, setSaving] = useState(false);
   const [info, setInfo] = useState<Record<string, ArrInfo>>({});
   const [syncing, setSyncing] = useState(false);
+  // The tag name as last saved, per instance id — used to offer renaming
+  // it in Sonarr/Radarr too when the user edits reencode_tag.
+  const [savedTags, setSavedTags] = useState<Record<string, string>>({});
+  const [renaming, setRenaming] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
     setDrafts(cfg.arr_instances.map((a) => ({ ...a, keyInput: "" })));
+    setSavedTags(Object.fromEntries(cfg.arr_instances.filter((a) => a.id).map((a) => [a.id!, a.reencode_tag || ""])));
     // Codec-penalty reports come from each saved instance's own
     // last sync, not this form's draft state.
     cfg.arr_instances.forEach((a) => {
@@ -309,7 +314,23 @@ function ArrSection({ cfg, setCfg }: { cfg: Config; setCfg: (c: Config) => void 
   const toPayload = (d: ArrDraft) => ({
     id: d.id || undefined, name: d.name, kind: d.kind, url: d.url,
     api_key: d.keyInput || undefined, path_map: d.path_map, enabled: d.enabled,
+    tag_after_reencode: d.tag_after_reencode, reencode_tag: d.reencode_tag,
+    unmonitor_after_reencode: d.unmonitor_after_reencode,
   });
+
+  const renameTag = async (id: string, oldName: string, newName: string) => {
+    setRenaming((r) => ({ ...r, [id]: true }));
+    try {
+      const r = await api.arrRenameTag(id, oldName, newName);
+      if (!r.ok) throw new Error(r.error || "Rename failed");
+      toast(r.renamed ? `Renamed "${oldName}" to "${newName}"` : `No "${oldName}" tag found there to rename`);
+      setSavedTags((m) => ({ ...m, [id]: newName }));
+    } catch (e: any) {
+      toast(e.message, "err");
+    } finally {
+      setRenaming((r) => ({ ...r, [id]: false }));
+    }
+  };
 
   const saveAll = async (list: ArrDraft[], msg: string) => {
     setSaving(true);
@@ -397,9 +418,11 @@ function ArrSection({ cfg, setCfg }: { cfg: Config; setCfg: (c: Config) => void 
                   </div>
                 ))}
                 <div className="small dim" style={{ marginTop: 6 }}>
-                  Fix: exclude a tag from that custom format in {d.kind === "sonarr" ? "Sonarr" : "Radarr"} → Settings → Custom
-                  Formats, or in Recyclarr's config under that format's <code>quality_profiles.score</code> override. See{" "}
+                  Fix: turn on "Tag after re-encode" below, then exclude that tag from this custom format in{" "}
+                  {d.kind === "sonarr" ? "Sonarr" : "Radarr"} → Settings → Custom Formats, or in Recyclarr's config under
+                  that format's <code>quality_profiles.score</code> override. See{" "}
                   <a href="https://github.com/TRaSH-Guides/Guides" target="_blank" rel="noreferrer">TRaSH-Guides</a> for the exclusion syntax.
+                  This is only a suggestion — nothing here gets tagged unless you turn it on yourself.
                 </div>
                 <div className="toolbar" style={{ marginTop: 8 }}>
                   <button className="btn mini" onClick={() => d.id && ack(d.id)}>I understand</button>
@@ -424,6 +447,34 @@ function ArrSection({ cfg, setCfg }: { cfg: Config; setCfg: (c: Config) => void 
               <label className="field"><span>Path mapping <span className="dim">(their view=here)</span></span>
                 <input className="input mono" value={d.path_map || ""} onChange={(e) => update(i, { path_map: e.target.value })} placeholder="/data=/media" spellCheck={false} />
               </label>
+            </div>
+            <div className="panel" style={{ marginTop: 10, marginBottom: 0 }}>
+              <h4 style={{ margin: "0 0 8px", fontSize: 13 }}>Write-back <span className="dim">(optional — off by default)</span></h4>
+              <div className="form-grid">
+                <div className="field">
+                  <Toggle on={!!d.tag_after_reencode} onChange={(v) => update(i, { tag_after_reencode: v })} label="Tag after re-encode" />
+                  <input className="input" value={d.reencode_tag || ""} onChange={(e) => update(i, { reencode_tag: e.target.value })}
+                    placeholder="distilled" spellCheck={false} disabled={!d.tag_after_reencode} style={{ marginTop: 6 }} />
+                </div>
+                <div className="field">
+                  <Toggle on={!!d.unmonitor_after_reencode} onChange={(v) => update(i, { unmonitor_after_reencode: v })}
+                    label={`Unmonitor after re-encode${d.kind === "sonarr" ? " (that episode only)" : ""}`} />
+                </div>
+              </div>
+              {d.id && savedTags[d.id] && d.reencode_tag && d.reencode_tag !== savedTags[d.id] && (
+                <div className="small dim" style={{ marginTop: 6 }}>
+                  Renamed the tag here?{" "}
+                  <button className="btn mini" disabled={renaming[d.id]}
+                    onClick={() => d.id && renameTag(d.id, savedTags[d.id], d.reencode_tag!)}>
+                    {renaming[d.id] ? "Renaming…" : `Also rename "${savedTags[d.id]}" → "${d.reencode_tag}" in ${d.kind === "sonarr" ? "Sonarr" : "Radarr"}`}
+                  </button>
+                </div>
+              )}
+              <div className="small dim" style={{ marginTop: 6 }}>
+                Applies after a successful re-encode/remux/upscale-replace of a file this instance manages. Tagging
+                creates the tag there if it doesn't exist yet. Unmonitoring targets the specific episode/movie, never
+                the whole series.
+              </div>
             </div>
             <div className="toolbar">
               <button className="btn" onClick={() => testOne(i)} disabled={testing[i]}>{testing[i] ? "Testing…" : "Test connection"}</button>

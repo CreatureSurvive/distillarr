@@ -354,3 +354,107 @@ func (c *Client) Tags(ctx context.Context) ([]Tag, error) {
 	err := c.get(ctx, &out, "/api/v3/tag", nil)
 	return out, err
 }
+
+type tagRequest struct {
+	Label string `json:"label"`
+}
+
+// CreateTag creates a new tag and returns it (with its assigned id).
+func (c *Client) CreateTag(ctx context.Context, label string) (*Tag, error) {
+	var t Tag
+	err := c.post(ctx, &t, "/api/v3/tag", tagRequest{Label: label})
+	return &t, err
+}
+
+// RenameTag relabels an existing tag in place (its id and every
+// assignment to a series/movie are unaffected).
+func (c *Client) RenameTag(ctx context.Context, id int64, label string) error {
+	return c.put(ctx, nil, fmt.Sprintf("/api/v3/tag/%d", id), Tag{ID: id, Label: label})
+}
+
+// EnsureTag returns the id of an existing tag matching label
+// case-insensitively, creating it first if none exists.
+func (c *Client) EnsureTag(ctx context.Context, label string) (int64, error) {
+	tags, err := c.Tags(ctx)
+	if err != nil {
+		return 0, err
+	}
+	for _, t := range tags {
+		if strings.EqualFold(t.Label, label) {
+			return t.ID, nil
+		}
+	}
+	created, err := c.CreateTag(ctx, label)
+	if err != nil {
+		return 0, err
+	}
+	return created.ID, nil
+}
+
+// seriesEditorRequest is the body for Sonarr's bulk PUT
+// /api/v3/series/editor, used instead of PUT /api/v3/series/{id} so a
+// tag/monitor change never has to round-trip (and risk clobbering) the
+// full series object.
+type seriesEditorRequest struct {
+	SeriesIDs []int64 `json:"seriesIds"`
+	Tags      []int64 `json:"tags,omitempty"`
+	ApplyTags string  `json:"applyTags,omitempty"` // "add" | "remove" | "replace"
+}
+
+// TagSeries adds tagID to seriesID's tags, leaving any it already has.
+func (c *Client) TagSeries(ctx context.Context, seriesID, tagID int64) error {
+	return c.put(ctx, nil, "/api/v3/series/editor",
+		seriesEditorRequest{SeriesIDs: []int64{seriesID}, Tags: []int64{tagID}, ApplyTags: "add"})
+}
+
+// movieEditorRequest is the body for Radarr's bulk PUT
+// /api/v3/movie/editor, the movie-side equivalent of seriesEditorRequest.
+type movieEditorRequest struct {
+	MovieIDs  []int64 `json:"movieIds"`
+	Monitored *bool   `json:"monitored,omitempty"`
+	Tags      []int64 `json:"tags,omitempty"`
+	ApplyTags string  `json:"applyTags,omitempty"`
+}
+
+// TagMovie adds tagID to movieID's tags, leaving any it already has.
+func (c *Client) TagMovie(ctx context.Context, movieID, tagID int64) error {
+	return c.put(ctx, nil, "/api/v3/movie/editor",
+		movieEditorRequest{MovieIDs: []int64{movieID}, Tags: []int64{tagID}, ApplyTags: "add"})
+}
+
+// UnmonitorMovie unmonitors one movie. Radarr has exactly one file per
+// movie, so this is already file-level granularity — unlike Sonarr,
+// there's no separate episode to look up.
+func (c *Client) UnmonitorMovie(ctx context.Context, movieID int64) error {
+	f := false
+	return c.put(ctx, nil, "/api/v3/movie/editor", movieEditorRequest{MovieIDs: []int64{movieID}, Monitored: &f})
+}
+
+// Episode is the subset of Sonarr's /api/v3/episode resource needed to
+// find the specific episode behind an episode file, so unmonitoring can
+// target that one episode instead of the whole series.
+type Episode struct {
+	ID            int64 `json:"id"`
+	SeriesID      int64 `json:"seriesId"`
+	EpisodeFileID int64 `json:"episodeFileId"`
+	Monitored     bool  `json:"monitored"`
+}
+
+// Episodes lists a series' episodes (id, and which episode file each one
+// currently has, if any).
+func (c *Client) Episodes(ctx context.Context, seriesID int64) ([]Episode, error) {
+	var out []Episode
+	err := c.get(ctx, &out, "/api/v3/episode", url.Values{"seriesId": {fmt.Sprint(seriesID)}})
+	return out, err
+}
+
+type episodeMonitorRequest struct {
+	EpisodeIDs []int64 `json:"episodeIds"`
+	Monitored  bool    `json:"monitored"`
+}
+
+// UnmonitorEpisode unmonitors one episode by its Sonarr episode id (not
+// its episode file id).
+func (c *Client) UnmonitorEpisode(ctx context.Context, episodeID int64) error {
+	return c.put(ctx, nil, "/api/v3/episode/monitor", episodeMonitorRequest{EpisodeIDs: []int64{episodeID}, Monitored: false})
+}
