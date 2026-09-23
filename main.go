@@ -140,14 +140,13 @@ func main() {
 		}
 	})
 
-	// Sonarr/Radarr: tell the owning instance to rescan after a replace
-	// Code is done and tested, but held out of the live wiring
-	// on purpose: it defaults to ON per instance, so wiring it in would
-	// start sending real RescanSeries/RescanMovie commands to the user's
-	// actual Sonarr/Radarr the next time a job finishes. Re-enable this
-	// line once the user has given the go-ahead for that first live
-	// write.
-	// eng.OnFinished(srv.ArrRescanSubscriber())
+	// Sonarr/Radarr: tell the owning instance to rescan after a replace.
+	// Sonarr
+	// rescans are batched per series (arrSeasonDebounce) so re-encoding
+	// a whole season sends one RescanSeries call once the burst of
+	// episode finishes settles, not one per episode; Radarr/movies
+	// always rescan immediately.
+	eng.OnFinished(srv.ArrRescanSubscriber())
 
 	// Sonarr/Radarr write-back: tag and/or unmonitor after a re-encode
 	// Both are off by default per instance, so this is a no-op

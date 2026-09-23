@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"strconv"
+	"sync"
 	"time"
 
 	"mediatrans/internal/arr"
@@ -19,7 +21,57 @@ var (
 	arrPollTotal   = 10 * time.Minute
 	arrPollInitial = 5 * time.Second
 	arrPollMax     = 60 * time.Second
+	// arrSeasonDebounce batches Sonarr rescans by series: re-encoding a
+	// whole season sends one RescanSeries call after the burst of
+	// episode finishes settles, instead of one call per episode. Movies
+	// (and Radarr generally) always rescan immediately — a movie's one
+	// file is already "the whole item", nothing to wait for.
+	arrSeasonDebounce = 2 * time.Minute
 )
+
+// arrPollRequest is one "confirm the instance picked up this new path"
+// job, queued until its batch's rescan actually runs.
+type arrPollRequest struct {
+	inst       config.ArrInstance
+	itemID     int64
+	wantRemote string
+}
+
+// arrRescanBatcher coalesces per-series rescans: each ArrRescanSubscriber
+// closure owns one, living for the process lifetime. schedule resets the
+// debounce timer for key on every call, so a steady stream of episode
+// finishes keeps pushing the rescan out until the stream stops.
+type arrRescanBatcher struct {
+	mu     sync.Mutex
+	timers map[string]*time.Timer
+	polls  map[string][]arrPollRequest
+}
+
+func newArrRescanBatcher() *arrRescanBatcher {
+	return &arrRescanBatcher{timers: map[string]*time.Timer{}, polls: map[string][]arrPollRequest{}}
+}
+
+// schedule queues req (if non-nil) against key and (re)starts key's
+// debounce timer; fire runs once the timer finally elapses, with every
+// poll request accumulated under key across the whole burst.
+func (b *arrRescanBatcher) schedule(key string, req *arrPollRequest, fire func([]arrPollRequest)) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if req != nil {
+		b.polls[key] = append(b.polls[key], *req)
+	}
+	if t, ok := b.timers[key]; ok {
+		t.Stop()
+	}
+	b.timers[key] = time.AfterFunc(arrSeasonDebounce, func() {
+		b.mu.Lock()
+		delete(b.timers, key)
+		reqs := b.polls[key]
+		delete(b.polls, key)
+		b.mu.Unlock()
+		fire(reqs)
+	})
+}
 
 // ArrRescanSubscriber returns a jobs.OnFinished subscriber: after a
 // successful encode/remux/upscale-replace, tell the owning Sonarr/Radarr
@@ -30,7 +82,14 @@ var (
 // (OldPath != NewPath), also poll for confirmation that the instance
 // now reports the new path, recording a warning if it never does within
 // arrPollTotal.
+//
+// Sonarr rescans are batched per series (see arrRescanBatcher): a whole
+// season re-encoding fires one RescanSeries call once the burst of
+// episode finishes settles, rather than hammering Sonarr once per
+// episode. Radarr's item is already a single movie, so it always
+// rescans immediately.
 func (s *Server) ArrRescanSubscriber() func(jobs.ReplacedEvent) {
+	batch := newArrRescanBatcher()
 	return func(ev jobs.ReplacedEvent) {
 		switch ev.Kind {
 		case "encode", "remux", "upscale-replace", "upscale-copy":
@@ -46,26 +105,49 @@ func (s *Server) ArrRescanSubscriber() func(jobs.ReplacedEvent) {
 			return
 		}
 
-		cl := arr.New(inst.URL, inst.APIKey, arrKind(inst.Kind))
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-		defer cancel()
-		var rescanErr error
-		if arrKind(inst.Kind) == arr.Sonarr {
-			rescanErr = cl.RescanSeries(ctx, item.ItemID)
-		} else {
-			rescanErr = cl.RescanMovie(ctx, item.ItemID)
+		var pending *arrPollRequest
+		if ev.Kind != "upscale-copy" && ev.OldPath != ev.NewPath {
+			pm, _ := pathmap.Parse(inst.PathMap)
+			pending = &arrPollRequest{inst: *inst, itemID: item.ItemID, wantRemote: pm.ToRemote(ev.NewPath)}
 		}
-		if rescanErr != nil {
-			log.Printf("arr rescan %s (item %d): %v", inst.ID, item.ItemID, rescanErr)
+
+		rescanAndPoll := func(polls []arrPollRequest) {
+			s.arrRescanNow(*inst, item.ItemID, polls)
+		}
+
+		if arrKind(inst.Kind) != arr.Sonarr {
+			var polls []arrPollRequest
+			if pending != nil {
+				polls = []arrPollRequest{*pending}
+			}
+			rescanAndPoll(polls)
 			return
 		}
 
-		if ev.Kind == "upscale-copy" || ev.OldPath == ev.NewPath {
-			return // nothing to confirm: a copy beside the source, or the path didn't change
-		}
-		pm, _ := pathmap.Parse(inst.PathMap)
-		wantRemote := pm.ToRemote(ev.NewPath)
-		go s.arrPollNewPath(*inst, item.ItemID, wantRemote)
+		key := inst.ID + ":" + strconv.FormatInt(item.ItemID, 10)
+		batch.schedule(key, pending, rescanAndPoll)
+	}
+}
+
+// arrRescanNow sends the RescanSeries/RescanMovie command and, on
+// success, kicks off polling for every path confirmation queued against
+// this batch.
+func (s *Server) arrRescanNow(inst config.ArrInstance, itemID int64, polls []arrPollRequest) {
+	cl := arr.New(inst.URL, inst.APIKey, arrKind(inst.Kind))
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	var rescanErr error
+	if arrKind(inst.Kind) == arr.Sonarr {
+		rescanErr = cl.RescanSeries(ctx, itemID)
+	} else {
+		rescanErr = cl.RescanMovie(ctx, itemID)
+	}
+	if rescanErr != nil {
+		log.Printf("arr rescan %s (item %d): %v", inst.ID, itemID, rescanErr)
+		return
+	}
+	for _, r := range polls {
+		go s.arrPollNewPath(r.inst, r.itemID, r.wantRemote)
 	}
 }
 
