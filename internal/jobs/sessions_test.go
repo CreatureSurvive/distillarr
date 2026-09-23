@@ -84,6 +84,56 @@ func TestPollSessionsMapsPathsAndCountsTranscoding(t *testing.T) {
 	}
 }
 
+func TestPollSessionsRecordsPlaybackEvents(t *testing.T) {
+	jf := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`[
+			{"NowPlayingItem":{"Path":"/jf/movies/A.mkv"},
+			 "TranscodingInfo":{"IsVideoDirect":false,"TranscodeReasons":["VideoCodecNotSupported","AudioCodecNotSupported"]}}
+		]`))
+	}))
+	defer jf.Close()
+
+	e := newTestEngine(t)
+	if err := e.cfg.Update(func(c *config.Config) {
+		c.JellyfinURL, c.JellyfinAPIKey, c.JellyfinPathMap = jf.URL, "key", "/jf=/local"
+	}); err != nil {
+		t.Fatal(err)
+	}
+	f := &store.File{Path: "/local/movies/A.mkv", Library: "movies"}
+	if err := e.st.UpsertFile(f, nil); err != nil {
+		t.Fatal(err)
+	}
+
+	e.pollSessions()
+
+	forces, err := e.st.ForcesTranscode(f.ID, 30)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !forces {
+		t.Error("a non-direct session must record a playback event the forces_transcode issue can see")
+	}
+	detail, err := e.st.ForcesTranscodeDetail(f.ID, 30)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if detail == nil || detail.Reasons["video_codec"] != 1 || detail.Reasons["audio_codec"] != 1 {
+		t.Errorf("wrong reason detail: %+v", detail)
+	}
+}
+
+func TestReasonCategories(t *testing.T) {
+	got := reasonCategories([]string{"VideoCodecNotSupported", "VideoProfileNotSupported", "VideoLevelNotSupported"})
+	if len(got) != 3 {
+		t.Errorf("distinct raw reasons must map to distinct categories: %v", got)
+	}
+	got = reasonCategories([]string{"AudioCodecNotSupported", "AudioBitrateNotSupported"})
+	if len(got) != 1 || got[0] != "audio_codec" {
+		t.Errorf("raw reasons mapping to the same category must dedup: %v", got)
+	}
+}
+
 func TestDispatcherGateWhileTranscoding(t *testing.T) {
 	e := newTestEngine(t)
 	e.workerCap.Store(1)
