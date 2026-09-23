@@ -339,9 +339,10 @@ function PlexSection({ cfg, setCfg, live, onPlex }: { cfg: Config; setCfg: (c: C
         <label className="field"><span>Server URL</span>
           <input className="input" value={url} onChange={(e) => setUrl(e.target.value)} placeholder="http://host.docker.internal:32400" spellCheck={false} />
         </label>
-        <label className="field"><span>Token {cfg.plex_token_set && <span className="teal">· saved</span>}</span>
+        <label className="field"><span>Token {cfg.plex_token_set && <span className="teal">· saved</span>}{" "}
+          <a href="https://support.plex.tv/articles/204059436-finding-an-authentication-token-x-plex-token/" target="_blank" rel="noreferrer" className="dim small">how to find yours</a></span>
           <input className="input" type="password" value={token} onChange={(e) => setToken(e.target.value)}
-            placeholder={cfg.plex_token_set ? "Leave blank to keep the saved token" : "support.plex.tv/articles/204059436"} autoComplete="off" />
+            placeholder={cfg.plex_token_set ? "Leave blank to keep the saved token" : "paste your X-Plex-Token"} autoComplete="off" />
         </label>
         <label className="field"><span>Path mapping <span className="dim">(Plex=here)</span></span>
           <input className="input mono" value={pathMap} onChange={(e) => setPathMap(e.target.value)} placeholder="/data=/srv/media" spellCheck={false} />
