@@ -9,6 +9,7 @@ import (
 	"mediatrans/internal/config"
 	"mediatrans/internal/encode"
 	"mediatrans/internal/hwprobe"
+	"mediatrans/internal/issues"
 	"mediatrans/internal/recs"
 	"mediatrans/internal/store"
 	"mediatrans/internal/upscale"
@@ -476,6 +477,17 @@ func (s *Server) fileDetail(w http.ResponseWriter, r *http.Request) {
 	// clicks Queue — the gate itself only holds autopilot/webhook-intake.
 	if blocked, instName := s.codecPenaltyBlocked(f, settings); blocked {
 		resp["codec_penalty_warning"] = instName
+	}
+	// forces_transcode detail: only fetched for the one file this
+	// page is showing, not the bulk list — reasons/counts a client
+	// couldn't play this file directly for, in the lookback window.
+	for _, k := range issues.Decode(f.Issues) {
+		if k == "forces_transcode" {
+			if d, _ := s.st.ForcesTranscodeDetail(f.ID, issues.ForcesTranscodeLookbackDays); d != nil {
+				resp["forces_transcode"] = d
+			}
+			break
+		}
 	}
 	writeJSON(w, http.StatusOK, resp)
 }
