@@ -245,6 +245,10 @@ var alters = []string{
 		created_at TEXT NOT NULL, updated_at TEXT NOT NULL)`,
 	`CREATE INDEX IF NOT EXISTS intake_file ON intake(file_id)`,
 	`CREATE INDEX IF NOT EXISTS intake_state ON intake(state)`,
+	`CREATE TABLE IF NOT EXISTS speed_stats(
+		key TEXT PRIMARY KEY,
+		samples TEXT NOT NULL DEFAULT '[]',
+		updated_at TEXT NOT NULL)`,
 }
 
 func (s *Store) migrate() error {

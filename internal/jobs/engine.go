@@ -410,6 +410,7 @@ func (e *Engine) runJob(j *store.Job, resume bool) {
 		return
 	}
 	container := primary.Container
+	var encodeStart time.Time
 	if !resume {
 		if err := e.st.SetJobTemp(j.ID, tempPath, string(stJSON)); err != nil {
 			log.Printf("jobs: set temp: %v", err)
@@ -424,6 +425,7 @@ func (e *Engine) runJob(j *store.Job, resume bool) {
 		if neuralJob {
 			serr = e.runNeural(ctx, j, settings, src, nplan, tempPath)
 		} else {
+			encodeStart = time.Now()
 			serr = e.encode(ctx, j, primary, fallback, src)
 		}
 		if serr != nil {
@@ -552,6 +554,19 @@ func (e *Engine) runJob(j *store.Job, resume bool) {
 		outVideo := float64(newSize) - (float64(st.Size) - srcVideo)
 		if outVideo > 0 {
 			recs.RecordObservation(before, settings, outVideo/srcVideo)
+		}
+	}
+
+	// Feed the speed model with what really happened, so autopilot's
+	// ordering and budget estimates improve over time. Video-copy
+	// jobs are disk-bound, not GPU-bound, so they don't belong in the
+	// same buckets as a real encode.
+	if !settings.VideoCopy && !encodeStart.IsZero() && src.DurationSec() > 0 {
+		if elapsed := time.Since(encodeStart).Seconds(); elapsed > 0 {
+			device := rep.ActiveDevice(settings.Backend, settings.Codec).Name
+			resClass := res.Class(v.Width, v.Height)
+			key := store.SpeedKey(string(settings.Backend), device, string(settings.Codec), resClass)
+			_ = e.st.RecordSpeedSample(key, src.DurationSec()/elapsed)
 		}
 	}
 

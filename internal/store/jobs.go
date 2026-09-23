@@ -213,13 +213,17 @@ func (s *Store) SetJobDest(id int64, dest string) error {
 
 // MoveJob reorders the pending queue: job id is placed directly before
 // beforeID (0 = end). Pending priorities are renumbered in gaps of 10.
+// Autopilot-origin jobs are excluded from the reordered pool —
+// their priority is computed from estimated value per GPU-second and
+// must survive a manual drag elsewhere in the queue, not collapse into
+// the 10/20/30… scheme every time a person reorders their own jobs.
 func (s *Store) MoveJob(id, beforeID int64) error {
 	tx, err := s.dbW.Begin()
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
-	rows, err := tx.Query(`SELECT id FROM jobs WHERE status='queued' AND id != ? ORDER BY priority, id`, id)
+	rows, err := tx.Query(`SELECT id FROM jobs WHERE status='queued' AND id != ? AND origin != 'autopilot' ORDER BY priority, id`, id)
 	if err != nil {
 		return err
 	}
@@ -256,6 +260,16 @@ func (s *Store) MoveJob(id, beforeID int64) error {
 // SetRunNow promotes a job to run-now (bypasses schedule windows).
 func (s *Store) SetRunNow(id int64) error {
 	_, err := s.dbW.Exec(`UPDATE jobs SET run_now=1, priority=0 WHERE id=? AND status='queued'`, id)
+	return err
+}
+
+// SetJobPriority overrides a queued job's priority — used once, right
+// after an autopilot-origin job is created, to place it above
+// 100000 (manual's flat default) ordered by estimated value per
+// GPU-second, without touching the shared enqueue path every other
+// origin uses.
+func (s *Store) SetJobPriority(id int64, priority int) error {
+	_, err := s.dbW.Exec(`UPDATE jobs SET priority=? WHERE id=? AND status='queued'`, priority, id)
 	return err
 }
 
