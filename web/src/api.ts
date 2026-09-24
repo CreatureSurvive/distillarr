@@ -584,6 +584,7 @@ export type Config = {
   trash_enabled: boolean;
   trash_days: number;
   trash_dir: string;
+  allow_trash_copy?: boolean;
   max_attempts: number;
   recompress_hevc: boolean;
   max_height: number;
@@ -894,6 +895,7 @@ export const api = {
   system: () =>
     req<{
       filesystems?: { libraries: string[]; total: number; free: number }[];
+      trash_dirs?: { library: string; path: string; trash_dir: string; mergerfs: boolean }[];
       config?: { total: number; free: number };
       trash_bytes: number;
       trash_count: number;

@@ -10,6 +10,8 @@ import (
 	"syscall"
 
 	"mediatrans/internal/config"
+	"mediatrans/internal/jobs"
+	"mediatrans/internal/replace"
 )
 
 // libraryDisks reports total/free space per filesystem the libraries
@@ -119,4 +121,16 @@ func (s *Server) browseDirs(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"path": p, "parent": filepath.Dir(p), "dirs": dirs})
+}
+
+// trashDirs says where each library's originals go on replace and
+// whether that library sits on a mergerfs pool, for Settings.
+func trashDirs(cfg config.Config) []map[string]any {
+	out := []map[string]any{}
+	for _, l := range cfg.Libraries {
+		_, fstype := replace.MountPoint(l.Path)
+		out = append(out, map[string]any{"library": l.Name, "path": l.Path,
+			"trash_dir": jobs.TrashDirFor(cfg, filepath.Join(l.Path, "x")), "mergerfs": fstype == "fuse.mergerfs"})
+	}
+	return out
 }

@@ -600,7 +600,7 @@ func (e *Engine) runJob(j *store.Job, resume bool) {
 	cfg := e.cfg.Get()
 	trashDir := ""
 	if cfg.TrashEnabled {
-		trashDir = cfg.TrashDir
+		trashDir = TrashDirFor(cfg, j.SrcPath)
 	}
 	before, _ := e.st.GetFileByPath(j.SrcPath)
 
@@ -620,7 +620,7 @@ func (e *Engine) runJob(j *store.Job, resume bool) {
 			e.fail(j, fmt.Sprintf("add upscaled copy: %v", err), "")
 			return
 		}
-	} else if trashPath, err = replace.Replace(tempPath, j.SrcPath, destPath, st, trashDir); err != nil {
+	} else if trashPath, err = replace.Replace(tempPath, j.SrcPath, destPath, st, trashDir, cfg.AllowTrashCopy); err != nil {
 		e.fail(j, fmt.Sprintf("replace: %v", err), "")
 		return
 	}
@@ -1197,7 +1197,7 @@ func (e *Engine) PurgeTrash(all bool) (int64, int) {
 			log.Printf("trash: remove %s: %v", t.TrashPath, err)
 			continue
 		}
-		pruneEmptyDirs(filepath.Dir(t.TrashPath), cfg.TrashDir)
+		pruneEmptyDirs(filepath.Dir(t.TrashPath), trashRootOf(t.TrashPath, cfg.TrashDir))
 		_ = e.st.DeleteTrash(t.ID)
 		freed += t.Size
 	}
@@ -1216,7 +1216,7 @@ func (e *Engine) RestoreTrash(id int64) error {
 	if err := replace.Restore(t.TrashPath, t.OrigPath, t.CurrentPath); err != nil {
 		return err
 	}
-	pruneEmptyDirs(filepath.Dir(t.TrashPath), e.cfg.Get().TrashDir)
+	pruneEmptyDirs(filepath.Dir(t.TrashPath), trashRootOf(t.TrashPath, e.cfg.Get().TrashDir))
 	_ = e.st.DeleteTrash(id)
 	// The job's savings weren't kept - exclude it from history/stats.
 	_ = e.st.MarkJobReverted(t.JobID)
@@ -1254,7 +1254,7 @@ func (e *Engine) DeleteTrashItem(id int64) error {
 	if err := os.Remove(t.TrashPath); err != nil && !os.IsNotExist(err) {
 		return err
 	}
-	pruneEmptyDirs(filepath.Dir(t.TrashPath), e.cfg.Get().TrashDir)
+	pruneEmptyDirs(filepath.Dir(t.TrashPath), trashRootOf(t.TrashPath, e.cfg.Get().TrashDir))
 	return e.st.DeleteTrash(id)
 }
 
@@ -1325,4 +1325,51 @@ func (e *Engine) LastFPS() map[string]float64 {
 		return true
 	})
 	return out
+}
+
+// Trash folder names: new installs use the Distillarr name; installs from
+// before the rename keep the old one.
+const (
+	trashDirNew    = ".distillarr-trash"
+	trashDirLegacy = ".mediatrans-trash"
+)
+
+// TrashDirFor picks where path's original goes on replace: the
+// global TrashDir when set (existing installs), otherwise a trash folder
+// at the root of the filesystem holding path's library, so retention is
+// an instant hardlink on any layout. A library that isn't its own mount
+// keeps the trash in the library folder itself.
+func TrashDirFor(cfg config.Config, path string) string {
+	if cfg.TrashDir != "" {
+		return cfg.TrashDir
+	}
+	lib := ""
+	for _, l := range cfg.Libraries {
+		lp := filepath.Clean(l.Path)
+		if strings.HasPrefix(path, lp+"/") && len(lp) > len(lib) {
+			lib = lp
+		}
+	}
+	base := lib
+	if base == "" {
+		base = filepath.Dir(path)
+	}
+	if mp, _ := replace.MountPoint(base); mp != "" && mp != "/" {
+		base = mp
+	}
+	return filepath.Join(base, trashDirNew)
+}
+
+// trashRootOf finds the trash folder a trashed file sits in, as the
+// stop point for pruning its emptied parent directories.
+func trashRootOf(trashPath, global string) string {
+	if global != "" && strings.HasPrefix(trashPath, filepath.Clean(global)+"/") {
+		return global
+	}
+	for d := filepath.Dir(trashPath); d != "/" && d != "."; d = filepath.Dir(d) {
+		if b := filepath.Base(d); b == trashDirNew || b == trashDirLegacy {
+			return d
+		}
+	}
+	return filepath.Dir(trashPath)
 }

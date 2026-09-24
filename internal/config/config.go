@@ -196,6 +196,10 @@ type Config struct {
 	MaxHeight          int    `json:"max_height"`          // 0 = keep; e.g. 1080 caps output
 	TonemapHDR         bool   `json:"tonemap_hdr"`         // HDR10→SDR profile off by default
 	DefaultSpeed       string `json:"default_speed"`       // faster|fast|medium|slow|slower
+	// TrashDir is a global trash override; "" (the default for new
+	// installs) keeps each library's trash on its own filesystem (// see jobs.TrashDirFor). AllowTrashCopy lets retention copy when the
+	// trash ends up on another filesystem instead of failing the job.
+	AllowTrashCopy     bool   `json:"allow_trash_copy,omitempty"`
 	TrashDir           string `json:"trash_dir"`           // on the media pool → hardlinks, no copy
 	// PreferMP4 is deprecated: kept only so normalize() can
 	// migrate an old stored value into ContainerGoal the first time this

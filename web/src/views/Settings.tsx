@@ -1295,16 +1295,28 @@ function TrashSection({ cfg, save }: { cfg: Config; save: (p: Partial<Config>, m
         <div className="stat"><div className="stat-label">In trash</div><div className="stat-val">{bytes(total)} · {items.length} file{items.length === 1 ? "" : "s"}</div></div>
       </div>
       <p className="dim small">
-        Before an original is replaced it is moved to <span className="mono">{cfg.trash_dir}</span> on the media pool (instant, no copying).
+        Before an original is replaced it is hardlinked into a trash folder on the same filesystem (instant, no copying).
         It's deleted after the retention period. Restore puts it back and removes the encoded file.
       </p>
+      <ul className="lib-check">
+        {(sys?.trash_dirs || []).map((t) => (
+          <li key={t.path}><span>{t.library}</span><span className="mono dim small">{t.path} → {t.trash_dir}</span>
+            {t.mergerfs && <span className="dim small">mergerfs pool: the trash must be inside the same pool, not on one of its disks directly.</span>}</li>
+        ))}
+      </ul>
       <div className="opts">
         <Field label="Keep originals">
           <Toggle on={cfg.trash_enabled} onChange={(v) => save({ trash_enabled: v })} label={cfg.trash_enabled ? "On" : "Off: originals are deleted immediately"} />
         </Field>
+        <Field label="Trash folder" hint="Blank: one per library filesystem (recommended). A single folder only works if every library is on the same filesystem.">
+          <input className="input mono" defaultValue={cfg.trash_dir} placeholder="per library" spellCheck={false}
+            onBlur={(e) => e.target.value !== cfg.trash_dir && save({ trash_dir: e.target.value.trim() })} />
+        </Field>
         <Field label="Retention">
           <Seg value={cfg.trash_days} onChange={(v) => save({ trash_days: v })} options={[1, 3, 7, 14, 30].map((d) => ({ value: d, label: `${d} day${d === 1 ? "" : "s"}` }))} />
         </Field>
+        <Toggle on={!!cfg.allow_trash_copy} onChange={(v) => save({ allow_trash_copy: v })} label="Copy originals when a hardlink isn't possible"
+          hint="Off: a replace whose trash is on another filesystem fails with an explanation. On: the original is copied into the trash first, which takes as long as copying the file and needs that much free space." />
       </div>
       {items.length > 0 && (
         <>

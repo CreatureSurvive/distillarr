@@ -275,6 +275,7 @@ func (s *Server) system(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"crop":          map[string]int{"checked": checked, "total": total, "with_bars": bars},
 		"filesystems":   libraryDisks(s.cfg.Get().Libraries),
+		"trash_dirs":    trashDirs(s.cfg.Get()),
 		"config":        diskUsage("/config"),
 		"trash_bytes":   trashBytes,
 		"trash_count":   len(items),

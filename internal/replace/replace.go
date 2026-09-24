@@ -11,6 +11,7 @@ package replace
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -220,7 +221,9 @@ func spotCheck(ctx context.Context, path string) error {
 // changed (e.g. .avi → .mkv), in which case the original path is
 // removed after the new file is in place (the trash copy already
 // preserves it). trashDir == "" skips retention (not recommended).
-func Replace(tempPath, srcPath, destPath string, st *SrcStat, trashDir string) (trashPath string, err error) {
+// allowCopy lets retention fall back to a full copy when the trash is on
+// another filesystem (EXDEV); otherwise that fails the replace.
+func Replace(tempPath, srcPath, destPath string, st *SrcStat, trashDir string, allowCopy bool) (trashPath string, err error) {
 	if destPath == "" {
 		destPath = srcPath
 	}
@@ -235,7 +238,7 @@ func Replace(tempPath, srcPath, destPath string, st *SrcStat, trashDir string) (
 	// 2. Retain the original first (crash-safety anchor).
 	if trashDir != "" {
 		trashPath = TrashPath(trashDir, srcPath)
-		if err := retain(srcPath, trashPath, st); err != nil {
+		if err := retain(srcPath, trashPath, st, allowCopy); err != nil {
 			return "", fmt.Errorf("trash retention: %w", err)
 		}
 	}
@@ -302,19 +305,34 @@ func Restore(trashPath, origPath, currentPath string) error {
 	return nil
 }
 
-// retain hard-links the original into the trash tree; falls back to a
-// streamed copy when the link crosses mergerfs branches (EXDEV).
-func retain(srcPath, dst string, st *SrcStat) error {
+// Link is os.Link, overridable in tests to simulate EXDEV.
+var Link = os.Link
+
+// ErrCrossDevice means the trash isn't on the original's filesystem, so
+// retention would need a full copy.
+var ErrCrossDevice = errors.New("the trash folder is on a different filesystem than the file, so the original can't be kept with an instant hardlink; set a trash folder on the same filesystem (or mergerfs pool) in Settings > System > Storage & trash, or allow copying originals into the trash there")
+
+// retain hard-links the original into the trash tree. A cross-device
+// link (EXDEV, including across mergerfs branches) copies only when
+// allowCopy is set; otherwise it fails with ErrCrossDevice rather than
+// silently copying a multi-gigabyte file.
+func retain(srcPath, dst string, st *SrcStat, allowCopy bool) error {
 	if _, err := os.Stat(dst); err == nil {
 		return nil // already retained (job retry)
 	}
 	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
 		return err
 	}
-	if err := os.Link(srcPath, dst); err == nil {
+	err := Link(srcPath, dst)
+	if err == nil {
 		return nil
 	}
-	// Cross-branch link (or any link failure) → durable copy.
+	if !errors.Is(err, syscall.EXDEV) {
+		return err
+	}
+	if !allowCopy {
+		return ErrCrossDevice
+	}
 	return copyFile(srcPath, dst, st)
 }
 
@@ -416,3 +434,27 @@ func AddCopy(tempPath, destPath string, st *SrcStat) error {
 	}
 	return nil
 }
+
+// MountPoint returns the mount point containing path (longest matching
+// entry in /proc/self/mounts) and its filesystem type.
+func MountPoint(path string) (mount, fstype string) {
+	b, err := os.ReadFile(MountsFile)
+	if err != nil {
+		return "", ""
+	}
+	path = filepath.Clean(path)
+	for _, line := range strings.Split(string(b), "\n") {
+		f := strings.Fields(line)
+		if len(f) < 3 {
+			continue
+		}
+		mp := strings.ReplaceAll(f[1], `\040`, " ")
+		if (path == mp || mp == "/" || strings.HasPrefix(path, mp+"/")) && len(mp) >= len(mount) {
+			mount, fstype = mp, f[2]
+		}
+	}
+	return mount, fstype
+}
+
+// MountsFile is overridable in tests.
+var MountsFile = "/proc/self/mounts"
