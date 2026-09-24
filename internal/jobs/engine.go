@@ -26,6 +26,7 @@ import (
 	"mediatrans/internal/replace"
 	"mediatrans/internal/res"
 	"mediatrans/internal/scan"
+	"mediatrans/internal/sidecar"
 	"mediatrans/internal/store"
 	"mediatrans/internal/upscale"
 	"mediatrans/internal/tune"
@@ -521,6 +522,20 @@ func (e *Engine) runJob(j *store.Job, resume bool) {
 		removeTemp(tempPath)
 		e.failKeepAttempt(j, fmt.Sprintf("hardlinked: file now shares its data with another link (nlink=%d); confirm to replace anyway", cur.Nlink))
 		return
+	}
+
+	// Subtitle sidecar extraction: runs against the untouched
+	// original source, right before Replace swaps it out, so it never
+	// races the encode. Best-effort: a failure here doesn't fail the
+	// encode/replace that's the reason this job exists.
+	if created, serr := sidecar.Extract(ctx, j.SrcPath, src.Subtitles(), settings.SidecarMode); serr != nil {
+		log.Printf("jobs: sidecar extraction for job %d: %v", j.ID, serr)
+	} else if len(created) > 0 {
+		paths := make([]string, len(created))
+		for i, c := range created {
+			paths[i] = c.Path
+		}
+		_ = e.st.SetJobSidecars(j.ID, paths)
 	}
 
 	// Replace.
@@ -1162,6 +1177,15 @@ func (e *Engine) RestoreTrash(id int64) error {
 	_ = e.st.DeleteTrash(id)
 	// The job's savings weren't kept - exclude it from history/stats.
 	_ = e.st.MarkJobReverted(t.JobID)
+	// Delete the sidecar files this job created, and only those.
+	if j, jerr := e.st.GetJob(t.JobID); jerr == nil && j != nil && j.SidecarsJSON != "" {
+		var paths []string
+		if json.Unmarshal([]byte(j.SidecarsJSON), &paths) == nil {
+			for _, p := range paths {
+				_ = os.Remove(p)
+			}
+		}
+	}
 	if t.CurrentPath != t.OrigPath {
 		// Same reasoning as the replace path in runJob: Jellyfin won't
 		// report the reverted path until its own next scan, so re-key the

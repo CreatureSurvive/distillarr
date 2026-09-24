@@ -78,6 +78,7 @@ func (s *Server) quickJob(f *store.File, runNow bool) (*store.Job, error) {
 	cfg := s.cfg.Get()
 	st := issues.QuickFix(f, cfg)
 	applyLangPrune(f, cfg, &st)
+	applySidecar(f, cfg, &st)
 	// The caller (fixFile, fixIssue) already checked HasQueuedForFile and
 	// the hardlinked confirmation before reaching here.
 	if f.Nlink > 1 {

@@ -26,6 +26,22 @@ func TestJellyfinPathMapBothWays(t *testing.T) {
 	}
 }
 
+func TestEffectiveSidecarMode(t *testing.T) {
+	c := Config{SubsSidecarMode: "extract_keep"}
+	if got := c.EffectiveSidecarMode("", ""); got != "extract_keep" {
+		t.Errorf("no overrides: got %q, want global extract_keep", got)
+	}
+	if got := c.EffectiveSidecarMode("", "extract_remove"); got != "extract_remove" {
+		t.Errorf("rule override should win over global: got %q", got)
+	}
+	if got := c.EffectiveSidecarMode("off", "extract_remove"); got != "off" {
+		t.Errorf("file override should win over both rule and global: got %q", got)
+	}
+	if got := (Config{}).EffectiveSidecarMode("", ""); got != "off" {
+		t.Errorf("nothing set anywhere: got %q, want off", got)
+	}
+}
+
 func TestPlexPathMapBothWays(t *testing.T) {
 	c := Config{PlexPathMap: "/media=/srv/media"} // Plex mounts /srv/media as /media
 	for _, tc := range []struct{ plex, local string }{

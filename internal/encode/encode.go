@@ -133,6 +133,14 @@ type Settings struct {
 	// before the replace: a link that appears during the encode is not
 	// covered by this and still stops the job.
 	ConfirmedHardlinked bool `json:"confirmed_hardlinked,omitempty"`
+
+	// SidecarMode: "" | "extract_keep" | "extract_remove". Carries
+	// the resolved subs_sidecar_mode through to the engine, which extracts
+	// text subtitle sidecars right before the replace step. Drop entries
+	// for extract_remove are folded into Subs the same way language
+	// pruning's are; this field only tells the engine whether/how to
+	// extract.
+	SidecarMode string `json:"sidecar_mode,omitempty"`
 }
 
 // DefaultRenderNode is a last-resort fallback for when no probe has chosen a

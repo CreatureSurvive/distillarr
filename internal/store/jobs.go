@@ -2,6 +2,7 @@ package store
 
 import (
 	"database/sql"
+	"encoding/json"
 	"fmt"
 )
 
@@ -50,6 +51,10 @@ type Job struct {
 	Origin string `json:"origin,omitempty"`
 	Reason string `json:"reason,omitempty"`
 
+	// SidecarsJSON is the subtitle sidecar file paths this job created
+	// JSON string array; RestoreTrash deletes exactly these.
+	SidecarsJSON string `json:"sidecars_json,omitempty"`
+
 	// Joined for API convenience:
 	FileTitle string `json:"file_title,omitempty"`
 }
@@ -57,7 +62,7 @@ type Job struct {
 const jobCols = `id, file_id, src_path, temp_path, status, priority, run_now, backend, codec,
 	quality, settings_json, attempts, max_attempts, error, error_tail, progress_json,
 	src_stat_json, src_size, output_size, started_at, finished_at, created_at, cmd, dest_path,
-	origin, reason`
+	origin, reason, sidecars_json`
 
 func scanJob(row interface{ Scan(...any) error }) (*Job, error) {
 	j := &Job{}
@@ -66,7 +71,7 @@ func scanJob(row interface{ Scan(...any) error }) (*Job, error) {
 	err := row.Scan(&j.ID, &fileID, &j.SrcPath, &j.TempPath, &j.Status, &j.Priority, &runNow,
 		&j.Backend, &j.Codec, &j.Quality, &j.SettingsJSON, &j.Attempts, &j.MaxAttempts,
 		&j.Error, &j.ErrorTail, &j.ProgressJSON, &j.SrcStatJSON, &j.SrcSize, &j.OutputSize,
-		&j.StartedAt, &j.FinishedAt, &j.CreatedAt, &j.Cmd, &j.DestPath, &j.Origin, &j.Reason)
+		&j.StartedAt, &j.FinishedAt, &j.CreatedAt, &j.Cmd, &j.DestPath, &j.Origin, &j.Reason, &j.SidecarsJSON)
 	if err != nil {
 		return nil, err
 	}
@@ -211,6 +216,17 @@ func (s *Store) SetJobDest(id int64, dest string) error {
 	return err
 }
 
+// SetJobSidecars records the subtitle sidecar files this job created
+// so RestoreTrash can delete exactly those.
+func (s *Store) SetJobSidecars(id int64, paths []string) error {
+	b, err := json.Marshal(paths)
+	if err != nil {
+		return err
+	}
+	_, err = s.dbW.Exec(`UPDATE jobs SET sidecars_json=? WHERE id=?`, string(b), id)
+	return err
+}
+
 // MoveJob reorders the pending queue: job id is placed directly before
 // beforeID (0 = end). Pending priorities are renumbered in gaps of 10.
 // Autopilot-origin jobs are excluded from the reordered pool —
@@ -315,7 +331,7 @@ func (s *Store) ListJobs(statuses []string, beforeID int64, limit int) ([]*Job, 
 			&j.Backend, &j.Codec, &j.Quality, &j.SettingsJSON, &j.Attempts, &j.MaxAttempts,
 			&j.Error, &j.ErrorTail, &j.ProgressJSON, &j.SrcStatJSON, &j.SrcSize, &j.OutputSize,
 			&j.StartedAt, &j.FinishedAt, &j.CreatedAt, &j.Cmd, &j.DestPath, &j.Origin, &j.Reason,
-			&j.FileTitle); err != nil {
+			&j.SidecarsJSON, &j.FileTitle); err != nil {
 			return nil, err
 		}
 		if fileID.Valid {

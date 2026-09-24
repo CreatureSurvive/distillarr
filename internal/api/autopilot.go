@@ -149,6 +149,7 @@ func (s *Server) autopilotBacklog(w http.ResponseWriter, r *http.Request) {
 		case "quick_fix":
 			settings = issues.QuickFix(f, cfg)
 			applyLangPrune(f, cfg, &settings)
+			applySidecar(f, cfg, &settings)
 		case "queue_override":
 			if d.Codec != "" {
 				settings.Codec = encode.Codec(d.Codec)
@@ -161,6 +162,9 @@ func (s *Server) autopilotBacklog(w http.ResponseWriter, r *http.Request) {
 			}
 			if d.PruneLanguages {
 				forceLangPrune(f, cfg, &settings)
+			}
+			if d.SidecarMode != "" {
+				forceSidecarMode(f, cfg, d.SidecarMode, &settings)
 			}
 		}
 		if blocked, _ := s.codecPenaltyBlocked(f, settings); blocked {

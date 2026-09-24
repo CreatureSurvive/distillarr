@@ -285,6 +285,12 @@ var alters = []string{
 	// User opt-out of language pruning; never touched by
 	// scan/probe, so it survives reprobes and rescans (see UpsertFile).
 	`ALTER TABLE files ADD COLUMN lang_prune_exempt INTEGER NOT NULL DEFAULT 0`,
+	// Per-file override of subs_sidecar_mode; "" = inherit. Same
+	// reprobe-safety reasoning as lang_prune_exempt.
+	`ALTER TABLE files ADD COLUMN sidecar_mode TEXT NOT NULL DEFAULT ''`,
+	// Sidecar files a job created, JSON string array; RestoreTrash
+	// deletes exactly these and only these.
+	`ALTER TABLE jobs ADD COLUMN sidecars_json TEXT NOT NULL DEFAULT '[]'`,
 }
 
 func (s *Store) migrate() error {

@@ -104,6 +104,11 @@ type File struct {
 	// touched by scan/probe, so a reprobe or rescan never clears it (see
 	// UpsertFile, which deliberately leaves this column alone).
 	LangPruneExempt bool `json:"lang_prune_exempt"`
+	// SidecarMode overrides subs_sidecar_mode for this file: "" |
+	// "extract_keep" | "extract_remove"; "" means "use the rule/global
+	// resolution". User-set only; never touched by scan/probe, same
+	// reprobe-safety reasoning as LangPruneExempt.
+	SidecarMode string `json:"sidecar_mode,omitempty"`
 }
 
 // HasBars reports detected black bars inside the encoded frame.
@@ -131,7 +136,7 @@ const fileCols = `id, path, library, title, year, season, episode, ep_title, qua
 	size, mtime_ns, container, duration, video_codec, width, height, bit_depth, fps, hdr,
 	video_bitrate, total_bitrate, audio_json, sub_count, sidecars_json, transcode_score,
 	rec_json, missing, scanned_at, updated_at, interlaced, crop_w, crop_h, crop_x, crop_y, crop_checked, tune_json,
-	video_tag, faststart, meta_checked, issues, nlink, subs_json, lang_prune_exempt`
+	video_tag, faststart, meta_checked, issues, nlink, subs_json, lang_prune_exempt, sidecar_mode`
 
 func scanFile(row interface{ Scan(...any) error }) (*File, error) {
 	f := &File{}
@@ -143,7 +148,7 @@ func scanFile(row interface{ Scan(...any) error }) (*File, error) {
 		&f.VideoBitrate, &f.TotalBitrate, &audio, &f.SubCount, &sidecars,
 		&f.TranscodeScore, &f.RecJSON, &missing, &f.ScannedAt, &f.UpdatedAt, &interlaced,
 		&f.CropW, &f.CropH, &f.CropX, &f.CropY, &cropChecked, &f.TuneJSON,
-		&f.VideoTag, &f.Faststart, &metaChecked, &f.Issues, &f.Nlink, &subs, &langPruneExempt)
+		&f.VideoTag, &f.Faststart, &metaChecked, &f.Issues, &f.Nlink, &subs, &langPruneExempt, &f.SidecarMode)
 	if err != nil {
 		return nil, err
 	}
@@ -310,6 +315,13 @@ func (s *Store) SetTune(id int64, tuneJSON string) error {
 // pruning.
 func (s *Store) SetLangPruneExempt(id int64, exempt bool) error {
 	_, err := s.dbW.Exec(`UPDATE files SET lang_prune_exempt=? WHERE id=?`, b2i(exempt), id)
+	return err
+}
+
+// SetSidecarMode sets or clears a file's subs_sidecar_mode override
+// "" clears it back to "inherit the rule/global resolution".
+func (s *Store) SetSidecarMode(id int64, mode string) error {
+	_, err := s.dbW.Exec(`UPDATE files SET sidecar_mode=? WHERE id=?`, mode, id)
 	return err
 }
 

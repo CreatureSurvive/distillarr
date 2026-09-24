@@ -38,6 +38,9 @@ type intakePromoter struct {
 	// regardless of the global/scoped apply mode. nil (as in tests that
 	// don't care about it) means "do nothing".
 	forcePrune func(f *store.File, st *encode.Settings)
+	// forceSidecar applies a rule's subtitle-sidecar override (// RuleAction.SidecarMode) for a "queue_override" action. nil means
+	// "do nothing".
+	forceSidecar func(f *store.File, mode string, st *encode.Settings)
 	// codecPenaltyBlocked reports whether f's settings must be held for
 	// confirmation instead of queued: the owning arr instance has
 	// an unacknowledged codec penalty and settings is a real HEVC/AV1
@@ -69,10 +72,14 @@ func (s *Server) newIntakePromoter() *intakePromoter {
 			cfg := s.cfg.Get()
 			st := issues.QuickFix(f, cfg)
 			applyLangPrune(f, cfg, &st)
+			applySidecar(f, cfg, &st)
 			return st
 		},
 		forcePrune: func(f *store.File, st *encode.Settings) {
 			forceLangPrune(f, s.cfg.Get(), st)
+		},
+		forceSidecar: func(f *store.File, mode string, st *encode.Settings) {
+			forceSidecarMode(f, s.cfg.Get(), mode, st)
 		},
 		codecPenaltyBlocked: s.codecPenaltyBlocked,
 		estimateSeconds:     s.eng.EstimateSeconds,
@@ -194,6 +201,9 @@ func (p *intakePromoter) promoteOne(st *store.Store, row store.Intake) {
 				}
 				if d.PruneLanguages && p.forcePrune != nil {
 					p.forcePrune(f, &settings)
+				}
+				if d.SidecarMode != "" && p.forceSidecar != nil {
+					p.forceSidecar(f, d.SidecarMode, &settings)
 				}
 			}
 			// The rule engine decided this, not whatever put the row in

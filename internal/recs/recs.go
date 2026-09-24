@@ -15,6 +15,7 @@ import (
 	"mediatrans/internal/encode"
 	"mediatrans/internal/langprune"
 	"mediatrans/internal/res"
+	"mediatrans/internal/sidecar"
 	"mediatrans/internal/store"
 )
 
@@ -338,6 +339,12 @@ func Recommend(f *store.File, cfg config.Config) Recommendation {
 	audioDrops, subDrops := langprune.Drops(f, cfg, instanceName, OriginalLanguage(f.ID))
 	s.Audio = append(s.Audio, audioDrops...)
 	s.Subs = append(s.Subs, subDrops...)
+	// Subtitle sidecar extraction: the resolved mode rides on
+	// Settings for the engine; extract_remove also drops the now-sidecar'd
+	// text tracks from the output, same fold pattern as the drops above.
+	sidecarMode := cfg.EffectiveSidecarMode(f.SidecarMode, "")
+	s.SidecarMode = sidecarMode
+	s.Subs = append(s.Subs, sidecar.DropEntries(f.Subs, sidecarMode, s.Subs)...)
 	if f.HDR == "dolby_vision" {
 		r.Action = "caution"
 		r.Reason = "Dolby Vision source: re-encoding drops the Dolby Vision layer. Skipped unless you queue it by hand."

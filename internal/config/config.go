@@ -124,6 +124,24 @@ func (c Config) EffectiveLangPolicy(library, instanceName string, exempt bool) L
 	return p
 }
 
+// EffectiveSidecarMode resolves subs_sidecar_mode for one file: a
+// per-file override (fileOverride) always wins — it's the user's most
+// specific, explicit choice; an autopilot rule override (ruleOverride,
+// RuleAction.SidecarMode) wins next; otherwise the global default
+// applies. "" resolves to "off".
+func (c Config) EffectiveSidecarMode(fileOverride, ruleOverride string) string {
+	switch {
+	case fileOverride != "":
+		return fileOverride
+	case ruleOverride != "":
+		return ruleOverride
+	case c.SubsSidecarMode != "":
+		return c.SubsSidecarMode
+	default:
+		return "off"
+	}
+}
+
 // Config is the whole persisted configuration.
 type Config struct {
 	Libraries []Library `json:"libraries"`
@@ -199,6 +217,12 @@ type Config struct {
 	// EffectiveLangPolicy.
 	LangLibraryOverrides  map[string]LangOverride `json:"lang_library_overrides,omitempty"`
 	LangInstanceOverrides map[string]LangOverride `json:"lang_instance_overrides,omitempty"`
+
+	// SubsSidecarMode: "off" (default) | "extract_keep" |
+	// "extract_remove". Off by default — embedded text subtitles already
+	// fit MP4 as mov_text, so this is only for users who want sidecar
+	// files too. Resolved per file by EffectiveSidecarMode.
+	SubsSidecarMode string `json:"subs_sidecar_mode,omitempty"`
 
 	JellyfinURL    string `json:"jellyfin_url"`
 	JellyfinAPIKey string `json:"jellyfin_api_key"`
@@ -298,6 +322,12 @@ type RuleAction struct {
 	// whose effective keep list is empty is skipped (never drops
 	// everything). Only applies with Kind == "queue_override".
 	PruneLanguages bool `json:"prune_languages,omitempty"`
+	// SidecarMode overrides subs_sidecar_mode for files this rule matches
+	// same values as Config.SubsSidecarMode. "" means "use the
+	// file/global resolution unchanged". Only applies with
+	// Kind == "queue_override"; still loses to an explicit per-file
+	// override (see EffectiveSidecarMode).
+	SidecarMode string `json:"sidecar_mode,omitempty"`
 }
 
 // AutoRule is one ordered entry in Config.AutoRules.
