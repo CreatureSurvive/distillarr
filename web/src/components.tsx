@@ -94,6 +94,7 @@ export const ISSUE_SHORT: Record<string, { label: string; fix: "quick" | "reenco
   quality_limited: { label: "can't reach target", fix: "info" },
   upgrade_pending: { label: "upgrade pending", fix: "info" },
   forces_transcode: { label: "forces client transcode", fix: "info" },
+  extra_languages: { label: "extra language tracks", fix: "info" },
 };
 
 // Canonical reason category (issues.ReasonCategory on the Go side) ->

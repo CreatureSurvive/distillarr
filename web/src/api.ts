@@ -9,6 +9,20 @@ export type AudioStream = {
   bit_rate: number;
   default?: boolean;
   forced?: boolean;
+  commentary?: boolean;
+};
+
+export type SubStream = {
+  index: number;
+  codec: string;
+  lang: string;
+  title: string;
+  bit_rate?: number;
+  default?: boolean;
+  forced?: boolean;
+  commentary?: boolean;
+  sdh?: boolean;
+  is_text?: boolean;
 };
 
 export type RecSummary = {
@@ -51,6 +65,7 @@ export type FileItem = {
   total_bitrate: number;
   audio: AudioStream[];
   sub_count: number;
+  subs?: SubStream[];
   sidecars: { name: string; lang: string; kind: string }[];
   transcode_score: number;
   mtime_ns: number;
