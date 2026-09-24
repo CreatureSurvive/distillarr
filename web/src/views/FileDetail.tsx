@@ -186,6 +186,27 @@ export default function FileDetail({ live }: { live: LiveState }) {
                 toast(e.message, "err");
               }
             }} />
+          <div className="opt-row" style={{ marginTop: 6 }}>
+            <div className="opt-label">Subtitle sidecars for this file</div>
+            <div className="opt-ctl">
+              <select className="input" value={file.sidecar_mode || ""}
+                onChange={async (e) => {
+                  const mode = e.target.value;
+                  try {
+                    await api.setSidecarMode(file.id, mode);
+                    setFile({ ...file, sidecar_mode: mode });
+                    toast(mode ? "Sidecar override set" : "Back to the rule/global default");
+                  } catch (err: any) {
+                    toast(err.message, "err");
+                  }
+                }}>
+                <option value="">Inherit rule/global setting</option>
+                <option value="off">Off</option>
+                <option value="extract_keep">Extract + keep embedded</option>
+                <option value="extract_remove">Extract + remove embedded</option>
+              </select>
+            </div>
+          </div>
         </div>
       </section>
 

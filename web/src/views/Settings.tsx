@@ -48,6 +48,7 @@ export default function SettingsView({ live, onJellyfin, onPlex }: { live: LiveS
         <a href="#/settings" onClick={(e) => { e.preventDefault(); document.getElementById("s-arr")?.scrollIntoView({ behavior: "smooth" }); }}>Sonarr / Radarr</a>
         <a href="#/settings" onClick={(e) => { e.preventDefault(); document.getElementById("s-auto")?.scrollIntoView({ behavior: "smooth" }); }}>Autopilot</a>
         <a href="#/settings" onClick={(e) => { e.preventDefault(); document.getElementById("s-lang")?.scrollIntoView({ behavior: "smooth" }); }}>Languages</a>
+        <a href="#/settings" onClick={(e) => { e.preventDefault(); document.getElementById("s-sidecar")?.scrollIntoView({ behavior: "smooth" }); }}>Subtitles</a>
         <a href="#/settings" onClick={(e) => { e.preventDefault(); document.getElementById("s-enc")?.scrollIntoView({ behavior: "smooth" }); }}>Encoding</a>
         <a href="#/settings" onClick={(e) => { e.preventDefault(); document.getElementById("s-up")?.scrollIntoView({ behavior: "smooth" }); }}>Upscaling</a>
         <a href="#/settings" onClick={(e) => { e.preventDefault(); document.getElementById("s-hw")?.scrollIntoView({ behavior: "smooth" }); }}>Hardware</a>
@@ -64,6 +65,7 @@ export default function SettingsView({ live, onJellyfin, onPlex }: { live: LiveS
       <AutopilotSection cfg={cfg} setCfg={setCfg} />
 
       <LangPolicySection cfg={cfg} save={save} />
+      <SidecarSection cfg={cfg} save={save} />
 
       <section className="panel" id="s-enc">
         <h2 className="panel-title">Encoding defaults</h2>
@@ -882,8 +884,14 @@ function RuleEditor({ rule, instanceNames, onClose, onSave, onDelete }: {
           </div>
         )}
         {r.then?.kind === "queue_override" && (
-          <Toggle on={!!r.then.prune_languages} onChange={(v) => setR({ ...r, then: { ...r.then, prune_languages: v } })}
-            label="Apply language pruning" hint="Drops tracks per the Languages settings' keep lists for files this rule matches, even when the global/scoped mode isn't set to apply." />
+          <>
+            <Toggle on={!!r.then.prune_languages} onChange={(v) => setR({ ...r, then: { ...r.then, prune_languages: v } })}
+              label="Apply language pruning" hint="Drops tracks per the Languages settings' keep lists for files this rule matches, even when the global/scoped mode isn't set to apply." />
+            <label className="field"><span>Subtitle sidecars</span>
+              <Seg value={r.then.sidecar_mode || ""} onChange={(v) => setR({ ...r, then: { ...r.then, sidecar_mode: v } })}
+                options={SIDECAR_MODES} />
+            </label>
+          </>
         )}
 
         <div className="toolbar" style={{ marginTop: 14 }}>
@@ -1543,6 +1551,30 @@ function LangPolicySection({ cfg, save }: { cfg: Config; save: (p: Partial<Confi
       <LangScopeOverrides title="Per-instance overrides" scopes={(cfg.arr_instances || []).map((i) => i.name)}
         overrides={cfg.lang_instance_overrides || {}}
         save={(next) => save({ lang_instance_overrides: next })} />
+    </section>
+  );
+}
+
+const SIDECAR_MODES: { value: string; label: string }[] = [
+  { value: "", label: "Off" },
+  { value: "extract_keep", label: "Extract + keep embedded" },
+  { value: "extract_remove", label: "Extract + remove embedded" },
+];
+
+function SidecarSection({ cfg, save }: { cfg: Config; save: (p: Partial<Config>, m?: string) => void }) {
+  return (
+    <section className="panel" id="s-sidecar">
+      <h2 className="panel-title">Subtitles</h2>
+      <p className="dim small">
+        Off by default — embedded text subtitles already fit MP4 as mov_text, so this is only for sidecar files you
+        specifically want. Extraction never overwrites an existing sidecar and runs before a file is replaced, so it
+        rides along with whatever job (re-encode or quick fix) already touches the file.
+      </p>
+      <div className="opts">
+        <Field label="Text subtitle sidecars">
+          <Seg value={cfg.subs_sidecar_mode || ""} onChange={(v) => save({ subs_sidecar_mode: v })} options={SIDECAR_MODES} />
+        </Field>
+      </div>
     </section>
   );
 }

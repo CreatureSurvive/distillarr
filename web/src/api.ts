@@ -83,6 +83,7 @@ export type FileItem = {
   issues?: string; // ",no_hvc1,pcm_audio,"
   upscaled?: UpscaledInfo; // set when this file is the output of a finished upscale job
   lang_prune_exempt?: boolean; // opts this file out of language pruning
+  sidecar_mode?: string; // "" | "extract_keep" | "extract_remove" (per-file override; "" = inherit)
 };
 
 export type IssueType = {
@@ -435,6 +436,10 @@ export type RuleAction = {
   // kind === "queue_override". A side with an empty keep list is
   // skipped (never drops everything).
   prune_languages?: boolean;
+  // subtitle-sidecar mode override for files this rule matches.
+  // "" means "use the file/global resolution". Only applies with
+  // kind === "queue_override"; a per-file override still wins over it.
+  sidecar_mode?: string;
 };
 
 // LangPolicy: which audio/subtitle tracks langprune.Select
@@ -577,6 +582,8 @@ export type Config = {
   lang_policy?: LangPolicy;
   lang_library_overrides?: Record<string, LangOverride>;
   lang_instance_overrides?: Record<string, LangOverride>;
+  // subtitle sidecar extraction, off by default.
+  subs_sidecar_mode?: string; // "" (off) | extract_keep | extract_remove
   jellyfin_url: string;
   jellyfin_api_key?: string;
   jellyfin_key_set?: boolean;
@@ -850,6 +857,8 @@ export const api = {
     post<Job>(`/api/v1/files/${id}/fix`, { run_now, confirm_hardlinked }),
   setLangExempt: (id: number, exempt: boolean) =>
     post<{ id: number; exempt: boolean }>(`/api/v1/files/${id}/lang-exempt`, { exempt }),
+  setSidecarMode: (id: number, mode: string) =>
+    post<{ id: number; mode: string }>(`/api/v1/files/${id}/sidecar-mode`, { mode }),
   langpruneReport: () => req<LangpruneReport>("/api/v1/langprune/report"),
   langpruneApply: () => post<{ queued: number; skipped: number }>("/api/v1/langprune/apply", { confirm: true }),
   issues: () => req<{ types: IssueType[] }>("/api/v1/issues"),
