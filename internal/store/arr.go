@@ -239,6 +239,27 @@ func (s *Store) ArrOriginalLanguages() (map[int64]string, error) {
 	return out, rows.Err()
 }
 
+// ArrInstanceIDs returns every managed file's owning arr instance id,
+// keyed by file id. Used to resolve per-file scope (// lang_instance_overrides) in bulk without one ArrItemByFileID query per
+// file, the same way ArrOriginalLanguages avoids that for original_language.
+func (s *Store) ArrInstanceIDs() (map[int64]string, error) {
+	out := map[int64]string{}
+	rows, err := s.dbR.Query(`SELECT file_id, instance_id FROM arr_items`)
+	if err != nil {
+		return out, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id int64
+		var inst string
+		if err := rows.Scan(&id, &inst); err != nil {
+			return out, err
+		}
+		out[id] = inst
+	}
+	return out, rows.Err()
+}
+
 // ArrManagedCount returns how many non-missing files have an arr_items
 // row, for the "Managed by" facet's counts.
 func (s *Store) ArrManagedCount() (int, error) {

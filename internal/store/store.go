@@ -282,6 +282,9 @@ var alters = []string{
 	// mirroring audio_json, for the langprune report issue. sub_count
 	// stays as the plain count other code already relies on.
 	`ALTER TABLE files ADD COLUMN subs_json TEXT NOT NULL DEFAULT ''`,
+	// User opt-out of language pruning; never touched by
+	// scan/probe, so it survives reprobes and rescans (see UpsertFile).
+	`ALTER TABLE files ADD COLUMN lang_prune_exempt INTEGER NOT NULL DEFAULT 0`,
 }
 
 func (s *Store) migrate() error {

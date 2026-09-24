@@ -44,7 +44,10 @@ type Decision struct {
 	// AudioRules is the rule's audio-policy override (per-rule
 	// override, RuleAction.AudioRules); nil means "use the global policy".
 	AudioRules map[string]encode.AudioRule `json:"audio_rules,omitempty"`
-	Reason     string                      `json:"reason"`
+	// PruneLanguages is the rule's language-pruning override (// RuleAction.PruneLanguages); false means "use the global/scoped
+	// policy as-is".
+	PruneLanguages bool   `json:"prune_languages,omitempty"`
+	Reason         string `json:"reason"`
 }
 
 // Evaluate walks rules in order and returns the first enabled match.
@@ -60,7 +63,8 @@ func Evaluate(f *store.File, rec recs.Recommendation, policy *recs.Policy, ctx C
 			return Decision{
 				RuleID: r.ID, Rule: r.Name, Action: r.Then.Kind,
 				Codec: r.Then.Codec, Quality: r.Then.Quality, AudioRules: r.Then.AudioRules,
-				Reason: fmt.Sprintf("rule %q matched", r.Name),
+				PruneLanguages: r.Then.PruneLanguages,
+				Reason:         fmt.Sprintf("rule %q matched", r.Name),
 			}
 		}
 	}

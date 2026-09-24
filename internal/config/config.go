@@ -68,6 +68,55 @@ func (p LangPolicy) KeepSDHOn() bool {
 	return p.KeepSDH == nil || *p.KeepSDH
 }
 
+// LangOverride scopes LangPolicy to one library or arr instance.
+// "inherit" (the zero value) changes nothing. "off" disables pruning for
+// files in this scope regardless of the global policy. "custom" uses
+// this override's own AudioKeep/SubsKeep in place of the global list —
+// but a side left empty here simply inherits the global list for that
+// side, so a custom override can never accidentally empty a list and
+// have Select drop everything in it (see validateLangPolicy, which
+// guards the same hazard for the global policy).
+type LangOverride struct {
+	Mode      string   `json:"mode,omitempty"` // inherit|off|custom
+	AudioKeep []string `json:"audio_keep,omitempty"`
+	SubsKeep  []string `json:"subs_keep,omitempty"`
+}
+
+func applyLangOverride(p *LangPolicy, ov LangOverride) {
+	switch ov.Mode {
+	case "off":
+		p.AudioMode, p.SubsMode = "off", "off"
+	case "custom":
+		if len(ov.AudioKeep) > 0 {
+			p.AudioKeep = ov.AudioKeep
+		}
+		if len(ov.SubsKeep) > 0 {
+			p.SubsKeep = ov.SubsKeep
+		}
+	}
+}
+
+// EffectiveLangPolicy resolves LangPolicy for one file: the instance
+// override (if any) applies first, then the library override on top of
+// that (more specific — a file's storage location is the more direct
+// signal for what it should keep), then a per-file exemption always
+// wins last by forcing both modes off.
+func (c Config) EffectiveLangPolicy(library, instanceName string, exempt bool) LangPolicy {
+	p := c.LangPolicy
+	if instanceName != "" {
+		if ov, ok := c.LangInstanceOverrides[instanceName]; ok {
+			applyLangOverride(&p, ov)
+		}
+	}
+	if ov, ok := c.LangLibraryOverrides[library]; ok {
+		applyLangOverride(&p, ov)
+	}
+	if exempt {
+		p.AudioMode, p.SubsMode = "off", "off"
+	}
+	return p
+}
+
 // Config is the whole persisted configuration.
 type Config struct {
 	Libraries []Library `json:"libraries"`
@@ -137,6 +186,12 @@ type Config struct {
 	// LangPolicy: which audio/subtitle tracks to drop by language.
 	// Everything off/empty by default — deliberately no default keep list.
 	LangPolicy LangPolicy `json:"lang_policy,omitempty"`
+	// LangLibraryOverrides / LangInstanceOverrides scope LangPolicy per
+	// library (keyed by Library.Name) or per Sonarr/Radarr instance
+	// (keyed by ArrInstance.Name, like RuleMatch.Instances). See
+	// EffectiveLangPolicy.
+	LangLibraryOverrides  map[string]LangOverride `json:"lang_library_overrides,omitempty"`
+	LangInstanceOverrides map[string]LangOverride `json:"lang_instance_overrides,omitempty"`
 
 	JellyfinURL    string `json:"jellyfin_url"`
 	JellyfinAPIKey string `json:"jellyfin_api_key"`
@@ -229,6 +284,13 @@ type RuleAction struct {
 	// (keyed by source codec_name, plus the virtual "pcm" key). Only applies
 	// with Kind == "queue_override"; nil means "use the global policy".
 	AudioRules map[string]encode.AudioRule `json:"audio_rules,omitempty"`
+	// PruneLanguages applies language pruning to files this rule matches
+	// using the effective LangPolicy (global + scope overrides)
+	// even when the matching AudioMode/SubsMode isn't globally "apply" —
+	// a rule can turn pruning on for just its own matched files. A side
+	// whose effective keep list is empty is skipped (never drops
+	// everything). Only applies with Kind == "queue_override".
+	PruneLanguages bool `json:"prune_languages,omitempty"`
 }
 
 // AutoRule is one ordered entry in Config.AutoRules.
