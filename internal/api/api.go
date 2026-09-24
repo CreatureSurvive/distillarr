@@ -102,6 +102,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/v1/files/{id}/plan", s.filePlan)
 	mux.HandleFunc("POST /api/v1/files/{id}/queue", s.queueFile)
 	mux.HandleFunc("POST /api/v1/files/{id}/fix", s.fixFile)
+	mux.HandleFunc("POST /api/v1/files/{id}/lang-exempt", s.setLangExempt)
+	mux.HandleFunc("GET /api/v1/langprune/report", s.langpruneReportHandler)
 	mux.HandleFunc("GET /api/v1/issues", s.issueSummary)
 	mux.HandleFunc("GET /api/v1/stats", func(w http.ResponseWriter, r *http.Request) {
 		h, err := s.st.HistoryStats()
@@ -338,7 +340,7 @@ func (s *Server) putConfig(w http.ResponseWriter, r *http.Request) {
 	s.eng.Kick()
 	for _, k := range []string{"default_codec", "default_quality", "preferred_backend", "min_savings_pct",
 		"audio_pcm_target", "recompress_hevc", "max_height", "tonemap_hdr", "default_speed", "prefer_mp4", "crop_bars",
-		"lang_policy"} {
+		"lang_policy", "lang_library_overrides", "lang_instance_overrides"} {
 		if _, ok := patch[k]; ok {
 			s.scan.RefreshRecsSoon()
 			break
