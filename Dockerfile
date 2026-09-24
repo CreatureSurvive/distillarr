@@ -105,7 +105,10 @@ RUN set -e && \
         libva-drm2 \
         libdrm2 \
         vainfo \
+        mesa-va-drivers \
     && rm -rf /var/lib/apt/lists/*
+# mesa-va-drivers adds VA-API for AMD GPUs (set LIBVA_DRIVER_NAME=radeonsi;
+# see examples/docker-compose.amd.yml).
 
 RUN echo "=== ffmpeg ===" && ffmpeg -version | head -1 && \
     echo "=== hw encoders ===" && \
@@ -148,5 +151,8 @@ EXPOSE 8080
 HEALTHCHECK --interval=30s --timeout=10s --start-period=15s --retries=3 \
     CMD curl -fsS http://127.0.0.1:8080/api/v1/health || exit 1
 
-ENTRYPOINT ["/usr/bin/tini", "--"]
+# PUID/PGID/UMASK handling and GPU group detection.
+COPY docker/entrypoint.sh /usr/local/bin/entrypoint.sh
+ENV PUID=1000 PGID=1000 UMASK=022 TZ=UTC
+ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/entrypoint.sh"]
 CMD ["/usr/local/bin/distillarr"]

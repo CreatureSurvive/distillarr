@@ -1,0 +1,17 @@
+# Distillarr without a GPU: software encoding (x265, SVT-AV1, x264).
+# Slower, but the same quality targets apply. Upscaling is unavailable
+# (it needs a Vulkan GPU).
+services:
+  distillarr:
+    image: ghcr.io/creaturesurvive/distillarr:latest
+    container_name: distillarr
+    restart: unless-stopped
+    ports:
+      - "8093:8080"
+    environment:
+      PUID: "1000"
+      PGID: "1000"
+      TZ: Etc/UTC
+    volumes:
+      - ./config:/config
+      - /path/to/media:/data

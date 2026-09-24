@@ -1,0 +1,25 @@
+<?xml version="1.0"?>
+<Container version="2">
+  <Name>distillarr</Name>
+  <Repository>ghcr.io/creaturesurvive/distillarr:latest</Repository>
+  <Registry>https://github.com/CreatureSurvive/distillarr/pkgs/container/distillarr</Registry>
+  <Network>bridge</Network>
+  <Shell>sh</Shell>
+  <Privileged>false</Privileged>
+  <Support>https://github.com/CreatureSurvive/distillarr/issues</Support>
+  <Project>https://github.com/CreatureSurvive/distillarr</Project>
+  <Overview>Finds the files in your media library worth re-encoding (HEVC/AV1/H.264) or fixing, and re-encodes them on your GPU with a VMAF quality target, verification and a trash for originals. Works with Sonarr, Radarr, Jellyfin, Plex and Bazarr.</Overview>
+  <Category>MediaApp:Video Tools:</Category>
+  <WebUI>http://[IP]:[PORT:8080]/</WebUI>
+  <ExtraParams>--restart unless-stopped</ExtraParams>
+  <Config Name="Web UI port" Target="8080" Default="8093" Mode="tcp" Description="Web interface" Type="Port" Display="always" Required="true">8093</Config>
+  <Config Name="Config" Target="/config" Default="/mnt/user/appdata/distillarr" Mode="rw" Description="Database, previews, caches" Type="Path" Display="always" Required="true">/mnt/user/appdata/distillarr</Config>
+  <Config Name="Media" Target="/data" Default="/mnt/user/data" Mode="rw" Description="Your media share. Use the same container path as Sonarr/Radarr if you can. Keep libraries inside one share so the trash can hardlink." Type="Path" Display="always" Required="true">/mnt/user/data</Config>
+  <Config Name="GPU (Intel/AMD)" Target="/dev/dri" Default="/dev/dri" Mode="" Description="Remove for CPU-only or NVIDIA. For NVIDIA add --runtime=nvidia to Extra Parameters and set NVIDIA_VISIBLE_DEVICES." Type="Device" Display="always" Required="false">/dev/dri</Config>
+  <Config Name="PUID" Target="PUID" Default="99" Mode="" Description="User id (Unraid: 99 = nobody)" Type="Variable" Display="advanced" Required="true">99</Config>
+  <Config Name="PGID" Target="PGID" Default="100" Mode="" Description="Group id (Unraid: 100 = users)" Type="Variable" Display="advanced" Required="true">100</Config>
+  <Config Name="UMASK" Target="UMASK" Default="022" Mode="" Description="umask for created files" Type="Variable" Display="advanced" Required="false">022</Config>
+  <Config Name="LIBVA_DRIVER_NAME" Target="LIBVA_DRIVER_NAME" Default="iHD" Mode="" Description="iHD for Intel, radeonsi for AMD" Type="Variable" Display="advanced" Required="false">iHD</Config>
+  <Config Name="NVIDIA_VISIBLE_DEVICES" Target="NVIDIA_VISIBLE_DEVICES" Default="" Mode="" Description="NVIDIA only: 'all' or a GPU UUID" Type="Variable" Display="advanced" Required="false"></Config>
+  <Config Name="NVIDIA_DRIVER_CAPABILITIES" Target="NVIDIA_DRIVER_CAPABILITIES" Default="compute,video,utility,graphics" Mode="" Description="NVIDIA only" Type="Variable" Display="advanced" Required="false">compute,video,utility,graphics</Config>
+</Container>

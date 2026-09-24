@@ -1,0 +1,28 @@
+# Distillarr with an NVIDIA GPU (NVENC). Needs the NVIDIA Container
+# Toolkit on the host. "graphics" in the capabilities also exposes the
+# Vulkan driver that upscaling needs.
+services:
+  distillarr:
+    image: ghcr.io/creaturesurvive/distillarr:latest
+    container_name: distillarr
+    restart: unless-stopped
+    ports:
+      - "8093:8080"
+    environment:
+      PUID: "1000"
+      PGID: "1000"
+      TZ: Etc/UTC
+      NVIDIA_VISIBLE_DEVICES: all
+      NVIDIA_DRIVER_CAPABILITIES: compute,video,utility,graphics
+    runtime: nvidia
+    # Or, with Compose's device reservations instead of `runtime`:
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: all
+    #           capabilities: [gpu, video, graphics]
+    volumes:
+      - ./config:/config
+      - /path/to/media:/data

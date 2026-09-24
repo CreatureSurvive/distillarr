@@ -1,0 +1,18 @@
+# Distillarr with an Intel GPU (Quick Sync / VA-API, Arc or iGPU).
+services:
+  distillarr:
+    image: ghcr.io/creaturesurvive/distillarr:latest
+    container_name: distillarr
+    restart: unless-stopped
+    ports:
+      - "8093:8080"
+    environment:
+      PUID: "1000"
+      PGID: "1000"
+      TZ: Etc/UTC
+      LIBVA_DRIVER_NAME: iHD # modern Intel (Broadwell and newer)
+    devices:
+      - /dev/dri:/dev/dri # the entrypoint adds the render group automatically
+    volumes:
+      - ./config:/config
+      - /path/to/media:/data # use the same path Sonarr/Radarr use if you can

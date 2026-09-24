@@ -17,7 +17,7 @@ instead, and a blank value in a `PUT` keeps the saved one.
 | `DISTILLARR_DB` | `/config/distillarr.db` | SQLite database path. |
 | `DISTILLARR_PREVIEWS` | `/config/previews` | A/B preview clips. |
 | `DISTILLARR_UPSCALE_WORK` | `/config/upscale` | Chunks of neural upscales in progress (they survive restarts). |
-| `PUID` / `PGID` / `UMASK` | `1000` / `1000` / `002` | User, group and umask the app runs as (see `docs/packaging.md`). |
+| `PUID` / `PGID` / `UMASK` | `1000` / `1000` / `022` | User, group and umask the app runs as (see `docs/packaging.md`). |
 | `TZ` | `UTC` | Time zone for processing windows and the nightly summary. |
 | `LIBVA_DRIVER_NAME` | driver default | VA-API driver (`iHD` for modern Intel, `radeonsi` for AMD). |
 
