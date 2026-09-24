@@ -2,13 +2,16 @@ import React from "react";
 import ReactDOM from "react-dom/client";
 import { HashRouter } from "react-router-dom";
 import App from "./App";
+import { AuthGate } from "./Login";
 import "./tokens.css";
 import "./app.css";
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
     <HashRouter>
-      <App />
+      <AuthGate>
+        <App />
+      </AuthGate>
     </HashRouter>
   </React.StrictMode>
 );

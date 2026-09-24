@@ -8,6 +8,7 @@ import { qualityWord } from "../options";
 import type { LiveState } from "../App";
 import { ScheduleTimeline } from "./Queue";
 import { NotificationsSection } from "./SettingsNotify";
+import { SecuritySection } from "./SettingsSecurity";
 
 function Field({ label, hint, children }: { label: string; hint?: string; children: ReactNode }) {
   return (
@@ -27,6 +28,7 @@ const SETTINGS_TABS = [
   { id: "encoding", label: "Encoding" },
   { id: "tracks", label: "Languages & subtitles" },
   { id: "upscaling", label: "Upscaling" },
+  { id: "security", label: "Security" },
   { id: "system", label: "System" },
 ];
 
@@ -85,6 +87,7 @@ export default function SettingsView({ live, onJellyfin, onPlex }: { live: LiveS
       </>}
 
       {tab === "notifications" && <NotificationsSection cfg={cfg} setCfg={setCfg} />}
+      {tab === "security" && <SecuritySection cfg={cfg} setCfg={setCfg} />}
       {tab === "encoding" && <>
       <section className="panel" id="s-enc">
         <h2 className="panel-title">Encoding defaults</h2>

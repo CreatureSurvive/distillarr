@@ -623,6 +623,11 @@ export type Config = {
   bazarr_key_set?: boolean;
   bazarr_path_map?: string;
   notifiers?: Notifier[];
+  auth_mode?: string;
+  auth_cidrs?: string[];
+  trusted_proxies?: string[];
+  proxy_header?: string;
+  metrics_public?: boolean;
   plex_keep_added_at: boolean;
   defer_while_transcoding: boolean;
   hold_replace_while_playing: boolean;
@@ -763,6 +768,17 @@ export type TrendSnapshot = {
   saved_cumulative: number;
 };
 
+export type AuthStatus = {
+  mode: string; // required | lan_bypass | proxy_header | disabled
+  authenticated: boolean;
+  setup_required: boolean;
+  setup_allowed: boolean;
+  has_admin: boolean;
+  user?: string;
+  via?: string; // disabled | bypass | proxy | key | session
+};
+export type APIKey = { id: number; name: string; prefix: string; created_at: string; last_used_at?: string };
+
 export type BazarrTest = {
   ok: boolean;
   error?: string;
@@ -819,8 +835,21 @@ export class ApiError extends Error {
   }
 }
 
+// browser sessions echo the CSRF cookie in a header on writes
+// (double submit); a 401 tells the AuthGate to show the login page.
+function csrfToken(): string {
+  const m = document.cookie.match(/(?:^|; )distillarr_csrf=([^;]*)/);
+  return m ? decodeURIComponent(m[1]) : "";
+}
+
+export const AUTH_EVENT = "distillarr-auth-required";
+
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(path, { headers: { "Content-Type": "application/json" }, ...init });
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  const method = (init?.method || "GET").toUpperCase();
+  if (method !== "GET" && method !== "HEAD") headers["X-CSRF-Token"] = csrfToken();
+  const res = await fetch(path, { ...init, headers: { ...headers, ...(init?.headers as Record<string, string> | undefined) } });
+  if (res.status === 401 && !path.startsWith("/api/v1/auth/")) window.dispatchEvent(new Event(AUTH_EVENT));
   if (!res.ok) {
     let msg = `${res.status} ${res.statusText}`;
     let data: any;
@@ -938,6 +967,14 @@ export const api = {
   composition: (library?: string) => req<Composition>(`/api/v1/libraries/composition?${qs({ library })}`),
   measure: () => req<MeasureStatus>("/api/v1/measure"),
   stats: () => req<HistoryStats>("/api/v1/stats"),
+  authStatus: () => req<AuthStatus>("/api/v1/auth/status"),
+  authSetup: (username: string, password: string) => post<{ ok: boolean }>("/api/v1/auth/setup", { username, password }),
+  authLogin: (username: string, password: string) => post<{ ok: boolean }>("/api/v1/auth/login", { username, password }),
+  authLogout: () => post<{ ok: boolean }>("/api/v1/auth/logout"),
+  authPassword: (body: { username?: string; current: string; new: string }) => post<{ ok: boolean }>("/api/v1/auth/password", body),
+  authKeys: () => req<APIKey[]>("/api/v1/auth/keys"),
+  authCreateKey: (name: string) => post<{ key: string; info: APIKey }>("/api/v1/auth/keys", { name }),
+  authDeleteKey: (id: number) => req<{ ok: boolean }>(`/api/v1/auth/keys/${id}`, { method: "DELETE" }),
   trends: () => req<TrendSnapshot[]>("/api/v1/trends"),
 
   jobs: (status?: string, limit = 100) => req<{ jobs: Job[] }>(`/api/v1/jobs?${qs({ status, limit })}`),
