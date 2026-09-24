@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { NavLink, Route, Routes } from "react-router-dom";
+import { NavLink, Route, Routes, useLocation } from "react-router-dom";
 import { api, subscribe, type Job, type JfStatus, type Progress, type ScanStats } from "./api";
 import { Toaster } from "./components";
 import { bytes, dur } from "./format";
@@ -12,6 +12,7 @@ import Issues from "./views/Issues";
 import PreviewView from "./views/Preview";
 import UpscaleView from "./views/Upscale";
 import SettingsView from "./views/Settings";
+import SetupWizard from "./views/Setup";
 
 export type LiveState = {
   progress: Record<number, Progress>;
@@ -100,6 +101,12 @@ export default function App() {
     api.intake("needs_confirmation").then((r) => setNeedsConfirmation(r.rows.length)).catch(() => {});
   }, [live.intakeVersion]);
 
+  // no library yet means a fresh install; show the setup wizard
+  // (Settings stays reachable for the wizard's integration links).
+  const [needsSetup, setNeedsSetup] = useState(false);
+  useEffect(() => { api.config().then((c) => setNeedsSetup(c.libraries.length === 0)).catch(() => {}); }, []);
+  const loc = useLocation();
+
   const running = live.activeJobs.length;
 
   return (
@@ -143,6 +150,7 @@ export default function App() {
       </aside>
 
       <main className="main">
+        {needsSetup && !loc.pathname.startsWith("/settings") ? <SetupWizard onDone={() => setNeedsSetup(false)} /> : (
         <Routes>
           <Route path="/" element={<Library live={live} />} />
           <Route path="/shows" element={<Shows live={live} />} />
@@ -156,6 +164,7 @@ export default function App() {
             onJellyfin={() => setLive((l) => ({ ...l, jfVersion: l.jfVersion + 1 }))}
             onPlex={() => setLive((l) => ({ ...l, plexVersion: l.plexVersion + 1 }))} />} />
         </Routes>
+        )}
       </main>
 
       <EncodeDeck live={live} />

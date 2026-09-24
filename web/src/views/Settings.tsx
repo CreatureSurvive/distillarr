@@ -274,7 +274,7 @@ function JellyfinSection({ cfg, setCfg, live, onJellyfin }: { cfg: Config; setCf
             placeholder={cfg.jellyfin_key_set ? "Leave blank to keep the saved key" : "Dashboard → API Keys → +"} autoComplete="off" />
         </label>
         <label className="field"><span>Path mapping <span className="dim">(Jellyfin=here)</span></span>
-          <input className="input mono" value={pathMap} onChange={(e) => setPathMap(e.target.value)} placeholder="/data=/srv/media" spellCheck={false} />
+          <input className="input mono" value={pathMap} onChange={(e) => setPathMap(e.target.value)} placeholder="/data=/media" spellCheck={false} />
         </label>
       </div>
       <div className="toolbar">
@@ -393,7 +393,7 @@ function PlexSection({ cfg, setCfg, live, onPlex }: { cfg: Config; setCfg: (c: C
             placeholder={cfg.plex_token_set ? "Leave blank to keep the saved token" : "paste your X-Plex-Token"} autoComplete="off" />
         </label>
         <label className="field"><span>Path mapping <span className="dim">(Plex=here)</span></span>
-          <input className="input mono" value={pathMap} onChange={(e) => setPathMap(e.target.value)} placeholder="/data=/srv/media" spellCheck={false} />
+          <input className="input mono" value={pathMap} onChange={(e) => setPathMap(e.target.value)} placeholder="/data=/media" spellCheck={false} />
         </label>
       </div>
       <div className="toolbar">
@@ -490,7 +490,7 @@ function BazarrSection({ cfg, setCfg }: { cfg: Config; setCfg: (c: Config) => vo
             placeholder={cfg.bazarr_key_set ? "Leave blank to keep the saved key" : "Settings > General > Security"} autoComplete="off" />
         </label>
         <label className="field"><span>Path mapping <span className="dim">(Bazarr=here)</span></span>
-          <input className="input mono" value={pathMap} onChange={(e) => setPathMap(e.target.value)} placeholder="/data=/srv/media" spellCheck={false} />
+          <input className="input mono" value={pathMap} onChange={(e) => setPathMap(e.target.value)} placeholder="/data=/media" spellCheck={false} />
         </label>
       </div>
       <div className="toolbar">
@@ -1288,8 +1288,10 @@ function TrashSection({ cfg, save }: { cfg: Config; save: (p: Partial<Config>, m
     <section className="panel" id="s-trash">
       <h2 className="panel-title">Storage &amp; trash</h2>
       <div className="stat-row">
-        <div className="stat"><div className="stat-label">Media pool</div><div className="stat-val">{disk(sys?.media)}</div></div>
-        <div className="stat"><div className="stat-label">App data (NVMe)</div><div className="stat-val">{disk(sys?.config)}</div></div>
+        {(sys?.filesystems || []).map((f) => (
+          <div className="stat" key={f.libraries.join(",")}><div className="stat-label">Media: {f.libraries.join(", ")}</div><div className="stat-val">{disk(f)}</div></div>
+        ))}
+        <div className="stat"><div className="stat-label">App data</div><div className="stat-val">{disk(sys?.config)}</div></div>
         <div className="stat"><div className="stat-label">In trash</div><div className="stat-val">{bytes(total)} · {items.length} file{items.length === 1 ? "" : "s"}</div></div>
       </div>
       <p className="dim small">

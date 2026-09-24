@@ -893,7 +893,7 @@ export const api = {
   scanStats: () => req<ScanStats>("/api/v1/scan"),
   system: () =>
     req<{
-      media?: { total: number; free: number };
+      filesystems?: { libraries: string[]; total: number; free: number }[];
       config?: { total: number; free: number };
       trash_bytes: number;
       trash_count: number;
@@ -904,6 +904,7 @@ export const api = {
   config: () => req<Config>("/api/v1/config"),
   saveConfig: (c: Partial<Config>) => req<Config>("/api/v1/config", { method: "PUT", body: JSON.stringify(c) }),
 
+  browse: (path: string) => req<{ path: string; parent?: string; dirs: string[] }>(`/api/v1/fs/browse?path=${encodeURIComponent(path)}`),
   hw: () =>
     req<HwInfo>("/api/v1/hw"),
   reprobe: () => post<{ started: boolean }>("/api/v1/hw"),

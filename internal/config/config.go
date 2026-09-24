@@ -583,11 +583,13 @@ func (a ArrInstance) On() bool { return a.Enabled == nil || *a.Enabled }
 
 // Default returns the initial configuration for a new install.
 func Default() Config {
+	// A fresh install assumes nothing about paths: no libraries,
+	// no path maps, no media-server URL, and the queue paused until the
+	// user has reviewed what it would do. Stored configs are loaded over
+	// this, so existing installs keep every value they saved.
 	return Config{
-		Libraries: []Library{
-			{Name: "movies", Path: "/srv/media/movies"},
-			{Name: "tvshows", Path: "/srv/media/tvshows"},
-		},
+		Libraries:          []Library{},
+		Paused:             true,
 		Workers:            1,
 		Schedules:          []Schedule{},
 		DefaultCodec:       "hevc",
@@ -597,12 +599,9 @@ func Default() Config {
 		AudioPCMTarget:     "flac",
 		TrashEnabled:       true,
 		TrashDays:          14,
-		TrashDir:           "/srv/media/.distillarr-trash",
 		DefaultSpeed:       "medium",
-		JellyfinPathMap:    "/data=/srv/media",
 		MaxAttempts:        3,
 		RecompressHEVC:     false,
-		JellyfinURL:        "http://host.docker.internal:8096",
 	}
 }
 
@@ -628,9 +627,8 @@ func NewManager(st *store.Store) *Manager {
 }
 
 func (m *Manager) normalize() {
-	d := Default()
-	if len(m.cfg.Libraries) == 0 {
-		m.cfg.Libraries = d.Libraries
+	if m.cfg.Libraries == nil {
+		m.cfg.Libraries = []Library{}
 	}
 	if m.cfg.Workers < 1 {
 		m.cfg.Workers = 1
@@ -691,15 +689,9 @@ func (m *Manager) normalize() {
 		def("opus", encode.AudioRule{Action: "convert", Target: "aac"})
 		def("vorbis", encode.AudioRule{Action: "convert", Target: "aac"})
 	}
-	if m.cfg.TrashDir == "" {
-		m.cfg.TrashDir = d.TrashDir
-	}
 	if m.cfg.VMAFTarget == nil {
 		t := 93.0
 		m.cfg.VMAFTarget = &t
-	}
-	if m.cfg.JellyfinPathMap == "" {
-		m.cfg.JellyfinPathMap = d.JellyfinPathMap
 	}
 	if m.cfg.PlexKeepAddedAt == nil {
 		t := true

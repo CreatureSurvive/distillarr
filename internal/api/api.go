@@ -90,6 +90,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("DELETE /api/v1/auth/keys/{id}", s.authDeleteKey)
 	mux.HandleFunc("GET /api/v1/events", s.hub.ServeHTTP)
 	mux.HandleFunc("GET /api/v1/system", s.system)
+	mux.HandleFunc("GET /api/v1/fs/browse", s.browseDirs)
 
 	mux.HandleFunc("GET /api/v1/config", s.getConfig)
 	mux.HandleFunc("PUT /api/v1/config", s.putConfig)
@@ -273,7 +274,7 @@ func (s *Server) system(w http.ResponseWriter, r *http.Request) {
 	checked, total, bars := s.st.CropProgress()
 	writeJSON(w, http.StatusOK, map[string]any{
 		"crop":          map[string]int{"checked": checked, "total": total, "with_bars": bars},
-		"media":         diskUsage("/srv/media"),
+		"filesystems":   libraryDisks(s.cfg.Get().Libraries),
 		"config":        diskUsage("/config"),
 		"trash_bytes":   trashBytes,
 		"trash_count":   len(items),
