@@ -1437,6 +1437,40 @@ function TrashSection({ cfg, save }: { cfg: Config; save: (p: Partial<Config>, m
 // stale. None of these touch media files - everything but history rebuilds
 // itself automatically (measurements in the overnight queue; crop/issue
 // detection the same way it backfilled on first scan).
+// Removes finished job records for one folder, e.g. a scratch test
+// library, with a count shown before anything is deleted.
+function HistoryFolderRemover() {
+  const [path, setPath] = useState("");
+  const [matches, setMatches] = useState<number | null>(null);
+  const check = async () => {
+    try { setMatches((await api.removeHistoryUnder(path, true)).matches ?? 0); } catch (e: any) { toast(e.message, "err"); }
+  };
+  const remove = async () => {
+    try {
+      const r = await api.removeHistoryUnder(path, false);
+      toast(`Removed ${r.cleared ?? 0} job record${r.cleared === 1 ? "" : "s"}`);
+      setMatches(null);
+    } catch (e: any) { toast(e.message, "err"); }
+  };
+  return (
+    <li>
+      <div className="trash-name" style={{ flex: 1 }}>
+        <div>Job history for one folder</div>
+        <div className="mono faint small">Deletes finished job records for files under a folder (e.g. a test library) and rebuilds the trend charts. Active jobs and jobs whose original is still in the trash are kept.</div>
+        <div className="toolbar" style={{ marginTop: 6 }}>
+          <input className="input mono" style={{ maxWidth: 420 }} value={path} placeholder="/media/.test-library"
+            onChange={(e) => { setPath(e.target.value); setMatches(null); }} spellCheck={false} />
+          {matches === null
+            ? <button className="btn mini" onClick={check} disabled={!path.trim()}>Find</button>
+            : <button className="btn mini btn-danger" onClick={remove} disabled={matches === 0}>
+                {matches === 0 ? "Nothing matches" : `Delete ${matches} record${matches === 1 ? "" : "s"}`}
+              </button>}
+        </div>
+      </div>
+    </li>
+  );
+}
+
 function MaintenanceSection() {
   const act = async (fn: () => Promise<{ cleared?: number; ok?: boolean }>, label: string) => {
     try {
@@ -1480,6 +1514,7 @@ function MaintenanceSection() {
         {item("Job history & stats", "Permanently deletes done/failed/canceled job records - what the savings/history dashboard and the “upscaled” badge are built from. Active jobs aren't touched.",
           "Permanently delete all job history? This cannot be undone - it removes the record of past work, not just a cache.",
           api.clearHistory, "Job history cleared", true)}
+        <HistoryFolderRemover />
       </ul>
     </section>
   );

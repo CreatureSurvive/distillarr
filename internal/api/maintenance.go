@@ -3,7 +3,10 @@
 package api
 
 import (
+	"fmt"
 	"net/http"
+	"strings"
+	"time"
 
 	"github.com/CreatureSurvive/distillarr/internal/recs"
 )
@@ -57,5 +60,43 @@ func (s *Server) clearIssueTags(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.scan.RefreshRecsSoon()
+	writeJSON(w, http.StatusOK, map[string]any{"cleared": n})
+}
+
+// removeHistoryUnder deletes finished job records for one folder (e.g.
+// a scratch test library), then rebuilds the trend history from what's
+// left. dry_run (the default) only counts.
+func (s *Server) removeHistoryUnder(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Path   string `json:"path"`
+		DryRun *bool  `json:"dry_run"`
+	}
+	if err := readJSON(r, &req); err != nil {
+		fail(w, 400, err)
+		return
+	}
+	p := strings.TrimSpace(req.Path)
+	if !strings.HasPrefix(p, "/") || strings.Trim(p, "/") == "" {
+		fail(w, 400, fmt.Errorf("enter an absolute folder path, not /"))
+		return
+	}
+	if req.DryRun == nil || *req.DryRun {
+		n, err := s.st.CountFinishedJobsUnder(p)
+		if err != nil {
+			fail(w, 500, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"matches": n})
+		return
+	}
+	n, err := s.st.RemoveFinishedJobsUnder(p)
+	if err != nil {
+		fail(w, 500, err)
+		return
+	}
+	if n > 0 {
+		_ = s.st.ClearTrends()
+		s.snapshotTrend(time.Now())
+	}
 	writeJSON(w, http.StatusOK, map[string]any{"cleared": n})
 }

@@ -217,6 +217,7 @@ func (s *Server) Handler() http.Handler {
 	// make stale, without touching the media files themselves.
 	mux.HandleFunc("POST /api/v1/maintenance/measurements/clear", s.clearMeasurements)
 	mux.HandleFunc("POST /api/v1/maintenance/history/clear", s.clearHistory)
+	mux.HandleFunc("POST /api/v1/maintenance/history/remove", s.removeHistoryUnder)
 	mux.HandleFunc("POST /api/v1/maintenance/calibration/clear", s.clearCalibration)
 	mux.HandleFunc("POST /api/v1/maintenance/crop/clear", s.clearCrop)
 	mux.HandleFunc("POST /api/v1/maintenance/issues/clear", s.clearIssueTags)

@@ -99,3 +99,10 @@ func (s *Store) SavedByDay(loc *time.Location) (map[string]int64, error) {
 	}
 	return out, rows.Err()
 }
+
+// ClearTrends deletes every snapshot; the next snapshot backfills
+// savings from the remaining job history.
+func (s *Store) ClearTrends() error {
+	_, err := s.dbW.Exec(`DELETE FROM trend_snapshots`)
+	return err
+}

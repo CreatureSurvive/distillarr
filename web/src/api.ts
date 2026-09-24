@@ -1035,6 +1035,8 @@ export const api = {
   jellystatTest: (body: { url?: string; key?: string }) => post<{ ok: boolean; error?: string; history_groups?: number }>("/api/v1/jellystat/test", body),
   jellystatImport: () => post<{ started: boolean }>("/api/v1/jellystat/import"),
   jellystatStatus: () => req<{ importing: boolean; last_import?: string; last_count?: string }>("/api/v1/jellystat/status"),
+  removeHistoryUnder: (path: string, dryRun: boolean) =>
+    post<{ matches?: number; cleared?: number }>("/api/v1/maintenance/history/remove", { path, dry_run: dryRun }),
   bazarrTest: (body: { url?: string; key?: string; path_map?: string }) => post<BazarrTest>("/api/v1/bazarr/test", body),
   clearUpgradeLoop: (id: number) => req<{ ok: boolean }>(`/api/v1/files/${id}/upgrade-loop`, { method: "DELETE" }),
   bazarrSearch: (id: number) => post<{ ok: boolean }>(`/api/v1/files/${id}/bazarr-search`),

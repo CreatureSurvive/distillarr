@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"strings"
 )
 
 // Job statuses.
@@ -554,4 +555,36 @@ func (s *Store) CountIntakeByState() (map[string]int, error) {
 		out[k] = n
 	}
 	return out, rows.Err()
+}
+
+// finishedUnder selects finished jobs whose source is under prefix and
+// that no trash item still points at (a restore needs that record).
+const finishedUnder = `FROM jobs WHERE status IN ('done','failed','canceled')
+	AND (src_path = ? OR src_path LIKE ? ESCAPE '\')
+	AND id NOT IN (SELECT job_id FROM trash WHERE job_id > 0)`
+
+func likePrefix(prefix string) (string, string) {
+	prefix = strings.TrimRight(prefix, "/")
+	esc := strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`).Replace(prefix)
+	return prefix, esc + "/%"
+}
+
+// CountFinishedJobsUnder counts what RemoveFinishedJobsUnder would delete.
+func (s *Store) CountFinishedJobsUnder(prefix string) (int, error) {
+	exact, like := likePrefix(prefix)
+	var n int
+	err := s.dbR.QueryRow(`SELECT COUNT(*) `+finishedUnder, exact, like).Scan(&n)
+	return n, err
+}
+
+// RemoveFinishedJobsUnder deletes finished job records for files under
+// prefix (e.g. a scratch test folder), leaving active jobs and any job
+// a trash item still refers to.
+func (s *Store) RemoveFinishedJobsUnder(prefix string) (int64, error) {
+	exact, like := likePrefix(prefix)
+	res, err := s.dbW.Exec(`DELETE `+finishedUnder, exact, like)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
 }
