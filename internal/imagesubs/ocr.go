@@ -94,7 +94,7 @@ func RunOCR(ctx context.Context, srcPath string, track store.SubStream, minConfi
 		return res, nil
 	}
 
-	conf, cerr := sampleConfidence(ctx, work)
+	conf, cerr := sampleConfidence(ctx, supPath)
 	if cerr != nil {
 		res.Failed = true
 		res.Error = "confidence sampling: " + cerr.Error()
@@ -162,26 +162,42 @@ func ensureTessdata(ctx context.Context, dir, tess string) error {
 }
 
 // sampleConfidence re-OCRs up to confidenceSampleSize of pgsrip's kept
-// intermediate PNG frames (in work, --keep-temp-files leaves them under
-// a "*.pgsrip" subdirectory) with tesseract's own TSV output, averaging
-// the per-word confidence column — the same measurement used in testing
-// took manually.
-func sampleConfidence(ctx context.Context, work string) (float64, error) {
-	var pngs []string
-	err := filepath.WalkDir(work, func(p string, d os.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		if !d.IsDir() && strings.HasSuffix(strings.ToLower(p), ".png") {
-			pngs = append(pngs, p)
-		}
-		return nil
-	})
+// intermediate PNG frames with tesseract's own TSV output, averaging the
+// per-word confidence column — the same measurement used when this was tuned
+// manually. --keep-temp-files does NOT write next to supPath (found
+// live: pgsrip uses Python's system default temp directory, unrelated
+// to wherever the input file actually sits) — its dirs land directly
+// under os.TempDir(), named "<basename-of-supPath><random>.pgsrip", so
+// that's where this globs, and it removes every match it finds
+// afterward (pgsrip itself never cleans these up).
+func sampleConfidence(ctx context.Context, supPath string) (float64, error) {
+	pattern := filepath.Join(os.TempDir(), filepath.Base(supPath)+"*.pgsrip")
+	dirs, err := filepath.Glob(pattern)
 	if err != nil {
 		return 0, err
 	}
+	defer func() {
+		for _, d := range dirs {
+			os.RemoveAll(d)
+		}
+	}()
+	var pngs []string
+	for _, dir := range dirs {
+		err := filepath.WalkDir(dir, func(p string, d os.DirEntry, err error) error {
+			if err != nil {
+				return err
+			}
+			if !d.IsDir() && strings.HasSuffix(strings.ToLower(p), ".png") {
+				pngs = append(pngs, p)
+			}
+			return nil
+		})
+		if err != nil {
+			return 0, err
+		}
+	}
 	if len(pngs) == 0 {
-		return 0, fmt.Errorf("no intermediate frames found (pgsrip --keep-temp-files layout may have changed)")
+		return 0, fmt.Errorf("no intermediate frames found under %s (no dialogue in this track's span, or pgsrip's --keep-temp-files layout changed)", pattern)
 	}
 	if len(pngs) > confidenceSampleSize {
 		pngs = pngs[:confidenceSampleSize]
