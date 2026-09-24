@@ -320,9 +320,13 @@ func (s *Server) putConfig(w http.ResponseWriter, r *http.Request) {
 		}
 		b, _ = json.Marshal(merged)
 		next := *cur
-		if perr = json.Unmarshal(b, &next); perr == nil {
-			*cur = next
+		if perr = json.Unmarshal(b, &next); perr != nil {
+			return
 		}
+		if perr = validateLangPolicy(next.LangPolicy); perr != nil {
+			return
+		}
+		*cur = next
 	})
 	if err == nil {
 		err = perr
@@ -340,6 +344,19 @@ func (s *Server) putConfig(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	s.getConfig(w, r)
+}
+
+// validateLangPolicy rejects turning on report/apply mode while its
+// matching keep list is empty — Select would otherwise drop every track
+// in that kind, which is never what silently saving an empty list means.
+func validateLangPolicy(p config.LangPolicy) error {
+	if p.AudioMode != "" && p.AudioMode != "off" && len(p.AudioKeep) == 0 {
+		return fmt.Errorf("lang_policy: audio_mode needs at least one language in audio_keep")
+	}
+	if p.SubsMode != "" && p.SubsMode != "off" && len(p.SubsKeep) == 0 {
+		return fmt.Errorf("lang_policy: subs_mode needs at least one language in subs_keep")
+	}
+	return nil
 }
 
 // ---- scan ----

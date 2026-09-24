@@ -9,6 +9,7 @@ import (
 
 	"mediatrans/internal/config"
 	"mediatrans/internal/encode"
+	"mediatrans/internal/langprune"
 	"mediatrans/internal/store"
 )
 
@@ -44,6 +45,7 @@ var Types = []Type{
 	{"quality_limited", "Can't reach quality target", Info, "Measured: no tested setting reached your VMAF target, usually because the source is already heavily compressed. Best left as is.", "file"},
 	{"upgrade_pending", "Upgrade pending", Info, "A connected Sonarr/Radarr instance monitors this file and its quality cutoff isn't met yet, so a better release is probably coming. Skipped so a re-encode isn't wasted on a file about to be replaced.", "file"},
 	{"audio_blocks_mp4", "Audio blocks MP4", Quick, "The video (and any subtitles) already fit MP4, but the audio — TrueHD, DTS, FLAC or PCM with no matching conversion rule — would force MKV. Fixed by remuxing to MP4 and converting just the audio, per your audio rules.", "file"},
+	{"extra_languages", "Extra language tracks", Info, "Audio or subtitle tracks in languages your language policy doesn't keep are still present. Report mode only counts them; switching a mode to apply drops them.", "file"},
 	{"mixed_season", "Mixed formats in a season", Reencode, "Episodes in the same season use different codecs, containers or resolutions, which can cause inconsistent playback or transcoding.", "season"},
 	{"forces_transcode", "Forces client transcode", Info, "A Jellyfin or Plex session played this file with a transcode in the last 30 days, so at least one client couldn't play it directly. See the file page for the reasons.", "file"},
 }
@@ -76,8 +78,10 @@ func isMP4(container string) bool {
 // Detect returns the issue keys for one file. worth/measuredMiss come
 // from its current recommendation; forcesTranscode comes from the
 // playback-events table; cfg supplies AudioRules for
-// audio_blocks_mp4.
-func Detect(f *store.File, cfg config.Config, worth, measuredMiss, upgradePending, forcesTranscode bool) []string {
+// audio_blocks_mp4; origLangName is the file's
+// arr_items.original_language display name ("" if unmanaged or unknown),
+// used to resolve extra_languages.
+func Detect(f *store.File, cfg config.Config, worth, measuredMiss, upgradePending, forcesTranscode bool, origLangName string) []string {
 	var out []string
 	// Any tag other than hvc1 (hev1, blank-in-MP4 "[0][0][0][0]", ...);
 	// "" means the tag couldn't be read, so don't guess.
@@ -98,6 +102,9 @@ func Detect(f *store.File, cfg config.Config, worth, measuredMiss, upgradePendin
 	}
 	if audioBlocksMP4(f, cfg) {
 		out = append(out, "audio_blocks_mp4")
+	}
+	if has, _ := ExtraLanguages(f, cfg, origLangName); has {
+		out = append(out, "extra_languages")
 	}
 	if legacyCodecs[f.VideoCodec] {
 		out = append(out, "legacy_codec")
@@ -207,6 +214,21 @@ func audioBlocksMP4(f *store.File, cfg config.Config) bool {
 		}
 	}
 	return false
+}
+
+// ExtraLanguages reports whether cfg's LangPolicy would drop any of f's
+// audio/subtitle tracks, and the estimated bytes dropping them would
+// save. Report-only: nothing here changes the file applies the
+// decision). origLangName is the arr_items.original_language display
+// name; langprune.Select falls back to the first audio track's language
+// when it's "" or unrecognized.
+func ExtraLanguages(f *store.File, cfg config.Config, origLangName string) (bool, int64) {
+	p := cfg.LangPolicy
+	if (p.AudioMode == "" || p.AudioMode == "off") && (p.SubsMode == "" || p.SubsMode == "off") {
+		return false, 0
+	}
+	res := langprune.Select(f.Audio, f.Subs, langprune.NameToCode(origLangName), f.Duration, p)
+	return len(res.DropAudio) > 0 || len(res.DropSubs) > 0, res.SavedBytes
 }
 
 // HasQuick reports whether any of a file's issues has a quick fix.

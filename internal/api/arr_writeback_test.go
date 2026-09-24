@@ -259,6 +259,30 @@ func TestPutConfigRejectsTagAfterReencodeWithoutTagName(t *testing.T) {
 	}
 }
 
+// PUT /api/v1/config must reject turning on lang_policy's audio_mode or
+// subs_mode with an empty matching keep list.
+func TestPutConfigRejectsLangModeWithoutKeepList(t *testing.T) {
+	s := newTestServer(t)
+	rec := doJSON(t, s, "PUT", "/api/v1/config", map[string]any{
+		"lang_policy": map[string]any{"audio_mode": "report"},
+	})
+	if rec.Code != 400 {
+		t.Fatalf("audio_mode with empty audio_keep: status = %d, want 400; body = %s", rec.Code, rec.Body.String())
+	}
+	rec = doJSON(t, s, "PUT", "/api/v1/config", map[string]any{
+		"lang_policy": map[string]any{"audio_mode": "report", "audio_keep": []string{"eng"}},
+	})
+	if rec.Code != 200 {
+		t.Fatalf("audio_mode with a keep list: status = %d, want 200; body = %s", rec.Code, rec.Body.String())
+	}
+	rec = doJSON(t, s, "PUT", "/api/v1/config", map[string]any{
+		"lang_policy": map[string]any{"subs_mode": "apply"},
+	})
+	if rec.Code != 400 {
+		t.Fatalf("subs_mode with empty subs_keep: status = %d, want 400; body = %s", rec.Code, rec.Body.String())
+	}
+}
+
 // POST /api/v1/arr/{id}/rename-tag renames a matching tag by label.
 func TestArrRenameTag(t *testing.T) {
 	var renameBody string

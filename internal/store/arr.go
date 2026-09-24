@@ -216,6 +216,29 @@ func (s *Store) ArrItemsMap(fileIDs []int64) (map[int64]ArrItem, error) {
 	return out, nil
 }
 
+// ArrOriginalLanguages returns every managed file's original_language
+// name, keyed by file id (files with no arr_items row, or a blank
+// original_language, are simply absent). Used to resolve langprune's
+// "original" language in bulk (extra_languages issue), the same
+// way ForcesTranscodeFileIDs feeds forces_transcode.
+func (s *Store) ArrOriginalLanguages() (map[int64]string, error) {
+	out := map[int64]string{}
+	rows, err := s.dbR.Query(`SELECT file_id, original_language FROM arr_items WHERE original_language != ''`)
+	if err != nil {
+		return out, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id int64
+		var lang string
+		if err := rows.Scan(&id, &lang); err != nil {
+			return out, err
+		}
+		out[id] = lang
+	}
+	return out, rows.Err()
+}
+
 // ArrManagedCount returns how many non-missing files have an arr_items
 // row, for the "Managed by" facet's counts.
 func (s *Store) ArrManagedCount() (int, error) {
