@@ -337,7 +337,8 @@ func (s *Server) putConfig(w http.ResponseWriter, r *http.Request) {
 	}
 	s.eng.Kick()
 	for _, k := range []string{"default_codec", "default_quality", "preferred_backend", "min_savings_pct",
-		"audio_pcm_target", "recompress_hevc", "max_height", "tonemap_hdr", "default_speed", "prefer_mp4", "crop_bars"} {
+		"audio_pcm_target", "recompress_hevc", "max_height", "tonemap_hdr", "default_speed", "prefer_mp4", "crop_bars",
+		"lang_policy"} {
 		if _, ok := patch[k]; ok {
 			s.scan.RefreshRecsSoon()
 			break
