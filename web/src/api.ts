@@ -84,6 +84,19 @@ export type FileItem = {
   upscaled?: UpscaledInfo; // set when this file is the output of a finished upscale job
   lang_prune_exempt?: boolean; // opts this file out of language pruning
   sidecar_mode?: string; // "" | "extract_keep" | "extract_remove" (per-file override; "" = inherit)
+  image_subs_mode?: string; // "" | "sidecar" | "ocr" (per-file override; "" = inherit)
+  ocr?: OCRResult; // last OCR attempt on this file's image subtitle track, if any
+};
+
+// OCRResult: cached result of the last OCR attempt.
+export type OCRResult = {
+  track_index: number;
+  lang: string;
+  confidence: number;
+  srt_name?: string;
+  failed: boolean;
+  error?: string;
+  attempted_at: string;
 };
 
 export type IssueType = {
@@ -440,6 +453,10 @@ export type RuleAction = {
   // "" means "use the file/global resolution". Only applies with
   // kind === "queue_override"; a per-file override still wins over it.
   sidecar_mode?: string;
+  // image-subtitle mode override for files this rule matches.
+  // "" means "use the file/global resolution". Only applies with
+  // kind === "queue_override"; a per-file override still wins over it.
+  image_subs_mode?: string;
 };
 
 // LangPolicy: which audio/subtitle tracks langprune.Select
@@ -584,6 +601,13 @@ export type Config = {
   lang_instance_overrides?: Record<string, LangOverride>;
   // subtitle sidecar extraction, off by default.
   subs_sidecar_mode?: string; // "" (off) | extract_keep | extract_remove
+  // image (PGS/VobSub) subtitle handling, off ("keep") by default.
+  // "sidecar" is not known to be a selectable subtitle track in Jellyfin
+  // or Plex — the UI warns before
+  // this is picked.
+  image_subs_mode?: string; // "" (keep) | sidecar | ocr
+  image_subs_keep_original?: boolean; // default true
+  ocr_min_confidence?: number; // default 80
   jellyfin_url: string;
   jellyfin_api_key?: string;
   jellyfin_key_set?: boolean;
@@ -859,6 +883,10 @@ export const api = {
     post<{ id: number; exempt: boolean }>(`/api/v1/files/${id}/lang-exempt`, { exempt }),
   setSidecarMode: (id: number, mode: string) =>
     post<{ id: number; mode: string }>(`/api/v1/files/${id}/sidecar-mode`, { mode }),
+  setImageSubsMode: (id: number, mode: string) =>
+    post<{ id: number; mode: string }>(`/api/v1/files/${id}/image-subs-mode`, { mode }),
+  ocrFile: (id: number, runNow?: boolean) =>
+    post<Job>(`/api/v1/files/${id}/ocr`, { run_now: !!runNow }),
   langpruneReport: () => req<LangpruneReport>("/api/v1/langprune/report"),
   langpruneApply: () => post<{ queued: number; skipped: number }>("/api/v1/langprune/apply", { confirm: true }),
   issues: () => req<{ types: IssueType[] }>("/api/v1/issues"),

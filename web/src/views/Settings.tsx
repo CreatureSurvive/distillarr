@@ -49,6 +49,7 @@ export default function SettingsView({ live, onJellyfin, onPlex }: { live: LiveS
         <a href="#/settings" onClick={(e) => { e.preventDefault(); document.getElementById("s-auto")?.scrollIntoView({ behavior: "smooth" }); }}>Autopilot</a>
         <a href="#/settings" onClick={(e) => { e.preventDefault(); document.getElementById("s-lang")?.scrollIntoView({ behavior: "smooth" }); }}>Languages</a>
         <a href="#/settings" onClick={(e) => { e.preventDefault(); document.getElementById("s-sidecar")?.scrollIntoView({ behavior: "smooth" }); }}>Subtitles</a>
+        <a href="#/settings" onClick={(e) => { e.preventDefault(); document.getElementById("s-imgsubs")?.scrollIntoView({ behavior: "smooth" }); }}>Image subtitles</a>
         <a href="#/settings" onClick={(e) => { e.preventDefault(); document.getElementById("s-enc")?.scrollIntoView({ behavior: "smooth" }); }}>Encoding</a>
         <a href="#/settings" onClick={(e) => { e.preventDefault(); document.getElementById("s-up")?.scrollIntoView({ behavior: "smooth" }); }}>Upscaling</a>
         <a href="#/settings" onClick={(e) => { e.preventDefault(); document.getElementById("s-hw")?.scrollIntoView({ behavior: "smooth" }); }}>Hardware</a>
@@ -66,6 +67,7 @@ export default function SettingsView({ live, onJellyfin, onPlex }: { live: LiveS
 
       <LangPolicySection cfg={cfg} save={save} />
       <SidecarSection cfg={cfg} save={save} />
+      <ImageSubsSection cfg={cfg} save={save} />
 
       <section className="panel" id="s-enc">
         <h2 className="panel-title">Encoding defaults</h2>
@@ -891,6 +893,10 @@ function RuleEditor({ rule, instanceNames, onClose, onSave, onDelete }: {
               <Seg value={r.then.sidecar_mode || ""} onChange={(v) => setR({ ...r, then: { ...r.then, sidecar_mode: v } })}
                 options={SIDECAR_MODES} />
             </label>
+            <label className="field"><span>Image subtitles</span>
+              <Seg value={r.then.image_subs_mode || ""} onChange={(v) => setR({ ...r, then: { ...r.then, image_subs_mode: v } })}
+                options={IMAGE_SUBS_MODES} />
+            </label>
           </>
         )}
 
@@ -1574,6 +1580,53 @@ function SidecarSection({ cfg, save }: { cfg: Config; save: (p: Partial<Config>,
         <Field label="Text subtitle sidecars">
           <Seg value={cfg.subs_sidecar_mode || ""} onChange={(v) => save({ subs_sidecar_mode: v })} options={SIDECAR_MODES} />
         </Field>
+      </div>
+    </section>
+  );
+}
+
+const IMAGE_SUBS_MODES: { value: string; label: string }[] = [
+  { value: "", label: "Keep" },
+  { value: "sidecar", label: "Sidecar" },
+  { value: "ocr", label: "OCR to text" },
+];
+
+const IMAGE_SIDECAR_WARNING =
+  "External PGS/VobSub sidecar files are not known to be selectable subtitle tracks in Jellyfin or Plex — " +
+  "neither server offers an external image-subtitle sidecar as a track to choose. " +
+  "Extraction still happens and the files are still written; they just may not show up as a subtitle option in your player. " +
+  "Turn on Sidecar mode anyway?";
+
+function ImageSubsSection({ cfg, save }: { cfg: Config; save: (p: Partial<Config>, m?: string) => void }) {
+  const mode = cfg.image_subs_mode || "";
+  const setMode = (v: string) => {
+    if (v === "sidecar" && !confirm(IMAGE_SIDECAR_WARNING)) return;
+    save({ image_subs_mode: v });
+  };
+  return (
+    <section className="panel" id="s-imgsubs">
+      <h2 className="panel-title">Image subtitles</h2>
+      <p className="dim small">
+        PGS and VobSub (bitmap) subtitle tracks, off ("Keep") by default. <strong>Sidecar</strong> extracts them next to
+        the file — gated by a warning, since neither Jellyfin nor Plex is known to offer an external image sidecar as a
+        selectable track. <strong>OCR to text</strong> converts one representative track (the original-language or
+        default-flagged track, or the first found) to a real SRT sidecar via tesseract, only writing it when the
+        recognition confidence clears the threshold below; a low-confidence attempt is left untouched and flagged
+        instead. OCR only supports PGS tracks today, not VobSub.
+      </p>
+      <div className="opts">
+        <Field label="Mode">
+          <Seg value={mode} onChange={setMode} options={IMAGE_SUBS_MODES} />
+        </Field>
+        <Field label="OCR minimum confidence" hint="0-100; below this, the track is left alone and flagged instead. Default 80.">
+          <input className="input" type="number" min={0} max={100}
+            value={cfg.ocr_min_confidence ?? 80}
+            onChange={(e) => save({ ocr_min_confidence: parseFloat(e.target.value) || 0 })} />
+        </Field>
+      </div>
+      <div className="toggles">
+        <Toggle on={cfg.image_subs_keep_original !== false} onChange={(v) => save({ image_subs_keep_original: v })}
+          label="Keep the original image track too" hint="Default on: dropping it is a one-way loss of the source bitmap." />
       </div>
     </section>
   );

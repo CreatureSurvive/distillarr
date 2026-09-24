@@ -207,6 +207,48 @@ export default function FileDetail({ live }: { live: LiveState }) {
               </select>
             </div>
           </div>
+          <div className="opt-row" style={{ marginTop: 6, alignItems: "flex-start" }}>
+            <div className="opt-label">Image subtitles for this file</div>
+            <div className="opt-ctl" style={{ display: "block" }}>
+              <select className="input" value={file.image_subs_mode || ""}
+                onChange={async (e) => {
+                  const mode = e.target.value;
+                  if (mode === "sidecar" && !confirm(
+                    "External PGS/VobSub sidecars aren't known to be selectable subtitle tracks in Jellyfin or Plex " +
+                    ". Turn on anyway for this file?"
+                  )) return;
+                  try {
+                    await api.setImageSubsMode(file.id, mode);
+                    setFile({ ...file, image_subs_mode: mode });
+                    toast(mode ? "Image-subtitle override set" : "Back to the rule/global default");
+                  } catch (err: any) {
+                    toast(err.message, "err");
+                  }
+                }}>
+                <option value="">Inherit rule/global setting</option>
+                <option value="off">Off (keep)</option>
+                <option value="sidecar">Sidecar</option>
+                <option value="ocr">OCR to text</option>
+              </select>
+              {file.ocr && (
+                <div className="dim small" style={{ marginTop: 4 }}>
+                  {file.ocr.failed
+                    ? `Last OCR attempt scored ${file.ocr.confidence.toFixed(0)}, below threshold — track left untouched.`
+                    : `Last OCR wrote ${file.ocr.srt_name} at confidence ${file.ocr.confidence.toFixed(0)}.`}
+                </div>
+              )}
+              <div style={{ marginTop: 6 }}>
+                <button type="button" className="btn mini" onClick={async () => {
+                  try {
+                    await api.ocrFile(file.id);
+                    toast("OCR queued");
+                  } catch (err: any) {
+                    toast(err.message, "err");
+                  }
+                }}>Run OCR now</button>
+              </div>
+            </div>
+          </div>
         </div>
       </section>
 
