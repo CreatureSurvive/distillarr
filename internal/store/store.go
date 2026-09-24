@@ -278,6 +278,10 @@ var alters = []string{
 		reasons TEXT NOT NULL DEFAULT '',
 		PRIMARY KEY(file_id, server, at))`,
 	`CREATE INDEX IF NOT EXISTS playback_events_lookback ON playback_events(direct, at)`,
+	// Per-subtitle-track summary (lang/title/forced/commentary/SDH/text),
+	// mirroring audio_json, for the langprune report issue. sub_count
+	// stays as the plain count other code already relies on.
+	`ALTER TABLE files ADD COLUMN subs_json TEXT NOT NULL DEFAULT ''`,
 }
 
 func (s *Store) migrate() error {

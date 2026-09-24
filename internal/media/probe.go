@@ -216,6 +216,27 @@ func isDigits(s string) bool {
 	return len(s) == 2
 }
 
+// IsCommentary reports director/cast commentary tracks (audio or
+// subtitle), detected from the disposition flag or a "commentary" title
+// match (used by langprune).
+func (s *Stream) IsCommentary() bool {
+	if s.Disposition != nil && s.Disposition["comment"] == 1 {
+		return true
+	}
+	return strings.Contains(strings.ToLower(s.Title()), "commentary")
+}
+
+// IsSDH reports hearing-impaired subtitle tracks, detected from the
+// disposition flag or an "sdh"/"hearing impaired" title match (used by
+// langprune).
+func (s *Stream) IsSDH() bool {
+	if s.Disposition != nil && s.Disposition["hearing_impaired"] == 1 {
+		return true
+	}
+	t := strings.ToLower(s.Title())
+	return strings.Contains(t, "sdh") || strings.Contains(t, "hearing impaired")
+}
+
 // IsTextSubtitle reports text-based (movable/editable) subtitle codecs.
 func (s *Stream) IsTextSubtitle() bool {
 	switch s.CodecName {

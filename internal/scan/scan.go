@@ -230,7 +230,11 @@ func (s *Scanner) probeOne(path string, cfg config.Config) {
 	f.TranscodeScore = rec.Score
 	f.RecJSON = rec.JSON()
 	forces, _ := s.st.ForcesTranscode(f.ID, issues.ForcesTranscodeLookbackDays)
-	f.Issues = issues.Encode(issues.Detect(f, cfg, rec.Action == "transcode", rec.Limited, rec.UpgradePending, forces))
+	origLang := ""
+	if item, _ := s.st.ArrItemByFileID(f.ID); item != nil {
+		origLang = item.OriginalLanguage
+	}
+	f.Issues = issues.Encode(issues.Detect(f, cfg, rec.Action == "transcode", rec.Limited, rec.UpgradePending, forces, origLang))
 
 	if err := s.st.UpsertFile(f, buildStreams(f.ID, p)); err != nil {
 		log.Printf("scan: upsert %s: %v", path, err)
@@ -287,14 +291,28 @@ func buildFile(lib, path string, p *media.Probe) *store.File {
 	f.Faststart, f.MetaChecked = faststartOf(path, f.Container), true
 	audio := []store.AudioStream{}
 	for _, a := range p.Audios() {
+		a := a
 		audio = append(audio, store.AudioStream{
 			Index: a.Index, Codec: a.CodecName, Lang: a.Lang(), Title: a.Title(),
 			Channels: a.Channels, BitRate: a.BitRateInt(),
 			Default: a.Disposition["default"] == 1, Forced: a.Disposition["forced"] == 1,
+			Commentary: a.IsCommentary(),
 		})
 	}
 	f.Audio = audio
-	f.SubCount = len(p.Subtitles())
+	subsList := p.Subtitles()
+	subs := []store.SubStream{}
+	for _, st := range subsList {
+		st := st
+		subs = append(subs, store.SubStream{
+			Index: st.Index, Codec: st.CodecName, Lang: st.Lang(), Title: st.Title(),
+			BitRate: st.BitRateInt(),
+			Default: st.Disposition["default"] == 1, Forced: st.Disposition["forced"] == 1,
+			Commentary: st.IsCommentary(), SDH: st.IsSDH(), IsText: st.IsTextSubtitle(),
+		})
+	}
+	f.Subs = subs
+	f.SubCount = len(subsList)
 	if v != nil {
 		f.VideoCodec = v.CodecName
 		f.Width, f.Height = v.Width, v.Height
@@ -395,6 +413,10 @@ func (s *Scanner) RefreshRecs() {
 	if err != nil {
 		log.Printf("scan: refresh recs: forces_transcode lookup: %v", err)
 	}
+	origLangs, err := s.st.ArrOriginalLanguages()
+	if err != nil {
+		log.Printf("scan: refresh recs: original_language lookup: %v", err)
+	}
 	batch := map[int64]store.RecUpdate{}
 	flush := func() {
 		if len(batch) > 0 {
@@ -407,7 +429,7 @@ func (s *Scanner) RefreshRecs() {
 	_ = s.st.EachFile(func(f *store.File) error {
 		r := recs.Recommend(f, cfg)
 		batch[f.ID] = store.RecUpdate{Score: r.Score, Rec: r.JSON(),
-			Issues: issues.Encode(issues.Detect(f, cfg, r.Action == "transcode", r.Limited, r.UpgradePending, forces[f.ID]))}
+			Issues: issues.Encode(issues.Detect(f, cfg, r.Action == "transcode", r.Limited, r.UpgradePending, forces[f.ID], origLangs[f.ID]))}
 		if len(batch) >= 500 {
 			flush()
 		}

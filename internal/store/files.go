@@ -11,14 +11,32 @@ import (
 
 // AudioStream is the summary persisted in files.audio_json.
 type AudioStream struct {
-	Index    int    `json:"index"`
-	Codec    string `json:"codec"`
-	Lang     string `json:"lang"`
-	Title    string `json:"title"`
-	Channels int    `json:"channels"`
-	BitRate  int64  `json:"bit_rate"`
-	Default  bool   `json:"default,omitempty"`
-	Forced   bool   `json:"forced,omitempty"`
+	Index      int    `json:"index"`
+	Codec      string `json:"codec"`
+	Lang       string `json:"lang"`
+	Title      string `json:"title"`
+	Channels   int    `json:"channels"`
+	BitRate    int64  `json:"bit_rate"`
+	Default    bool   `json:"default,omitempty"`
+	Forced     bool   `json:"forced,omitempty"`
+	Commentary bool   `json:"commentary,omitempty"`
+}
+
+// SubStream is the summary persisted in files.subs_json (langprune;
+// files.sub_count stays the plain count other code already relies on).
+type SubStream struct {
+	Index      int    `json:"index"`
+	Codec      string `json:"codec"`
+	Lang       string `json:"lang"`
+	Title      string `json:"title"`
+	// BitRate is 0 for most text subtitle codecs (ffprobe reports none);
+	// image formats (PGS, VobSub) do report one.
+	BitRate    int64 `json:"bit_rate,omitempty"`
+	Default    bool  `json:"default,omitempty"`
+	Forced     bool  `json:"forced,omitempty"`
+	Commentary bool  `json:"commentary,omitempty"`
+	SDH        bool  `json:"sdh,omitempty"`
+	IsText     bool  `json:"is_text,omitempty"`
 }
 
 // Sidecar is an external subtitle file next to the media file.
@@ -57,6 +75,7 @@ type File struct {
 	TotalBitrate int64 `json:"total_bitrate"`
 	Audio       []AudioStream `json:"audio"`
 	SubCount    int    `json:"sub_count"`
+	Subs        []SubStream `json:"subs"`
 	Sidecars    []Sidecar `json:"sidecars"`
 	TranscodeScore float64 `json:"transcode_score"`
 	RecJSON     string `json:"rec_json,omitempty"`
@@ -107,11 +126,11 @@ const fileCols = `id, path, library, title, year, season, episode, ep_title, qua
 	size, mtime_ns, container, duration, video_codec, width, height, bit_depth, fps, hdr,
 	video_bitrate, total_bitrate, audio_json, sub_count, sidecars_json, transcode_score,
 	rec_json, missing, scanned_at, updated_at, interlaced, crop_w, crop_h, crop_x, crop_y, crop_checked, tune_json,
-	video_tag, faststart, meta_checked, issues, nlink`
+	video_tag, faststart, meta_checked, issues, nlink, subs_json`
 
 func scanFile(row interface{ Scan(...any) error }) (*File, error) {
 	f := &File{}
-	var audio, sidecars string
+	var audio, sidecars, subs string
 	var missing, interlaced, cropChecked, metaChecked int
 	err := row.Scan(&f.ID, &f.Path, &f.Library, &f.Title, &f.Year, &f.Season, &f.Episode,
 		&f.EpTitle, &f.QualityTag, &f.Size, &f.MtimeNS, &f.Container, &f.Duration,
@@ -119,7 +138,7 @@ func scanFile(row interface{ Scan(...any) error }) (*File, error) {
 		&f.VideoBitrate, &f.TotalBitrate, &audio, &f.SubCount, &sidecars,
 		&f.TranscodeScore, &f.RecJSON, &missing, &f.ScannedAt, &f.UpdatedAt, &interlaced,
 		&f.CropW, &f.CropH, &f.CropX, &f.CropY, &cropChecked, &f.TuneJSON,
-		&f.VideoTag, &f.Faststart, &metaChecked, &f.Issues, &f.Nlink)
+		&f.VideoTag, &f.Faststart, &metaChecked, &f.Issues, &f.Nlink, &subs)
 	if err != nil {
 		return nil, err
 	}
@@ -135,6 +154,10 @@ func scanFile(row interface{ Scan(...any) error }) (*File, error) {
 	if f.Sidecars == nil {
 		f.Sidecars = []Sidecar{}
 	}
+	_ = json.Unmarshal([]byte(subs), &f.Subs)
+	if f.Subs == nil {
+		f.Subs = []SubStream{}
+	}
 	return f, nil
 }
 
@@ -143,6 +166,7 @@ func scanFile(row interface{ Scan(...any) error }) (*File, error) {
 func (s *Store) UpsertFile(f *File, streams []Stream) error {
 	audio, _ := json.Marshal(f.Audio)
 	sidecars, _ := json.Marshal(f.Sidecars)
+	subs, _ := json.Marshal(f.Subs)
 	tx, err := s.dbW.Begin()
 	if err != nil {
 		return err
@@ -193,8 +217,8 @@ func (s *Store) UpsertFile(f *File, streams []Stream) error {
 	f.ID = id
 	// A (re)probed file is a new picture: bars must be detected again.
 	if _, err := tx.Exec(`UPDATE files SET interlaced=?, crop_w=0, crop_h=0, crop_x=0, crop_y=0,
-		crop_checked=0, tune_json='', video_tag=?, faststart=?, meta_checked=?, issues=?, nlink=? WHERE id=?`,
-		b2i(f.Interlaced), f.VideoTag, f.Faststart, b2i(f.MetaChecked), f.Issues, nlinkOrDefault(f.Nlink), id); err != nil {
+		crop_checked=0, tune_json='', video_tag=?, faststart=?, meta_checked=?, issues=?, nlink=?, subs_json=? WHERE id=?`,
+		b2i(f.Interlaced), f.VideoTag, f.Faststart, b2i(f.MetaChecked), f.Issues, nlinkOrDefault(f.Nlink), string(subs), id); err != nil {
 		return err
 	}
 	for i := range streams {
