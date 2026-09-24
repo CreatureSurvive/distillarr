@@ -526,3 +526,30 @@ func (s *Store) JobSummarySince(since string) (JobSummary, error) {
 		FROM jobs WHERE finished_at >= ?`, since).Scan(&out.Done, &out.Failed, &out.Saved)
 	return out, err
 }
+
+// EncodeSeconds totals wall time of every finished (done or failed) job.
+func (s *Store) EncodeSeconds() (float64, error) {
+	var sec float64
+	err := s.dbR.QueryRow(`SELECT COALESCE(SUM((julianday(finished_at) - julianday(started_at)) * 86400),0)
+		FROM jobs WHERE status IN ('done','failed') AND started_at != '' AND finished_at != ''`).Scan(&sec)
+	return sec, err
+}
+
+// CountIntakeByState counts intake rows per state.
+func (s *Store) CountIntakeByState() (map[string]int, error) {
+	rows, err := s.dbR.Query(`SELECT state, COUNT(*) FROM intake GROUP BY state`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string]int{}
+	for rows.Next() {
+		var k string
+		var n int
+		if err := rows.Scan(&k, &n); err != nil {
+			return nil, err
+		}
+		out[k] = n
+	}
+	return out, rows.Err()
+}

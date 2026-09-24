@@ -66,6 +66,10 @@ type Engine struct {
 	finishedMu   sync.Mutex
 	finishedSubs []func(ReplacedEvent)
 
+	// lastFPS is the most recent encode progress fps per job backend,
+	// for /metrics.
+	lastFPS sync.Map
+
 	windowOpen atomic.Bool
 	neuralOpen atomic.Bool // the neural upscale window (see config UpscaleSchedules)
 	active     atomic.Int32
@@ -777,6 +781,9 @@ func (e *Engine) encode(ctx context.Context, j *store.Job, primary, fallback *en
 		if p.Frame > 0 {
 			sawFrames = true
 		}
+		if p.FPS > 0 {
+			e.lastFPS.Store(j.Backend, p.FPS)
+		}
 		if p.Pct() >= lastPct+0.002 || p.Pct() == 1 {
 			lastPct = p.Pct()
 			e.notify(EvProgress, map[string]any{
@@ -1308,4 +1315,14 @@ func lastLines(s string, n int) string {
 // file (used by the queue API when no explicit settings are given).
 func RecommendFor(f *store.File, cfg config.Config) recs.Recommendation {
 	return recs.Recommend(f, cfg)
+}
+
+// LastFPS returns the most recent encode fps seen per backend.
+func (e *Engine) LastFPS() map[string]float64 {
+	out := map[string]float64{}
+	e.lastFPS.Range(func(k, v any) bool {
+		out[k.(string)] = v.(float64)
+		return true
+	})
+	return out
 }

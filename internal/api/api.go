@@ -175,6 +175,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/v1/notify/{id}/test", s.notifyTest)
 	mux.HandleFunc("GET /api/v1/notify/status", s.notifyStatus)
 	mux.HandleFunc("GET /api/v1/notify/events", s.notifyEventTypes)
+	mux.HandleFunc("GET /metrics", s.metrics)
 	mux.HandleFunc("DELETE /api/v1/files/{id}/upgrade-loop", s.clearUpgradeLoop)
 	mux.HandleFunc("POST /api/v1/files/{id}/bazarr-search", s.bazarrSearch)
 
