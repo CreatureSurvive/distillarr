@@ -69,6 +69,7 @@ func main() {
 	recs.ResolveBackend = func(pref string, c encode.Codec) encode.Backend { return eng.ResolveFor(pref, c) }
 	recs.Genres = st.GenresFor
 	recs.ArrPolicy = api.ArrPolicyFor(st, cfg)
+	recs.OriginalLanguage = st.ArrOriginalLanguageFor
 
 	// Preview notify is bound to the hub once the API server exists.
 	var hubNotify func(string, any)

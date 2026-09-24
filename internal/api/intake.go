@@ -33,6 +33,11 @@ type intakePromoter struct {
 	// quickFix builds the video-copy/remux settings for an autopilot
 	// "quick_fix" action.
 	quickFix func(f *store.File) encode.Settings
+	// forcePrune applies language pruning to settings for an autopilot
+	// "queue_override" action whose rule set PruneLanguages,
+	// regardless of the global/scoped apply mode. nil (as in tests that
+	// don't care about it) means "do nothing".
+	forcePrune func(f *store.File, st *encode.Settings)
 	// codecPenaltyBlocked reports whether f's settings must be held for
 	// confirmation instead of queued: the owning arr instance has
 	// an unacknowledged codec penalty and settings is a real HEVC/AV1
@@ -61,7 +66,13 @@ func (s *Server) newIntakePromoter() *intakePromoter {
 		},
 		autopilot: s.autopilotDecision,
 		quickFix: func(f *store.File) encode.Settings {
-			return issues.QuickFix(f, s.cfg.Get())
+			cfg := s.cfg.Get()
+			st := issues.QuickFix(f, cfg)
+			applyLangPrune(f, cfg, &st)
+			return st
+		},
+		forcePrune: func(f *store.File, st *encode.Settings) {
+			forceLangPrune(f, s.cfg.Get(), st)
 		},
 		codecPenaltyBlocked: s.codecPenaltyBlocked,
 		estimateSeconds:     s.eng.EstimateSeconds,
@@ -180,6 +191,9 @@ func (p *intakePromoter) promoteOne(st *store.Store, row store.Intake) {
 				}
 				if d.AudioRules != nil {
 					settings.AudioRules = d.AudioRules
+				}
+				if d.PruneLanguages && p.forcePrune != nil {
+					p.forcePrune(f, &settings)
 				}
 			}
 			// The rule engine decided this, not whatever put the row in

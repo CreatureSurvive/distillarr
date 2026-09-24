@@ -239,6 +239,17 @@ func (s *Store) ArrOriginalLanguages() (map[int64]string, error) {
 	return out, rows.Err()
 }
 
+// ArrOriginalLanguageFor is ArrOriginalLanguages for a single file, for
+// callers (recs.OriginalLanguage) that resolve one file at a time rather
+// than bulk-refreshing every row.
+func (s *Store) ArrOriginalLanguageFor(fileID int64) string {
+	item, err := s.ArrItemByFileID(fileID)
+	if err != nil || item == nil {
+		return ""
+	}
+	return item.OriginalLanguage
+}
+
 // ArrInstanceIDs returns every managed file's owning arr instance id,
 // keyed by file id. Used to resolve per-file scope (// lang_instance_overrides) in bulk without one ArrItemByFileID query per
 // file, the same way ArrOriginalLanguages avoids that for original_language.

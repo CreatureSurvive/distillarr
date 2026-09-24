@@ -13,6 +13,7 @@ import (
 
 	"mediatrans/internal/config"
 	"mediatrans/internal/encode"
+	"mediatrans/internal/langprune"
 	"mediatrans/internal/res"
 	"mediatrans/internal/store"
 )
@@ -87,6 +88,10 @@ var (
 	// ArrPolicy returns a file's Sonarr/Radarr-derived policy, or nil if
 	// no connected instance manages it.
 	ArrPolicy = func(fileID int64) *Policy { return nil }
+	// OriginalLanguage resolves a file's arr_items.original_language
+	// display name ("" if unmanaged or unknown), for langprune.Drops
+	// (autopilot-and-apply-mode pruning folded into Recommend).
+	OriginalLanguage = func(fileID int64) string { return "" }
 )
 
 // ---- size model ----
@@ -302,7 +307,9 @@ func Recommend(f *store.File, cfg config.Config) Recommendation {
 		r.Reason = "No readable video stream."
 		return r
 	}
+	instanceName := ""
 	if p := ArrPolicy(f.ID); p != nil {
+		instanceName = p.Instance
 		switch {
 		case p.Skip:
 			r.Reason = fmt.Sprintf("Tagged to skip in %s.", p.Instance)
@@ -322,6 +329,15 @@ func Recommend(f *store.File, cfg config.Config) Recommendation {
 			s.Codec = encode.AV1
 		}
 	}
+	// Language pruning: folded in here, before any audioPlan
+	// call below, so every downstream use of s.Audio/s.Subs — the
+	// display plan, the size estimate, and the real encode — sees the
+	// same drop list. Only "apply" mode (per side, after scope
+	// overrides and a per-file exemption) contributes anything here;
+	// "report" mode is ExtraLanguages' job and never touches settings.
+	audioDrops, subDrops := langprune.Drops(f, cfg, instanceName, OriginalLanguage(f.ID))
+	s.Audio = append(s.Audio, audioDrops...)
+	s.Subs = append(s.Subs, subDrops...)
 	if f.HDR == "dolby_vision" {
 		r.Action = "caution"
 		r.Reason = "Dolby Vision source: re-encoding drops the Dolby Vision layer. Skipped unless you queue it by hand."

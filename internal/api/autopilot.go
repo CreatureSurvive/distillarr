@@ -148,6 +148,7 @@ func (s *Server) autopilotBacklog(w http.ResponseWriter, r *http.Request) {
 		switch d.Action {
 		case "quick_fix":
 			settings = issues.QuickFix(f, cfg)
+			applyLangPrune(f, cfg, &settings)
 		case "queue_override":
 			if d.Codec != "" {
 				settings.Codec = encode.Codec(d.Codec)
@@ -157,6 +158,9 @@ func (s *Server) autopilotBacklog(w http.ResponseWriter, r *http.Request) {
 			}
 			if d.AudioRules != nil {
 				settings.AudioRules = d.AudioRules
+			}
+			if d.PruneLanguages {
+				forceLangPrune(f, cfg, &settings)
 			}
 		}
 		if blocked, _ := s.codecPenaltyBlocked(f, settings); blocked {

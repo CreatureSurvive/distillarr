@@ -326,6 +326,41 @@ func TestPromoteOneAutopilotQueueOverrideAppliesCodecAndQuality(t *testing.T) {
 	}
 }
 
+func TestPromoteOneAutopilotQueueOverridePruneLanguages(t *testing.T) {
+	st := newTestServer(t).st
+	row := newIntakeRow(t, st, store.IntakeWaiting, time.Now().Add(-time.Minute))
+
+	var gotSettings encode.Settings
+	forcePruneCalled := false
+	p := &intakePromoter{
+		now:     time.Now,
+		reprobe: func(string) error { return nil },
+		getFile: func(id int64) (*store.File, error) { return fakeFile(id, 1), nil },
+		resolve: func(f *store.File, override *encode.Settings) (encode.Settings, recs.Recommendation) {
+			return encode.Settings{Codec: "hevc"}, recs.Recommendation{Action: "transcode"}
+		},
+		enqueue: func(f *store.File, st encode.Settings, origin, reason string) (*store.Job, error) {
+			gotSettings = st
+			return &store.Job{ID: 11}, nil
+		},
+		autopilot: func(f *store.File, rec recs.Recommendation, origin string) *autopilot.Decision {
+			return &autopilot.Decision{Action: "queue_override", PruneLanguages: true, Reason: "rule W prunes languages"}
+		},
+		forcePrune: func(f *store.File, st *encode.Settings) {
+			forcePruneCalled = true
+			st.Audio = append(st.Audio, encode.AudioTrack{Index: 2, Action: "drop"})
+		},
+	}
+	p.promoteOne(st, row)
+
+	if !forcePruneCalled {
+		t.Fatal("a queue_override decision with PruneLanguages must call forcePrune")
+	}
+	if len(gotSettings.Audio) != 1 || gotSettings.Audio[0].Index != 2 || gotSettings.Audio[0].Action != "drop" {
+		t.Fatalf("got settings.Audio %+v, want the forcePrune drop entry", gotSettings.Audio)
+	}
+}
+
 func TestPromoteOneAutopilotQuickFixUsesQuickFixSettings(t *testing.T) {
 	st := newTestServer(t).st
 	row := newIntakeRow(t, st, store.IntakeWaiting, time.Now().Add(-time.Minute))
