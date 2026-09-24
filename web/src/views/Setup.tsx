@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 // First-run setup wizard: shown while no library is configured.
 // Libraries (server-side directory browser), hardware probe, encoding
 // defaults and window, optional integrations, finish (queue stays paused).

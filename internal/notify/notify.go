@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 // Package notify delivers event messages to any number of notification
 // targets (shoutrrr URLs: Discord, ntfy, Pushover, email, ...).
 //

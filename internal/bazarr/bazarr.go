@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 // Package bazarr is the optional Bazarr integration: Bazarr stays
 // the subtitle source, and Distillarr only tells it when a file changed
 // (so it rescans the disk) or asks it to search for missing subtitles.

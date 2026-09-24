@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 // Package langprune decides which audio/subtitle tracks a file's language
 // policy would keep or drop. Pure decision logic; nothing here
 // touches a file — applying the decision is job.

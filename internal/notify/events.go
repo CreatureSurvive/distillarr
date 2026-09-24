@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 package notify
 
 // EventType describes one event key for the settings UI.

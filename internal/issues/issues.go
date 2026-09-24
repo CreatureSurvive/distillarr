@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 // Package issues finds things wrong with a file (or a season) against
 // the library's target: Apple/streaming compatibility, legacy formats,
 // wasteful audio, and files worth re-encoding. Each issue says whether a

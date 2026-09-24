@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 // gate the app behind the auth status; show first-run admin
 // creation or the login form when needed.
 import { useEffect, useState, type FormEvent, type ReactNode } from "react";

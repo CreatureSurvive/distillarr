@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 // Package pathmap rewrites paths between how an external service sees the
 // library (its own mount point) and how this container sees it. Every
 // integration that connects to something outside the container (Jellyfin,

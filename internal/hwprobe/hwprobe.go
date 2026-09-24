@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 // Package hwprobe detects usable hardware encoders by running real
 // test encodes — only encoders that demonstrably work are advertised.
 package hwprobe

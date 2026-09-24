@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 import { type ReactNode } from "react";
 import { type AudioTrack, type FileItem, type HwReport, type Settings, type Stream } from "./api";
 import { Seg, Toggle } from "./components";

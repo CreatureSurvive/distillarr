@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 // Package config holds runtime configuration, persisted as JSON in the
 // kv table. Every mutation broadcasts a change so the scheduler and
 // dispatcher pick up new windows / worker counts without a restart.

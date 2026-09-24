@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 // Formatting helpers + small utilities.
 
 export function bytes(b: number | undefined | null): string {

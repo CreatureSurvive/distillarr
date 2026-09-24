@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 import { useEffect, useState, type ReactNode } from "react";
 import { type FileItem, type HardlinkedFile, type Series } from "./api";
 import { bitrate, bytes, codecLabel, hdrLabel, resLabel, se, titleHue } from "./format";

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 // Package api exposes the REST surface and serves the embedded UI.
 package api
 

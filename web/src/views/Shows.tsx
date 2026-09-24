@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 import { useEffect, useState } from "react";
 import { api, type Series } from "../api";
 import { Empty, ShowCard, Toggle } from "../components";

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 // Package arr is the client for Sonarr and Radarr's near-identical v3
 // APIs: one Client type serves both, since almost every endpoint this
 // app needs (status, root folders, custom formats, quality profiles,

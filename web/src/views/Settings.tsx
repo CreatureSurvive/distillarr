@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 import { useEffect, useState, type ReactNode } from "react";
 import { NavLink, useParams } from "react-router-dom";
 import { api, subscribe, type ArrInfo, type ArrInstance, type ArrTestResult, type AudioRule, type AutopilotPreviewGroup, type AutoRule, type BazarrTest, type Config, type HwInfo, type JfStatus, type JfTest, type LangOverride, type LangpruneReport, type LangPolicy, type PlexStatus, type PlexTest, type RuleAction, type RuleMatch, type TrashItem } from "../api";

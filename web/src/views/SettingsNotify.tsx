@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 import { useEffect, useState } from "react";
 import { api, type Config, type Notifier, type NotifyEventType, type NotifyStatus } from "../api";
 import { Seg, Toggle, toast } from "../components";

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 // Package autopilot decides, from a file's recommendation and an
 // ordered list of user rules, whether an unattended candidate should be
 // queued, queued with an override, quick-fixed, or left alone. Evaluate

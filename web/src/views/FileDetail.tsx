@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { api, hardlinkedFiles, type AutopilotDecision, type FileItem, type ForcesTranscodeDetail, type HwReport, type Plan, type Settings, type Stream } from "../api";

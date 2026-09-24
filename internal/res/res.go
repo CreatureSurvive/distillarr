@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 // Package res classifies video resolution by its nominal class (480p,
 // 576p, 720p, 1080p, 2160p). Width and height are both considered, so
 // letterboxed scope films (1920×802, 3840×1600) and pillarboxed 4:3

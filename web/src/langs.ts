@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 // ISO 639-2/B codes matched to display names, for language pruning's
 // keep-list editors. Keep this list in sync with
 // internal/langprune/langcodes.go's codeAliases/nameToCode canonical

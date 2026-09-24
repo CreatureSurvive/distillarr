@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 import { useEffect, useState, type ReactNode } from "react";
 import { api, subscribe, type Config, type IntakeRow, type Job, type MeasureStatus, type Schedule } from "../api";
 import { Copyable, Empty, Seg, Toggle, toast } from "../components";

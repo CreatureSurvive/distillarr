@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 package store
 
 // PlexRow caches one Plex library item's mapping onto a local file,

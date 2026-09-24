@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 // Package store provides the SQLite persistence layer.
 //
 // Concurrency model: two *sql.DB handles over the same file.

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 // Package still renders single-frame A/B comparisons for tuning an upscale:
 // A is a standard Lanczos resize of a source frame, B runs the real upscale
 // chain on the same frame. Results are cached by content key, so dragging a

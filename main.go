@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 // mediatrans server: media analysis, transcoding & re-encoding.
 package main
 
@@ -232,7 +234,7 @@ func main() {
 	}
 
 	go func() {
-		log.Printf("mediatrans listening on %s", listen)
+		log.Printf("distillarr listening on %s", listen)
 		if err := httpSrv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			log.Fatalf("http: %v", err)
 		}

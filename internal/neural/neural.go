@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 // Package neural runs the neural upscale tier: Real-ESRGAN (ncnn/Vulkan) on a
 // video, chunk by chunk. See encode.PlanNeural for how a job is cut up. Every
 // finished chunk is kept in the job's work directory, so a run stopped by a

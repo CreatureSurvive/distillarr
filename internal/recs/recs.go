@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 // Package recs recommends per-file encode settings with written
 // reasons, and estimates output size with a bits-per-pixel model that
 // self-calibrates from finished jobs and preview samples.

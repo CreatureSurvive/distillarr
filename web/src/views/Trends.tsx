@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 // Library trend charts: daily snapshots from /api/v1/trends.
 // Hand-drawn SVG like the rest of Stats; hover shows a crosshair and the
 // day's values. Colours: the dataviz reference palette's dark steps,

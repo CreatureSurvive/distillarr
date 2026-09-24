@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 // Package encode builds ffmpeg command lines for every encoder
 // backend (software x265/SVT-AV1, Intel QSV, VA-API, NVENC) from one
 // Settings value: explicit per-stream mapping, speed/quality/bit-depth,

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 // Package scan walks the media libraries and parses names into
 // title/year/season/episode metadata following the library's
 // Sonarr/Radarr-style naming.

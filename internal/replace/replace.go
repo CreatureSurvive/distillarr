@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 // Package replace verifies encoded output and swaps it into place,
 // preserving original timestamps. Ordering is crash-safe on the
 // mergerfs pool: the original is duplicated into trash BEFORE the

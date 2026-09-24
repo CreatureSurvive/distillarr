@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 // Package tune finds, per file, the lowest-bitrate quality setting that
 // still meets a VMAF target: short samples are encoded with the exact
 // job pipeline and scored against the original. This replaces guessing

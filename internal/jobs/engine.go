@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 // Package jobs runs the transcode queue: dispatcher, workers, hw
 // semaphores, progress, decode-fallback retry, verification and
 // in-place replacement.

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 // Package sidecar extracts text subtitle tracks to external sidecar
 // files. Off by default: embedded text subtitles already fit MP4
 // as mov_text, so this only matters to users who specifically want

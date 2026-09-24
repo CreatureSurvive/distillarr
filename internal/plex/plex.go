@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 // Package plex is the optional Plex Media Server integration: library
 // sync (mapping Plex items onto local file paths) and post-replace
 // section refresh, mirroring internal/jellyfin's shape.

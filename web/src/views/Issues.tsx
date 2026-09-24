@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 // Issues: what's wrong across the library, grouped by type, with quick
 // fixes (remux, video untouched) and bulk re-encode queuing.
 import { useCallback, useEffect, useRef, useState } from "react";

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 // Package jellyfin is the optional integration client: library
 // enrichment (posters/overview), post-replace refresh, and the
 // DateCreated patch that preserves "date added" across in-place

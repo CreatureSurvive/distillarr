@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 // Package media wraps ffprobe and models probe results.
 package media
 

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 // Savings dashboard shown above the job history.
 import { useEffect, useState } from "react";
 import { api, type HistoryStats, type StatGroup } from "../api";

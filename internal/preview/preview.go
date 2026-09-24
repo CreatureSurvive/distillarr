@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 // Package preview generates A/B sample clips: short source cuts plus
 // the same segments encoded with proposed settings.
 package preview

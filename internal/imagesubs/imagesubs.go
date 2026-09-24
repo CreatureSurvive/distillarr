@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 // Package imagesubs handles PGS and VobSub image subtitle tracks:
 // extracting them to sidecar files, and OCR'ing one representative track
 // to text via tesseract (driven directly, not through pgsrip's CLI —

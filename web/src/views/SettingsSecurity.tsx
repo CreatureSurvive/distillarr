@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 // Settings → Security: auth mode, trusted ranges/proxies, the
 // admin password and API keys.
 import { useEffect, useState } from "react";

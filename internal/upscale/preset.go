@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 // Package upscale defines the super-resolution presets and builds the
 // libplacebo (Vulkan) filter fragment that runs them. It is a leaf package
 // (it imports nothing from the app) so encode.Build can call it without an

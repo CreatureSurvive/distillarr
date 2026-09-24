@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 // Facet filters (container, video/audio codec, resolution, issue) shared
 // by the library browser and the issues list. Options and counts come
 // from the library itself, so only values that exist are offered.
