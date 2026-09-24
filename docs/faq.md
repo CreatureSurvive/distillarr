@@ -1,6 +1,7 @@
 # FAQ
 
-Common questions.
+Common questions. Every setting is listed in
+[configuration.md](configuration.md).
 
 ## Will Sonarr/Radarr re-download files Distillarr re-encodes?
 
@@ -73,3 +74,38 @@ for a typical audience; measurements below that are visibly softer to
 at least some viewers on close inspection. Turning the target up
 produces a bigger file for the same source; turning it off encodes at a
 fixed quality setting instead of searching for one.
+
+## Which GPU does it use, and can I choose?
+
+At startup (and from Settings → System → Hardware) Distillarr runs a short
+test encode on every encoder and GPU it can see: each render node for
+VA-API and QSV, NVENC, and the software encoders. Only combinations that
+actually produce a valid file are used, so a GPU that can decode but not
+encode AV1, say, simply isn't offered for AV1. With several GPUs, each
+codec goes to the best one that passed (the Arc before the iGPU, for
+instance); the file page shows which device a job will use.
+
+To pin a backend, set Settings → Encoding → Encoder (QSV, VA-API, NVENC or
+CPU) instead of Auto. Device numbering (`renderD128`, `renderD129`) isn't
+stable between hosts or even boots, so Distillarr never relies on it.
+Upscaling picks a Vulkan device the same way.
+
+If a hardware encoder fails twice in 30 minutes it's marked degraded and
+jobs fall back to another encoder until you reset it on the Hardware card.
+
+## Why does it prefer MP4?
+
+Because more devices direct-play MP4. Apple TV, iPhone/iPad, most smart
+TVs and web browsers play HEVC and AAC/E-AC-3 in MP4 without a server-side
+transcode, while MKV often forces a remux or transcode on those clients.
+MP4 has limits, though: no image subtitles (PGS/VobSub), no styled ASS,
+and no TrueHD/DTS without conversion. With the default "Prefer MP4", a file
+becomes MP4 only when everything you keep fits; otherwise it stays MKV.
+"MP4 required" converts what doesn't fit (per your audio rules and
+subtitle settings), and "Keep" leaves the container alone.
+
+HEVC in MP4 must be tagged `hvc1` and have its index at the start
+(`faststart`) for Apple devices; Distillarr always writes it that way and
+refuses a result that isn't. Changing the extension (`.mkv` to `.mp4`) is
+handled: Sonarr/Radarr are asked to rescan, and it checks they picked up
+the new path.
