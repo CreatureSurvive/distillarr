@@ -26,7 +26,9 @@ func TestForcesTranscode(t *testing.T) {
 		t.Error("no events yet: must not force transcode")
 	}
 
-	now := time.Now()
+	// 10 past the previous hour: always in the past, and now+5min stays
+	// in the same hour whatever the wall clock says.
+	now := time.Now().Add(-time.Hour).Truncate(time.Hour).Add(10 * time.Minute)
 	if err := st.RecordPlaybackEvent(f.ID, "jellyfin", now, false, []string{"video_codec", "audio_codec"}); err != nil {
 		t.Fatal(err)
 	}
