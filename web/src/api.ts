@@ -443,6 +443,10 @@ export type RuleMatch = {
   min_age_days?: number;
   issue_keys?: string[];
   animation?: boolean | null;
+  // Popularity: plays from playback history (+ Jellystat) and Plex.
+  min_plays?: number;
+  max_plays?: number | null; // null/absent = no cap; 0 = never watched
+  not_played_days?: number;
 };
 export type RuleAction = {
   kind: "queue" | "queue_override" | "quick_fix" | "ignore";
@@ -629,6 +633,9 @@ export type Config = {
   bazarr_key?: string;
   bazarr_key_set?: boolean;
   bazarr_path_map?: string;
+  jellystat_url?: string;
+  jellystat_key?: string;
+  jellystat_key_set?: boolean;
   notifiers?: Notifier[];
   auth_mode?: string;
   auth_cidrs?: string[];
@@ -1022,6 +1029,9 @@ export const api = {
   notifyEvents: () => req<NotifyEventType[]>("/api/v1/notify/events"),
   notifyStatus: () => req<NotifyStatus>("/api/v1/notify/status"),
   notifyTest: (id: string, url?: string) => post<{ ok: boolean; error?: string }>(`/api/v1/notify/${id || "new"}/test`, { url }),
+  jellystatTest: (body: { url?: string; key?: string }) => post<{ ok: boolean; error?: string; history_groups?: number }>("/api/v1/jellystat/test", body),
+  jellystatImport: () => post<{ started: boolean }>("/api/v1/jellystat/import"),
+  jellystatStatus: () => req<{ importing: boolean; last_import?: string; last_count?: string }>("/api/v1/jellystat/status"),
   bazarrTest: (body: { url?: string; key?: string; path_map?: string }) => post<BazarrTest>("/api/v1/bazarr/test", body),
   clearUpgradeLoop: (id: number) => req<{ ok: boolean }>(`/api/v1/files/${id}/upgrade-loop`, { method: "DELETE" }),
   bazarrSearch: (id: number) => post<{ ok: boolean }>(`/api/v1/files/${id}/bazarr-search`),

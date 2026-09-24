@@ -153,3 +153,37 @@ func TestMatchesInstanceWithNilPolicy(t *testing.T) {
 }
 
 func boolPtr(b bool) *bool { return &b }
+
+func TestPopularityConditions(t *testing.T) {
+	f := baseFile()
+	rec := recs.Recommendation{Action: "transcode", Savings: 50}
+	zero, two := 0, 2
+	rule := func(m config.RuleMatch) []config.AutoRule {
+		return []config.AutoRule{{ID: "r", Name: "R", Enabled: true, When: m, Then: config.RuleAction{Kind: "quick_fix"}}}
+	}
+	hit := func(m config.RuleMatch, ctx Context) bool {
+		return Evaluate(f, rec, nil, ctx, rule(m), 20).RuleID == "r"
+	}
+	recent := time.Now().Add(-2 * 24 * time.Hour)
+	old := time.Now().Add(-100 * 24 * time.Hour)
+	cases := []struct {
+		name string
+		m    config.RuleMatch
+		ctx  Context
+		want bool
+	}{
+		{"min plays met", config.RuleMatch{MinPlays: 3}, Context{Plays: 5}, true},
+		{"min plays not met", config.RuleMatch{MinPlays: 3}, Context{Plays: 2}, false},
+		{"never watched", config.RuleMatch{MaxPlays: &zero}, Context{}, true},
+		{"watched once, max 0", config.RuleMatch{MaxPlays: &zero}, Context{Plays: 1}, false},
+		{"max 2", config.RuleMatch{MaxPlays: &two}, Context{Plays: 2}, true},
+		{"not played in 30d, last 100d ago", config.RuleMatch{NotPlayedDays: 30}, Context{Plays: 1, LastPlayed: old}, true},
+		{"not played in 30d, last 2d ago", config.RuleMatch{NotPlayedDays: 30}, Context{Plays: 1, LastPlayed: recent}, false},
+		{"not played in 30d, never played", config.RuleMatch{NotPlayedDays: 30}, Context{}, true},
+	}
+	for _, c := range cases {
+		if got := hit(c.m, c.ctx); got != c.want {
+			t.Errorf("%s: got %v", c.name, got)
+		}
+	}
+}

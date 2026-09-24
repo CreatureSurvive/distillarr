@@ -84,6 +84,7 @@ export default function SettingsView({ live, onJellyfin, onPlex }: { live: LiveS
       <ArrSection cfg={cfg} setCfg={setCfg} />
 
       <BazarrSection cfg={cfg} setCfg={setCfg} />
+      <JellystatSection cfg={cfg} setCfg={setCfg} />
       </>}
 
       {tab === "automation" && <>
@@ -539,6 +540,52 @@ function BazarrSection({ cfg, setCfg }: { cfg: Config; setCfg: (c: Config) => vo
   );
 }
 
+// Jellystat: optional playback-history backfill for the
+// forced-transcode issue and the play-count rule conditions.
+function JellystatSection({ cfg, setCfg }: { cfg: Config; setCfg: (c: Config) => void }) {
+  const [url, setUrl] = useState(cfg.jellystat_url || "");
+  const [key, setKey] = useState("");
+  const [msg, setMsg] = useState("");
+  const [st, setSt] = useState<{ importing: boolean; last_import?: string; last_count?: string } | null>(null);
+  const load = () => api.jellystatStatus().then(setSt).catch(() => {});
+  useEffect(() => { load(); }, []);
+  const test = async () => {
+    const r = await api.jellystatTest({ url, key }).catch((e) => ({ ok: false, error: e.message } as { ok: boolean; error?: string }));
+    setMsg(r.ok ? "Connected." : `Not connected: ${r.error}`);
+  };
+  const saveJs = async () => {
+    try {
+      setCfg(await api.saveConfig({ jellystat_url: url, jellystat_key: key || undefined }));
+      setKey("");
+      toast("Jellystat settings saved");
+    } catch (e: any) { toast(e.message, "err"); }
+  };
+  const importNow = () => api.jellystatImport().then(() => { toast("Importing history…"); setTimeout(load, 3000); }).catch((e) => toast(e.message, "err"));
+  return (
+    <section className="panel" id="s-jellystat">
+      <div className="panel-head"><h2 className="panel-title">Jellystat</h2></div>
+      <p className="dim small">Optional. Imports Jellyfin playback history, so “forces client transcode” and play-count rules don't have to
+        wait for new sessions. Re-imports new history every 6 hours.</p>
+      <div className="form-grid">
+        <label className="field"><span>URL</span>
+          <input className="input" value={url} onChange={(e) => setUrl(e.target.value)} placeholder="http://jellystat:3000" spellCheck={false} />
+        </label>
+        <label className="field"><span>API key {cfg.jellystat_key_set && <span className="teal">· saved</span>}</span>
+          <input className="input" type="password" value={key} onChange={(e) => setKey(e.target.value)}
+            placeholder={cfg.jellystat_key_set ? "Leave blank to keep the saved key" : "Jellystat: Settings > API Keys"} autoComplete="off" />
+        </label>
+      </div>
+      <div className="toolbar">
+        <button className="btn" onClick={test}>Test connection</button>
+        <button className="btn btn-primary" onClick={saveJs}>Save</button>
+        <button className="btn" onClick={importNow} disabled={!cfg.jellystat_url || !cfg.jellystat_key_set || st?.importing}>Import history now</button>
+      </div>
+      {msg && <div className="dim small">{msg}</div>}
+      <div className="dim small">{st?.importing ? "Importing…" : st?.last_import ? `Last import ${ago(st.last_import)} · ${st.last_count} sessions matched` : "Nothing imported yet."}</div>
+    </section>
+  );
+}
+
 type ArrDraft = ArrInstance & { keyInput: string };
 
 // Any number of Sonarr/Radarr connections. Each card edits its own
@@ -922,6 +969,9 @@ function summarizeRule(r: AutoRule): string {
   if (w.res_classes?.length) parts.push(w.res_classes.map((c) => (c === 2160 ? "4K" : `${c}p`)).join("/"));
   if (w.min_savings_pct) parts.push(`≥${w.min_savings_pct}% savings`);
   if (w.min_age_days) parts.push(`≥${w.min_age_days}d old`);
+  if (w.min_plays) parts.push(`≥${w.min_plays} plays`);
+  if (w.max_plays != null) parts.push(w.max_plays === 0 ? "never watched" : `≤${w.max_plays} plays`);
+  if (w.not_played_days) parts.push(`not played in ${w.not_played_days}d`);
   if (w.issue_keys?.length) parts.push(w.issue_keys.map((k) => ISSUE_SHORT[k]?.label || k).join(", "));
   if (w.animation === true) parts.push("animation");
   if (w.animation === false) parts.push("not animation");
@@ -985,6 +1035,21 @@ function RuleEditor({ rule, instanceNames, onClose, onSave, onDelete }: {
               onChange={(e) => setWhen({ min_age_days: parseInt(e.target.value) || 0 })} />
           </label>
         </div>
+        <div className="form-grid">
+          <label className="field"><span>Played at least <span className="dim">(times)</span></span>
+            <input className="input" type="number" min={0} value={w.min_plays || 0}
+              onChange={(e) => setWhen({ min_plays: parseInt(e.target.value) || 0 })} />
+          </label>
+          <label className="field"><span>Played at most <span className="dim">(blank = any; 0 = never watched)</span></span>
+            <input className="input" type="number" min={0} value={w.max_plays ?? ""}
+              onChange={(e) => setWhen({ max_plays: e.target.value === "" ? null : parseInt(e.target.value) || 0 })} />
+          </label>
+          <label className="field"><span>Not played in <span className="dim">(days)</span></span>
+            <input className="input" type="number" min={0} value={w.not_played_days || 0}
+              onChange={(e) => setWhen({ not_played_days: parseInt(e.target.value) || 0 })} />
+          </label>
+        </div>
+        <p className="dim small">Play counts come from Jellyfin sessions Distillarr has seen (plus Jellystat history, if connected) and Plex's own counts.</p>
         <div className="field"><span>Issue</span>
           <ChipMultiSelect options={Object.entries(ISSUE_SHORT).map(([k, v]) => ({ value: k, label: v.label }))}
             value={w.issue_keys || []} onChange={(v) => setWhen({ issue_keys: v })} />

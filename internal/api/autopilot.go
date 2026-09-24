@@ -45,6 +45,7 @@ func (s *Server) autopilotPreview(w http.ResponseWriter, r *http.Request) {
 	groups := map[string]*autopilotPreviewGroup{}
 	var order []string
 
+	plays, _ := s.st.PlayStats()
 	err := s.st.EachFile(func(f *store.File) error {
 		if f.RecJSON == "" {
 			return nil
@@ -57,7 +58,7 @@ func (s *Server) autopilotPreview(w http.ResponseWriter, r *http.Request) {
 			return nil
 		}
 		policy := recs.ArrPolicy(f.ID)
-		ctx := autopilot.Context{TagNames: s.arrTagNamesFor(f.ID)}
+		ctx := autopilot.Context{TagNames: s.arrTagNamesFor(f.ID), Plays: plays[f.ID].Plays, LastPlayed: plays[f.ID].LastPlayed}
 		d := autopilot.Evaluate(f, rec, policy, ctx, cfg.AutoRules, cfg.MinSavingsPct)
 
 		key := d.RuleID + "\x00" + d.Action
@@ -129,6 +130,7 @@ func (s *Server) autopilotBacklog(w http.ResponseWriter, r *http.Request) {
 	budgetSecs := cfg.AutopilotBudgetHours * mult * 3600
 
 	var candidates []autopilotBacklogFile
+	plays, _ := s.st.PlayStats()
 	err := s.st.EachFile(func(f *store.File) error {
 		if f.RecJSON == "" || f.Missing {
 			return nil
@@ -141,7 +143,7 @@ func (s *Server) autopilotBacklog(w http.ResponseWriter, r *http.Request) {
 			return nil
 		}
 		policy := recs.ArrPolicy(f.ID)
-		ctx := autopilot.Context{Origin: "autopilot", TagNames: s.arrTagNamesFor(f.ID)}
+		ctx := autopilot.Context{Origin: "autopilot", TagNames: s.arrTagNamesFor(f.ID), Plays: plays[f.ID].Plays, LastPlayed: plays[f.ID].LastPlayed}
 		d := autopilot.Evaluate(f, rec, policy, ctx, cfg.AutoRules, cfg.MinSavingsPct)
 		if d.Action == "ignore" {
 			return nil

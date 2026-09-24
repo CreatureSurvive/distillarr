@@ -331,6 +331,9 @@ var alters = []string{
   created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
   last_used_at TEXT NOT NULL DEFAULT ''
 )`,
+	// Plex play counts for popularity rules, refreshed by each sync.
+	`ALTER TABLE plex_items ADD COLUMN view_count INTEGER NOT NULL DEFAULT 0`,
+	`ALTER TABLE plex_items ADD COLUMN last_viewed_at INTEGER NOT NULL DEFAULT 0`,
 }
 
 func (s *Store) migrate() error {

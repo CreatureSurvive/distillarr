@@ -168,6 +168,8 @@ type Item struct {
 	Title            string            `json:"title"`
 	Type             string            `json:"type"`
 	AddedAt          int64             `json:"addedAt"` // unix seconds
+	ViewCount        int64             `json:"viewCount,omitempty"`
+	LastViewedAt     int64             `json:"lastViewedAt,omitempty"`
 	Media            []Media           `json:"Media"`
 	TranscodeSession *TranscodeSession `json:"TranscodeSession,omitempty"`
 }

@@ -183,6 +183,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/v1/plex/test", s.plexTest)
 	mux.HandleFunc("POST /api/v1/plex/sync", s.plexSync)
 	mux.HandleFunc("POST /api/v1/bazarr/test", s.bazarrTest)
+	mux.HandleFunc("POST /api/v1/jellystat/test", s.jellystatTest)
+	mux.HandleFunc("POST /api/v1/jellystat/import", s.jellystatImport)
+	mux.HandleFunc("GET /api/v1/jellystat/status", s.jellystatStatus)
 	mux.HandleFunc("POST /api/v1/notify/{id}/test", s.notifyTest)
 	mux.HandleFunc("GET /api/v1/notify/status", s.notifyStatus)
 	mux.HandleFunc("GET /api/v1/notify/events", s.notifyEventTypes)
@@ -293,6 +296,7 @@ type configOut struct {
 	JellyfinKeySet bool             `json:"jellyfin_key_set"`
 	PlexTokenSet   bool             `json:"plex_token_set"`
 	BazarrKeySet   bool             `json:"bazarr_key_set"`
+	JellystatKeySet bool            `json:"jellystat_key_set"`
 	ArrInstances   []arrInstanceOut `json:"arr_instances"`
 	Notifiers      []notifierOut    `json:"notifiers"`
 }
@@ -305,6 +309,8 @@ func (s *Server) getConfig(w http.ResponseWriter, r *http.Request) {
 	c.PlexToken = ""
 	bazarrKeySet := c.BazarrKey != ""
 	c.BazarrKey = ""
+	jellystatKeySet := c.JellystatKey != ""
+	c.JellystatKey = ""
 	notOuts := make([]notifierOut, len(c.Notifiers))
 	for i, n := range c.Notifiers {
 		notOuts[i] = notifierOutOf(n)
@@ -313,7 +319,7 @@ func (s *Server) getConfig(w http.ResponseWriter, r *http.Request) {
 	for i, inst := range c.ArrInstances {
 		arrOuts[i] = arrOut(inst)
 	}
-	writeJSON(w, http.StatusOK, configOut{Config: c, JellyfinKeySet: keySet, PlexTokenSet: plexTokSet, BazarrKeySet: bazarrKeySet, ArrInstances: arrOuts, Notifiers: notOuts})
+	writeJSON(w, http.StatusOK, configOut{Config: c, JellyfinKeySet: keySet, PlexTokenSet: plexTokSet, BazarrKeySet: bazarrKeySet, JellystatKeySet: jellystatKeySet, ArrInstances: arrOuts, Notifiers: notOuts})
 }
 
 // putConfig merges a partial JSON object into the config: only the
@@ -348,6 +354,14 @@ func (s *Server) putConfig(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	delete(patch, "bazarr_key_set")
+	if k, ok := patch["jellystat_key"]; ok {
+		var key string
+		_ = json.Unmarshal(k, &key)
+		if strings.TrimSpace(key) == "" {
+			delete(patch, "jellystat_key") // blank never erases a saved key
+		}
+	}
+	delete(patch, "jellystat_key_set")
 	var perr error
 	err := s.cfg.Update(func(cur *config.Config) {
 		if raw, ok := patch["arr_instances"]; ok {

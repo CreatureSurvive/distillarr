@@ -135,7 +135,8 @@ func (s *Server) autopilotDecision(f *store.File, rec recs.Recommendation, origi
 		return nil
 	}
 	policy := recs.ArrPolicy(f.ID)
-	ctx := autopilot.Context{Origin: origin, TagNames: s.arrTagNamesFor(f.ID)}
+	ps := s.st.PlayStatFor(f.ID)
+	ctx := autopilot.Context{Origin: origin, TagNames: s.arrTagNamesFor(f.ID), Plays: ps.Plays, LastPlayed: ps.LastPlayed}
 	d := autopilot.Evaluate(f, rec, policy, ctx, cfg.AutoRules, cfg.MinSavingsPct)
 	return &d
 }

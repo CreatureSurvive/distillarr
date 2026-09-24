@@ -12,6 +12,9 @@ type PlexRow struct {
 	// ItemType is Plex's own metadata type (1 movie, 4 episode); needed
 	// to build the addedAt-restore PUT.
 	ItemType int `json:"item_type,omitempty"`
+	// ViewCount / LastViewedAt (unix seconds) from Plex.
+	ViewCount    int64 `json:"view_count,omitempty"`
+	LastViewedAt int64 `json:"last_viewed_at,omitempty"`
 }
 
 // UpsertPlex inserts/updates plex cache rows in one transaction.
@@ -25,11 +28,12 @@ func (s *Store) UpsertPlex(rows []PlexRow) error {
 		if r.FileID == 0 || r.RatingKey == "" {
 			continue
 		}
-		if _, err := tx.Exec(`INSERT INTO plex_items(file_id, rating_key, section_id, added_at, item_type)
-			VALUES(?,?,?,?,?)
+		if _, err := tx.Exec(`INSERT INTO plex_items(file_id, rating_key, section_id, added_at, item_type, view_count, last_viewed_at)
+			VALUES(?,?,?,?,?,?,?)
 			ON CONFLICT(file_id) DO UPDATE SET rating_key=excluded.rating_key,
-			section_id=excluded.section_id, added_at=excluded.added_at, item_type=excluded.item_type`,
-			r.FileID, r.RatingKey, r.SectionID, r.AddedAt, r.ItemType); err != nil {
+			section_id=excluded.section_id, added_at=excluded.added_at, item_type=excluded.item_type,
+			view_count=excluded.view_count, last_viewed_at=excluded.last_viewed_at`,
+			r.FileID, r.RatingKey, r.SectionID, r.AddedAt, r.ItemType, r.ViewCount, r.LastViewedAt); err != nil {
 			return err
 		}
 	}

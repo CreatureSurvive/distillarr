@@ -302,6 +302,10 @@ type Config struct {
 	BazarrURL     string `json:"bazarr_url"`
 	BazarrKey     string `json:"bazarr_key"`
 	BazarrPathMap string `json:"bazarr_path_map"`
+	// Jellystat: optional playback-history backfill. The key is
+	// masked like bazarr_key.
+	JellystatURL string `json:"jellystat_url,omitempty"`
+	JellystatKey string `json:"jellystat_key,omitempty"`
 
 	// DeferWhileTranscoding stops new encode jobs from starting while any
 	// Jellyfin/Plex session is transcoding video; it can only take
@@ -385,6 +389,12 @@ type RuleMatch struct {
 	MinAgeDays    int      `json:"min_age_days,omitempty"`
 	IssueKeys     []string `json:"issue_keys,omitempty"`
 	Animation     *bool    `json:"animation,omitempty"`
+	// Popularity, from playback history (the sessions poller,
+	// Jellystat backfill) and Plex view counts. MaxPlays is a pointer so
+	// "at most 0 plays" (never watched) can be expressed.
+	MinPlays      int  `json:"min_plays,omitempty"`
+	MaxPlays      *int `json:"max_plays,omitempty"`
+	NotPlayedDays int  `json:"not_played_days,omitempty"`
 }
 
 // RuleAction: what to do once When matches.

@@ -33,6 +33,10 @@ import (
 type Context struct {
 	Origin   string
 	TagNames []string
+	// Plays and LastPlayed (zero = never) feed the popularity
+	// conditions.
+	Plays      int
+	LastPlayed time.Time
 }
 
 // Decision is Evaluate's result: which rule fired (empty for the
@@ -119,6 +123,15 @@ func matches(f *store.File, rec recs.Recommendation, policy *recs.Policy, ctx Co
 		return false
 	}
 	if m.Animation != nil && *m.Animation != recs.IsAnimation(f) {
+		return false
+	}
+	if m.MinPlays > 0 && ctx.Plays < m.MinPlays {
+		return false
+	}
+	if m.MaxPlays != nil && ctx.Plays > *m.MaxPlays {
+		return false
+	}
+	if m.NotPlayedDays > 0 && !ctx.LastPlayed.IsZero() && time.Since(ctx.LastPlayed) < time.Duration(m.NotPlayedDays)*24*time.Hour {
 		return false
 	}
 	return true

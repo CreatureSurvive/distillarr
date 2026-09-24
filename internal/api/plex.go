@@ -184,7 +184,8 @@ func (s *Server) SyncPlex(ctx context.Context, cl *plex.Client) (int, error) {
 							continue
 						}
 						rows = append(rows, store.PlexRow{FileID: f.ID, RatingKey: it.RatingKey,
-							SectionID: sec.Key, AddedAt: it.AddedAt, ItemType: itemType})
+							SectionID: sec.Key, AddedAt: it.AddedAt, ItemType: itemType,
+							ViewCount: it.ViewCount, LastViewedAt: it.LastViewedAt})
 					}
 				}
 			}
