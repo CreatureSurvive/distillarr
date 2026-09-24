@@ -82,6 +82,7 @@ export type FileItem = {
   faststart?: number;
   issues?: string; // ",no_hvc1,pcm_audio,"
   upscaled?: UpscaledInfo; // set when this file is the output of a finished upscale job
+  lang_prune_exempt?: boolean; // opts this file out of language pruning
 };
 
 export type IssueType = {
@@ -429,7 +430,41 @@ export type RuleAction = {
   // Per-rule audio policy override, same shape as Config.audio_rules.
   // Only applies with kind === "queue_override"; unset uses the global policy.
   audio_rules?: Record<string, AudioRule>;
+  // apply language pruning to files this rule matches, even when
+  // the global/scoped mode isn't "apply". Only applies with
+  // kind === "queue_override". A side with an empty keep list is
+  // skipped (never drops everything).
+  prune_languages?: boolean;
 };
+
+// LangPolicy: which audio/subtitle tracks langprune.Select
+// keeps. audio_mode/subs_mode are independent: off (default) | report
+// (extra_languages issue only) | apply (acts on it). Deliberately
+// no default keep list — the server rejects report/apply while the
+// matching list is empty.
+export type LangPolicy = {
+  audio_mode?: "off" | "report" | "apply";
+  subs_mode?: "off" | "report" | "apply";
+  audio_keep?: string[];
+  subs_keep?: string[];
+  keep_undetermined?: boolean | null; // default true
+  keep_commentary?: boolean; // default false
+  best_per_language?: boolean; // default false
+  keep_sdh?: boolean | null; // default true
+};
+
+// LangOverride scopes LangPolicy to one library or arr instance.
+// "inherit" (default) changes nothing; "off" disables pruning for that
+// scope; "custom" uses this override's own keep lists (a side left
+// empty here simply inherits the global list for that side).
+export type LangOverride = {
+  mode: "inherit" | "off" | "custom";
+  audio_keep?: string[];
+  subs_keep?: string[];
+};
+
+export type LangpruneReportRow = { language: string; audio_tracks: number; sub_tracks: number };
+export type LangpruneReport = { files: number; saved_bytes: number; by_language: LangpruneReportRow[] };
 export type AutoRule = {
   id: string;
   name: string;
@@ -537,6 +572,11 @@ export type Config = {
   vmaf_target: number;
   upscale_output: string;
   upscale_schedules: Schedule[];
+  // language pruning. Scoped per library (keyed by
+  // Library.name) or per arr instance (keyed by ArrInstance.name).
+  lang_policy?: LangPolicy;
+  lang_library_overrides?: Record<string, LangOverride>;
+  lang_instance_overrides?: Record<string, LangOverride>;
   jellyfin_url: string;
   jellyfin_api_key?: string;
   jellyfin_key_set?: boolean;
@@ -808,6 +848,10 @@ export const api = {
 
   fixFile: (id: number, run_now = false, confirm_hardlinked = false) =>
     post<Job>(`/api/v1/files/${id}/fix`, { run_now, confirm_hardlinked }),
+  setLangExempt: (id: number, exempt: boolean) =>
+    post<{ id: number; exempt: boolean }>(`/api/v1/files/${id}/lang-exempt`, { exempt }),
+  langpruneReport: () => req<LangpruneReport>("/api/v1/langprune/report"),
+  langpruneApply: () => post<{ queued: number; skipped: number }>("/api/v1/langprune/apply", { confirm: true }),
   issues: () => req<{ types: IssueType[] }>("/api/v1/issues"),
   mixedSeasons: (show?: string) => req<{ seasons: MixedSeason[] }>(`/api/v1/issues/mixed?${qs({ show })}`),
   fixIssue: (key: string, body: { library?: string; show?: string; run_now?: boolean; confirm_hardlinked?: boolean; skip_hardlinked?: boolean }) =>

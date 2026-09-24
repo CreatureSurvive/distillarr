@@ -1,7 +1,8 @@
 import { useEffect, useState, type ReactNode } from "react";
-import { api, subscribe, type ArrInfo, type ArrInstance, type ArrTestResult, type AudioRule, type AutopilotPreviewGroup, type AutoRule, type Config, type HwInfo, type JfStatus, type JfTest, type PlexStatus, type PlexTest, type RuleAction, type RuleMatch, type TrashItem } from "../api";
+import { api, subscribe, type ArrInfo, type ArrInstance, type ArrTestResult, type AudioRule, type AutopilotPreviewGroup, type AutoRule, type Config, type HwInfo, type JfStatus, type JfTest, type LangOverride, type LangpruneReport, type LangPolicy, type PlexStatus, type PlexTest, type RuleAction, type RuleMatch, type TrashItem } from "../api";
 import { Copyable, ISSUE_SHORT, Seg, Toggle, toast } from "../components";
 import { ago, backendLabel, bytes, codecLabel } from "../format";
+import { LANGUAGES, langName } from "../langs";
 import { qualityWord } from "../options";
 import type { LiveState } from "../App";
 import { ScheduleTimeline } from "./Queue";
@@ -46,6 +47,7 @@ export default function SettingsView({ live, onJellyfin, onPlex }: { live: LiveS
         <a href="#/settings" onClick={(e) => { e.preventDefault(); document.getElementById("s-plex")?.scrollIntoView({ behavior: "smooth" }); }}>Plex</a>
         <a href="#/settings" onClick={(e) => { e.preventDefault(); document.getElementById("s-arr")?.scrollIntoView({ behavior: "smooth" }); }}>Sonarr / Radarr</a>
         <a href="#/settings" onClick={(e) => { e.preventDefault(); document.getElementById("s-auto")?.scrollIntoView({ behavior: "smooth" }); }}>Autopilot</a>
+        <a href="#/settings" onClick={(e) => { e.preventDefault(); document.getElementById("s-lang")?.scrollIntoView({ behavior: "smooth" }); }}>Languages</a>
         <a href="#/settings" onClick={(e) => { e.preventDefault(); document.getElementById("s-enc")?.scrollIntoView({ behavior: "smooth" }); }}>Encoding</a>
         <a href="#/settings" onClick={(e) => { e.preventDefault(); document.getElementById("s-up")?.scrollIntoView({ behavior: "smooth" }); }}>Upscaling</a>
         <a href="#/settings" onClick={(e) => { e.preventDefault(); document.getElementById("s-hw")?.scrollIntoView({ behavior: "smooth" }); }}>Hardware</a>
@@ -60,6 +62,8 @@ export default function SettingsView({ live, onJellyfin, onPlex }: { live: LiveS
       <ArrSection cfg={cfg} setCfg={setCfg} />
 
       <AutopilotSection cfg={cfg} setCfg={setCfg} />
+
+      <LangPolicySection cfg={cfg} save={save} />
 
       <section className="panel" id="s-enc">
         <h2 className="panel-title">Encoding defaults</h2>
@@ -877,6 +881,10 @@ function RuleEditor({ rule, instanceNames, onClose, onSave, onDelete }: {
             </label>
           </div>
         )}
+        {r.then?.kind === "queue_override" && (
+          <Toggle on={!!r.then.prune_languages} onChange={(v) => setR({ ...r, then: { ...r.then, prune_languages: v } })}
+            label="Apply language pruning" hint="Drops tracks per the Languages settings' keep lists for files this rule matches, even when the global/scoped mode isn't set to apply." />
+        )}
 
         <div className="toolbar" style={{ marginTop: 14 }}>
           <button className="btn btn-primary" onClick={() => onSave(r)} disabled={!r.name.trim()}>Save rule</button>
@@ -1361,6 +1369,181 @@ function AudioRulesSection({ cfg, save }: { cfg: Config; save: (p: Partial<Confi
         </table>
       </div>
     </div>
+  );
+}
+
+// language pruning. off/report/apply per audio and subs.
+const LANG_MODES: { value: "off" | "report" | "apply"; label: string }[] = [
+  { value: "off", label: "Off" },
+  { value: "report", label: "Report only" },
+  { value: "apply", label: "Apply" },
+];
+
+function LangKeepPicker({ value, onChange }: { value: string[]; onChange: (v: string[]) => void }) {
+  return (
+    <ChipMultiSelect options={LANGUAGES.map((l) => ({ value: l.code, label: l.name }))} value={value} onChange={onChange} />
+  );
+}
+
+function LangReportPanel({ report, onApply, onClose }: { report: LangpruneReport; onApply: () => void; onClose: () => void }) {
+  return (
+    <div className="panel" style={{ marginTop: 10, marginBottom: 0 }}>
+      <div className="dim small" style={{ marginBottom: 8 }}>
+        {report.files.toLocaleString()} file{report.files === 1 ? "" : "s"} affected · about {bytes(report.saved_bytes)} would be freed
+      </div>
+      {report.by_language.length === 0 ? (
+        <div className="dim small">Nothing to drop right now.</div>
+      ) : (
+        <table className="audio-rules-table">
+          <thead><tr><th>Language</th><th>Audio tracks</th><th>Subtitle tracks</th></tr></thead>
+          <tbody>
+            {report.by_language.map((row) => (
+              <tr key={row.language}>
+                <td>{langName(row.language)}</td>
+                <td className="mono">{row.audio_tracks || "—"}</td>
+                <td className="mono">{row.sub_tracks || "—"}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+      <div className="dim small" style={{ marginTop: 8 }}>
+        Dropped tracks only survive in the trash copy until the retention period ends.
+      </div>
+      <div className="toolbar" style={{ marginTop: 10 }}>
+        <button className="btn btn-primary" disabled={report.files === 0} onClick={onApply}>Apply now</button>
+        <button className="btn" onClick={onClose}>Close</button>
+      </div>
+    </div>
+  );
+}
+
+function LangScopeOverrides({ title, scopes, overrides, save }: {
+  title: string; scopes: string[]; overrides: Record<string, LangOverride>;
+  save: (next: Record<string, LangOverride>) => void;
+}) {
+  if (scopes.length === 0) return null;
+  const setOverride = (name: string, patch: Partial<LangOverride>) => {
+    const cur = overrides[name] || { mode: "inherit" as const };
+    save({ ...overrides, [name]: { ...cur, ...patch } });
+  };
+  return (
+    <div className="opt-row" style={{ alignItems: "flex-start", marginTop: 12 }}>
+      <div className="opt-label">{title}</div>
+      <div className="opt-ctl" style={{ display: "block" }}>
+        {scopes.map((name) => {
+          const ov = overrides[name] || { mode: "inherit" as const };
+          return (
+            <div key={name} style={{ marginBottom: 10 }}>
+              <div className="small" style={{ marginBottom: 4 }}><b>{name}</b></div>
+              <Seg value={ov.mode} onChange={(v) => setOverride(name, { mode: v })}
+                options={[{ value: "inherit", label: "Inherit" }, { value: "off", label: "Off" }, { value: "custom", label: "Custom lists" }]} />
+              {ov.mode === "custom" && (
+                <div style={{ marginTop: 6 }}>
+                  <div className="dim small">Audio (blank inherits the global list)</div>
+                  <LangKeepPicker value={ov.audio_keep || []} onChange={(v) => setOverride(name, { audio_keep: v })} />
+                  <div className="dim small" style={{ marginTop: 6 }}>Subtitles (blank inherits the global list)</div>
+                  <LangKeepPicker value={ov.subs_keep || []} onChange={(v) => setOverride(name, { subs_keep: v })} />
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function LangPolicySection({ cfg, save }: { cfg: Config; save: (p: Partial<Config>, m?: string) => void }) {
+  const p: LangPolicy = cfg.lang_policy || {};
+  const [report, setReport] = useState<LangpruneReport | null>(null);
+  const setPolicy = (patch: Partial<LangPolicy>) => save({ lang_policy: { ...p, ...patch } });
+
+  const loadReport = async () => {
+    try {
+      setReport(await api.langpruneReport());
+    } catch (e: any) {
+      toast(e.message, "err");
+    }
+  };
+  const applyNow = async () => {
+    try {
+      const r = await api.langpruneApply();
+      toast(`Queued ${r.queued}, skipped ${r.skipped}`);
+      setReport(null);
+    } catch (e: any) {
+      toast(e.message, "err");
+    }
+  };
+  const setMode = (kind: "audio_mode" | "subs_mode", v: "off" | "report" | "apply") => {
+    setPolicy({ [kind]: v });
+    if (v === "apply") loadReport();
+  };
+
+  const empty = (p.audio_keep || []).length === 0 && (p.subs_keep || []).length === 0;
+
+  return (
+    <section className="panel" id="s-lang">
+      <h2 className="panel-title">Languages</h2>
+      <p className="dim small">
+        Drop audio and subtitle tracks in languages you don't want. Report mode only flags them (the "extra language
+        tracks" issue); apply mode drops them the next time a file is touched, or right away for a file that needs
+        nothing else — that's the "Apply now" button below, after reviewing what it would do.
+      </p>
+      {empty && (
+        <div className="dim small" style={{ marginBottom: 10 }}>Set your languages first — pick what to keep below.</div>
+      )}
+      <div className="opt-row" style={{ alignItems: "flex-start" }}>
+        <div className="opt-label">Audio to keep</div>
+        <div className="opt-ctl" style={{ display: "block" }}>
+          <LangKeepPicker value={p.audio_keep || []} onChange={(v) => setPolicy({ audio_keep: v })} />
+        </div>
+      </div>
+      <div className="opt-row" style={{ alignItems: "flex-start" }}>
+        <div className="opt-label">
+          Subtitles to keep
+          <div className="opt-hint">
+            <button type="button" className="btn mini" onClick={() => setPolicy({ subs_keep: p.audio_keep || [] })}>
+              Copy audio list
+            </button>
+          </div>
+        </div>
+        <div className="opt-ctl" style={{ display: "block" }}>
+          <LangKeepPicker value={p.subs_keep || []} onChange={(v) => setPolicy({ subs_keep: v })} />
+        </div>
+      </div>
+      <div className="opts">
+        <Field label="Audio mode">
+          <Seg value={p.audio_mode || "off"} onChange={(v) => setMode("audio_mode", v)} options={LANG_MODES} />
+        </Field>
+        <Field label="Subtitle mode">
+          <Seg value={p.subs_mode || "off"} onChange={(v) => setMode("subs_mode", v)} options={LANG_MODES} />
+        </Field>
+      </div>
+      <div className="toggles">
+        <Toggle on={p.keep_undetermined !== false} onChange={(v) => setPolicy({ keep_undetermined: v })}
+          label="Keep tracks with no language tag" hint="Default on: missing metadata isn't the same as a foreign track." />
+        <Toggle on={p.keep_sdh !== false} onChange={(v) => setPolicy({ keep_sdh: v })}
+          label="Keep hearing-impaired (SDH) subtitles in kept languages" hint="Default on." />
+        <Toggle on={!!p.keep_commentary} onChange={(v) => setPolicy({ keep_commentary: v })}
+          label="Keep commentary tracks in kept languages" hint="Default off: commentary is usually redundant even in a kept language." />
+        <Toggle on={!!p.best_per_language} onChange={(v) => setPolicy({ best_per_language: v })}
+          label="Keep only the best track per language" hint="Audio: most channels then highest bitrate. Subtitles: the default track." />
+      </div>
+      <div className="toolbar" style={{ marginTop: 4 }}>
+        <button className="btn" onClick={loadReport}>Preview what this would do</button>
+      </div>
+      {report && <LangReportPanel report={report}
+        onApply={() => confirm(`Queue quick fixes for ${report.files} file${report.files === 1 ? "" : "s"} that only need language pruning?`) && applyNow()}
+        onClose={() => setReport(null)} />}
+
+      <LangScopeOverrides title="Per-library overrides" scopes={cfg.libraries.map((l) => l.name)}
+        overrides={cfg.lang_library_overrides || {}}
+        save={(next) => save({ lang_library_overrides: next })} />
+      <LangScopeOverrides title="Per-instance overrides" scopes={(cfg.arr_instances || []).map((i) => i.name)}
+        overrides={cfg.lang_instance_overrides || {}}
+        save={(next) => save({ lang_instance_overrides: next })} />
+    </section>
   );
 }
 

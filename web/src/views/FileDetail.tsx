@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { api, hardlinkedFiles, type AutopilotDecision, type FileItem, type ForcesTranscodeDetail, type HwReport, type Plan, type Settings, type Stream } from "../api";
-import { Art, Copyable, Empty, FileChips, IssueChips, REASON_LABEL, SavingsGauge, hasQuickFix, toast, useHardlinkedConfirm } from "../components";
+import { Art, Copyable, Empty, FileChips, IssueChips, REASON_LABEL, SavingsGauge, Toggle, hasQuickFix, toast, useHardlinkedConfirm } from "../components";
 import EncodeOptions, { hasBars } from "../options";
 import { backendLabel, bitrate, bytes, channelsLabel, codecLabel, dur, resClass, se } from "../format";
 import type { LiveState } from "../App";
@@ -176,6 +176,16 @@ export default function FileDetail({ live }: { live: LiveState }) {
             </div>
           )}
           {file.overview && <p className="hero-overview">{file.overview}</p>}
+          <Toggle on={!!file.lang_prune_exempt} label="Don't prune languages on this file" hint="Opts out of language pruning regardless of the global/scoped policy."
+            onChange={async (v) => {
+              try {
+                await api.setLangExempt(file.id, v);
+                setFile({ ...file, lang_prune_exempt: v });
+                toast(v ? "Exempted from language pruning" : "No longer exempt");
+              } catch (e: any) {
+                toast(e.message, "err");
+              }
+            }} />
         </div>
       </section>
 
