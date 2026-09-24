@@ -755,6 +755,14 @@ export type Notifier = {
 export type NotifyEventType = { key: string; level: string; label: string; help: string; default_on: boolean };
 export type NotifyStatus = Record<string, { last_sent_at?: string; last_error?: string; last_error_at?: string }>;
 
+export type TrendSnapshot = {
+  day: string;
+  lib_bytes: number;
+  bytes_by_codec: Record<string, number> | null;
+  free_bytes_by_fs: Record<string, number> | null;
+  saved_cumulative: number;
+};
+
 export type BazarrTest = {
   ok: boolean;
   error?: string;
@@ -930,6 +938,7 @@ export const api = {
   composition: (library?: string) => req<Composition>(`/api/v1/libraries/composition?${qs({ library })}`),
   measure: () => req<MeasureStatus>("/api/v1/measure"),
   stats: () => req<HistoryStats>("/api/v1/stats"),
+  trends: () => req<TrendSnapshot[]>("/api/v1/trends"),
 
   jobs: (status?: string, limit = 100) => req<{ jobs: Job[] }>(`/api/v1/jobs?${qs({ status, limit })}`),
   job: (id: number) => req<{ job: Job; progress: Progress | null }>(`/api/v1/jobs/${id}`),

@@ -182,6 +182,7 @@ func main() {
 	defer close(pressureStop)
 	go srv.DiskPressureLoop(pressureStop)
 	go srv.SummaryLoop(make(chan struct{}))
+	go srv.TrendLoop(make(chan struct{}))
 	// Recommendations depend on settings + hardware + calibration;
 	// recompute once at boot so cached ones never go stale.
 	go func() {

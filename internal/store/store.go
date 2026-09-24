@@ -297,6 +297,15 @@ var alters = []string{
 	// Cached OCR attempt result, same no-retry-every-cycle
 	// reasoning as tune_json.
 	`ALTER TABLE files ADD COLUMN ocr_json TEXT NOT NULL DEFAULT ''`,
+	// Daily library trend snapshots; kept forever (one small row
+	// a day). Backfilled days only carry saved_cumulative.
+	`CREATE TABLE IF NOT EXISTS trend_snapshots(
+  day TEXT PRIMARY KEY,
+  lib_bytes INTEGER NOT NULL DEFAULT 0,
+  bytes_by_codec_json TEXT NOT NULL DEFAULT '{}',
+  free_bytes_by_fs_json TEXT NOT NULL DEFAULT '{}',
+  saved_cumulative INTEGER NOT NULL DEFAULT 0
+)`,
 }
 
 func (s *Store) migrate() error {

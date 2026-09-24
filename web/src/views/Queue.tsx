@@ -2,6 +2,7 @@ import { useEffect, useState, type ReactNode } from "react";
 import { api, subscribe, type Config, type IntakeRow, type Job, type MeasureStatus, type Schedule } from "../api";
 import { Copyable, Empty, Seg, Toggle, toast } from "../components";
 import { HistoryStatsPanel } from "./Stats";
+import { TrendsPanel } from "./Trends";
 import { ago, backendLabel, bytes, DAY_LABELS, dur, minutesToHM } from "../format";
 import type { LiveState } from "../App";
 
@@ -87,6 +88,7 @@ export default function Queue({ live }: { live: LiveState }) {
       </div>
 
       {tab === "history" && <HistoryStatsPanel version={live.queueVersion} />}
+      {tab === "history" && <TrendsPanel version={live.queueVersion} />}
 
       {jobs.length === 0 ? (
         <Empty title={tab === "active" ? "Nothing encoding" : tab === "pending" ? "Queue is empty" : "No history yet"}>

@@ -571,3 +571,20 @@ details.panel[open] > summary { margin-bottom: 12px; }
 .up-params .field { margin-bottom: 0; }
 .up-group { margin-top: 6px; padding-top: 10px; border-top: 1px solid var(--line-soft); }
 .chip.c-up { color: var(--violet); border-color: color-mix(in srgb, var(--violet) 45%, transparent); }
+
+/* Library trends */
+.trends-grid { display: grid; grid-template-columns: 1fr; gap: 18px; margin-top: 10px; }
+@media (min-width: 1100px) { .trends-grid { grid-template-columns: 1fr 1fr; } }
+.trend { margin: 0; min-width: 0; }
+.trend-plot { position: relative; }
+.trend-plot svg { width: 100%; height: auto; display: block; touch-action: none; }
+.trend-grid { stroke: var(--line); stroke-width: 1; }
+.trend-axis { fill: var(--text-faint); font-size: 10px; font-family: var(--mono, monospace); }
+.trend-cross { stroke: var(--text-dim); stroke-width: 1; stroke-dasharray: 3 3; }
+.trend-legend { display: flex; flex-wrap: wrap; gap: 4px 12px; margin: 4px 0 6px; font-size: 12px; color: var(--text-dim); }
+.trend-legend i, .trend-tip i { display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin-right: 5px; vertical-align: middle; }
+.trend-tip { position: absolute; top: 4px; transform: translateX(8px); pointer-events: none; background: var(--surface-2); border: 1px solid var(--line); border-radius: var(--r-sm); padding: 6px 8px; color: var(--text); white-space: nowrap; z-index: 2; }
+.trend-table table { width: 100%; border-collapse: collapse; }
+.trend-table td, .trend-table th { padding: 2px 8px; text-align: right; }
+.trend-table td:first-child, .trend-table th:first-child { text-align: left; }
+.table-wrap { overflow-x: auto; max-height: 240px; overflow-y: auto; }
