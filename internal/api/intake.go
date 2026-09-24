@@ -11,6 +11,7 @@ import (
 	"mediatrans/internal/autopilot"
 	"mediatrans/internal/encode"
 	"mediatrans/internal/issues"
+	"mediatrans/internal/notify"
 	"mediatrans/internal/recs"
 	"mediatrans/internal/store"
 )
@@ -320,7 +321,14 @@ func (s *Server) IntakeLoop(stop <-chan struct{}) {
 		case <-stop:
 			return
 		case <-t.C:
+			before, _ := s.st.CountIntakeNeedsConfirmation()
 			p.runIntakePass(s.st)
+			if after, _ := s.st.CountIntakeNeedsConfirmation(); after > before {
+				s.Notify.Send(notify.Event{Key: notify.NeedsConfirmation, Level: notify.Warning,
+					Title: fmt.Sprintf("%d file(s) need confirmation", after-before),
+					Body:  fmt.Sprintf("%d waiting in total in the Queue page's intake panel (hardlinked files or codec-penalty checks).", after),
+					Link:  "#/queue", Group: "needs-confirmation updates"})
+			}
 		}
 	}
 }

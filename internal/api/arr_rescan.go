@@ -11,6 +11,7 @@ import (
 	"mediatrans/internal/arr"
 	"mediatrans/internal/config"
 	"mediatrans/internal/jobs"
+	"mediatrans/internal/notify"
 	"mediatrans/internal/pathmap"
 )
 
@@ -187,6 +188,9 @@ func (s *Server) arrPollNewPath(inst config.ArrInstance, itemID int64, wantRemot
 	msg := fmt.Sprintf("%s didn't pick up the new path within %s", inst.Name, arrPollTotal)
 	_ = s.st.KVSet("arr_warning_"+inst.ID, msg)
 	s.hub.Broadcast("arr", map[string]any{"instance": inst.ID, "warning": msg})
+	s.Notify.Send(notify.Event{Key: notify.ArrPathNotUpdated, Level: notify.Warning, Title: msg,
+		Body: "Expected path: " + wantRemote + ". A manual rescan in " + inst.Name + " usually fixes it.",
+		Link: "#/settings/connections", Group: "paths not picked up by Sonarr/Radarr"})
 	log.Printf("arr rescan: %s", msg)
 }
 

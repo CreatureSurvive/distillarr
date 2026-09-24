@@ -36,6 +36,10 @@ func ArrPolicyFor(st *store.Store, cfg *config.Manager) func(fileID int64) *recs
 		}
 
 		p := &recs.Policy{Instance: inst.Name}
+		if _, ok, _ := st.KVGet(upgradeLoopKey(fileID)); ok {
+			p.UpgradeLoop = true
+			return p
+		}
 		if inst.SkipUpgradePendingOn() && item.Monitored && item.CutoffNotMet {
 			p.UpgradePending = true
 			return p

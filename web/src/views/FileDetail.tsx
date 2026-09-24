@@ -244,6 +244,21 @@ export default function FileDetail({ live }: { live: LiveState }) {
                 <option value="sidecar">Sidecar</option>
                 <option value="ocr">OCR to text</option>
               </select>
+              {file.upgrade_loop_at && (
+                <div className="dim small" style={{ marginTop: 4 }}>
+                  Skipped as an upgrade loop since {file.upgrade_loop_at.slice(0, 10)}: {file.arr?.instance_name || "Sonarr/Radarr"} replaced
+                  a file Distillarr had just re-encoded.{" "}
+                  <button className="btn mini" onClick={async () => {
+                    try {
+                      await api.clearUpgradeLoop(file.id);
+                      setFile({ ...file, upgrade_loop_at: undefined });
+                      toast("Skip cleared. The recommendation refreshes shortly.");
+                    } catch (e: any) {
+                      toast(e.message, "err");
+                    }
+                  }}>Clear skip</button>
+                </div>
+              )}
               {file.ocr && (
                 <div className="dim small" style={{ marginTop: 4 }}>
                   {file.ocr.failed

@@ -74,6 +74,7 @@ type Policy struct {
 	Skip           bool   // tagged with the configured skip tag
 	Codec          string // "hevc" | "av1" | "" — tagged codec override
 	RemuxOnly      bool   // tagged with the configured remux-only tag
+	UpgradeLoop    bool   // replaced by a download soon after a re-encode
 }
 
 // Hooks wired by main.
@@ -315,6 +316,9 @@ func Recommend(f *store.File, cfg config.Config) Recommendation {
 		switch {
 		case p.Skip:
 			r.Reason = fmt.Sprintf("Tagged to skip in %s.", p.Instance)
+			return r
+		case p.UpgradeLoop:
+			r.Reason = fmt.Sprintf("%s replaced this file soon after Distillarr re-encoded its predecessor (an upgrade loop), so it's skipped. Clear the skip from the file page to allow it again.", p.Instance)
 			return r
 		case p.UpgradePending:
 			r.Reason = fmt.Sprintf("%s expects a better release (quality cutoff not met yet); skipped so a re-encode isn't wasted on a file about to be replaced.", p.Instance)

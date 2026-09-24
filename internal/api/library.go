@@ -42,6 +42,9 @@ type fileOut struct {
 	// OCR is the last OCR attempt on this file's image subtitle track
 	// parsed from the internal-only OCRJSON cache.
 	OCR *imagesubs.OCRResult `json:"ocr,omitempty"`
+	// UpgradeLoopAt is when this file was put on the upgrade-loop skip
+	// list; "" when it isn't.
+	UpgradeLoopAt string `json:"upgrade_loop_at,omitempty"`
 }
 
 // arrItemOut is a store.ArrItem shaped for display: the instance name and
@@ -137,6 +140,7 @@ func (s *Server) decorate(files []*store.File) []fileOut {
 		}
 		if a, ok := arrOuts[f.ID]; ok {
 			fo.Arr = &a
+			fo.UpgradeLoopAt, _, _ = s.st.KVGet(upgradeLoopKey(f.ID))
 		}
 		if r, ok := imagesubs.UnmarshalResult(f.OCRJSON); ok {
 			fo.OCR = &r

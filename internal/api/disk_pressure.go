@@ -1,11 +1,13 @@
 package api
 
 import (
+	"fmt"
 	"log"
 	"syscall"
 	"time"
 
 	"mediatrans/internal/config"
+	"mediatrans/internal/notify"
 )
 
 // statFreePct is overridable in tests so a fake filesystem's free-space
@@ -56,6 +58,11 @@ func (s *Server) DiskPressureLoop(stop <-chan struct{}) {
 		}
 		s.diskPressure.Store(now)
 		s.hub.Broadcast("system", map[string]any{"pressure": now})
+		if now {
+			s.Notify.Send(notify.Event{Key: notify.DiskPressure, Level: notify.Warning, Title: "Low disk space",
+				Body: fmt.Sprintf("A library's filesystem is at or below %.0f%% free. Autopilot now favours the biggest savings.", s.cfg.Get().DiskPressurePct),
+				Link: "#/queue"})
+		}
 		log.Printf("disk pressure: %v", now)
 	}
 	check()

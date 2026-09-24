@@ -339,6 +339,12 @@ func (s *Store) KVSet(key, value string) error {
 	return err
 }
 
+// KVDelete removes key (no error when it's absent).
+func (s *Store) KVDelete(key string) error {
+	_, err := s.dbW.Exec(`DELETE FROM kv WHERE key=?`, key)
+	return err
+}
+
 // KVJSON stores arbitrary JSON-serializable state under key.
 func KVJSON[T any](s *Store, key string, v *T) error {
 	b, err := json.Marshal(v)

@@ -23,6 +23,7 @@ import (
 	"mediatrans/internal/imagesubs"
 	"mediatrans/internal/media"
 	"mediatrans/internal/neural"
+	"mediatrans/internal/notify"
 	"mediatrans/internal/recs"
 	"mediatrans/internal/replace"
 	"mediatrans/internal/res"
@@ -174,6 +175,9 @@ func (e *Engine) notify(event string, payload any) {
 // on disk, for anything that wants to react: Jellyfin/Plex refresh,
 // Sonarr/Radarr rescan, notifications. Kind distinguishes a plain re-encode
 // from a video-copy remux and from the two upscale outcomes.
+// Alert delivers a notification; main wires it to the notifier.
+var Alert = func(notify.Event) {}
+
 type ReplacedEvent struct {
 	JobID, FileID int64
 	Kind          string // "encode" | "remux" | "upscale-replace" | "upscale-copy"
@@ -818,6 +822,12 @@ func (e *Engine) fail(j *store.Job, msg, tail string) {
 	_ = e.st.FinishJob(j.ID, store.StatusFailed, 0, msg, tail)
 	log.Printf("jobs: %d failed: %s", j.ID, msg)
 	e.notify(EvJob, map[string]any{"id": j.ID, "status": store.StatusFailed, "error": msg})
+	link := "#/queue"
+	if j.FileID > 0 {
+		link = fmt.Sprintf("#/file/%d", j.FileID)
+	}
+	Alert(notify.Event{Key: notify.JobFailed, Level: notify.Error, Title: "Job failed: " + filepath.Base(j.SrcPath),
+		Body: msg, Link: link, Group: "jobs failed"})
 }
 
 // failKeepAttempt is like fail, but doesn't spend the attempt that claimed
@@ -906,6 +916,12 @@ func (e *Engine) noteHWFailure(backend string) {
 	fails = append(fails, now)
 	e.hwFails[backend] = fails
 	if len(fails) >= 2 {
+		if !e.BackendDegraded(backend) {
+			Alert(notify.Event{Key: notify.BackendDegraded, Level: notify.Warning,
+				Title: "Encoder degraded: " + backend,
+				Body:  "It failed twice within 30 minutes, so jobs fall back to another encoder until you reset it in Settings > System > Hardware.",
+				Link:  "#/settings/system"})
+		}
 		_ = e.st.KVSet("hw_health."+backend, "degraded")
 		e.notify(EvHW, map[string]any{"backend": backend, "degraded": true})
 	}

@@ -323,6 +323,10 @@ type Config struct {
 	// putConfig like arr_instances; URL is secret (masked, url_set).
 	// Notification links are built from WebhookBaseURL (see PublicURL).
 	Notifiers []Notifier `json:"notifiers,omitempty"`
+	// UpgradeLoopDays: a Sonarr/Radarr download replacing a file
+	// Distillarr re-encoded within this many days counts as an upgrade
+	// loop. 0 = default 14; see UpgradeLoopDaysOn.
+	UpgradeLoopDays int `json:"upgrade_loop_days,omitempty"`
 
 	// AutopilotEnabled turns on rule-driven unattended queueing,
 	// off by default. AutoRules are evaluated in order, first match
@@ -877,6 +881,20 @@ func (m *Manager) WindowOpen(t time.Time) bool {
 		return true
 	}
 	return inWindows(c.Schedules, t)
+}
+
+// UpgradeLoopDaysOn returns the effective upgrade-loop window.
+func (c Config) UpgradeLoopDaysOn() int {
+	if c.UpgradeLoopDays <= 0 {
+		return 14
+	}
+	return c.UpgradeLoopDays
+}
+
+// InSchedules reports whether t is inside the processing schedules,
+// ignoring Paused (zero schedules = always).
+func InSchedules(scheds []Schedule, t time.Time) bool {
+	return len(scheds) == 0 || inWindows(scheds, t)
 }
 
 // inWindows reports whether t falls inside any schedule.

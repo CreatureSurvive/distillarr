@@ -2,10 +2,12 @@ package jobs
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"path/filepath"
 
 	"mediatrans/internal/imagesubs"
+	"mediatrans/internal/notify"
 	"mediatrans/internal/store"
 )
 
@@ -44,6 +46,11 @@ func (e *Engine) runOCRJob(ctx context.Context, j *store.Job) {
 
 	if err := e.st.SetOCRResult(f.ID, imagesubs.MarshalResult(res)); err != nil {
 		log.Printf("jobs: ocr job %d: caching result: %v", j.ID, err)
+	}
+	if res.Failed {
+		Alert(notify.Event{Key: notify.OCRLowConfidence, Title: "Low-confidence OCR: " + filepath.Base(j.SrcPath),
+			Body: fmt.Sprintf("Confidence %.0f, below your threshold; the image subtitle track was left as is.", res.Confidence),
+			Link: fmt.Sprintf("#/file/%d", f.ID), Group: "files with low-confidence OCR"})
 	}
 	if !res.Failed && res.SRTName != "" {
 		sidecarPath := filepath.Join(filepath.Dir(j.SrcPath), res.SRTName)

@@ -500,3 +500,29 @@ func (s *Store) RetryJob(id int64) error {
 func (s *Store) ClearOldPath(path string) error {
 	return s.MarkMissingByPath(path)
 }
+
+// LastDoneJobAt returns when the file's most recent successful,
+// unreverted non-upscale job finished ("" when none), for upgrade-loop
+// detection.
+func (s *Store) LastDoneJobAt(fileID int64) (string, error) {
+	var at string
+	err := s.dbR.QueryRow(`SELECT COALESCE(MAX(finished_at),'') FROM jobs
+		WHERE file_id=? AND status='done' AND reverted_at='' AND NOT (`+isUpscale+`)`, fileID).Scan(&at)
+	return at, err
+}
+
+// JobSummary is the nightly summary's job counts.
+type JobSummary struct {
+	Done, Failed int
+	Saved        int64
+}
+
+// JobSummarySince counts jobs finished at or after since (RFC3339).
+func (s *Store) JobSummarySince(since string) (JobSummary, error) {
+	var out JobSummary
+	err := s.dbR.QueryRow(`SELECT
+		COALESCE(SUM(status='done'),0), COALESCE(SUM(status='failed'),0),
+		COALESCE(SUM(CASE WHEN status='done' AND src_size > output_size AND NOT (`+isUpscale+`) THEN src_size - output_size ELSE 0 END),0)
+		FROM jobs WHERE finished_at >= ?`, since).Scan(&out.Done, &out.Failed, &out.Saved)
+	return out, err
+}

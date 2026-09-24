@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"mediatrans/internal/config"
+	"mediatrans/internal/notify"
 	"mediatrans/internal/pathmap"
 )
 
@@ -27,6 +28,9 @@ type arrWebhookEnvelope struct {
 	MovieFile           json.RawMessage  `json:"movieFile,omitempty"`
 	RenamedEpisodeFiles []arrRenameEntry `json:"renamedEpisodeFiles,omitempty"`
 	DeleteReason        string           `json:"deleteReason,omitempty"`
+	// DeletedFiles are the files an upgrade replaced (Download with
+	// isUpgrade); used for upgrade-loop detection.
+	DeletedFiles []arrWebhookFile `json:"deletedFiles,omitempty"`
 }
 
 type arrWebhookFile struct {
@@ -68,6 +72,10 @@ func (s *Server) arrWebhook(w http.ResponseWriter, r *http.Request) {
 		arrWebhookAuthFails.m[id]++
 		log.Printf("arr webhook %s: auth failed (%d total)", id, arrWebhookAuthFails.m[id])
 		w.Header().Set("WWW-Authenticate", `Basic realm="distillarr"`)
+		s.Notify.Send(notify.Event{Key: notify.WebhookAuthFailed, Level: notify.Warning,
+			Title: "Webhook auth failed: " + inst.Name, Group: "failed webhook logins",
+			Body:  "A webhook call arrived with the wrong token. If you regenerated it, update the webhook's password in " + inst.Name + ".",
+			Link:  "#/settings/connections"})
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
@@ -135,12 +143,23 @@ func (s *Server) handleArrWebhookDownload(inst config.ArrInstance, ev arrWebhook
 		log.Printf("arr webhook %s: probe %s: %v", inst.ID, local, err)
 		return
 	}
-	if !inst.WebhookIntakeOn() {
-		return
-	}
 	f, err := s.st.GetFileByPath(local)
 	if err != nil || f == nil {
 		log.Printf("arr webhook %s: Download: no file row for %s after probing", inst.ID, local)
+		return
+	}
+	if ev.IsUpgrade {
+		var replaced []string
+		for _, d := range ev.DeletedFiles {
+			if d.Path != "" {
+				replaced = append(replaced, pm.ToLocal(d.Path))
+			}
+		}
+		if s.checkUpgradeLoop(inst, f, replaced, time.Now()) {
+			return // skipped: no intake row for a file stuck in a loop
+		}
+	}
+	if !inst.WebhookIntakeOn() {
 		return
 	}
 	reason := "Imported by " + inst.Name

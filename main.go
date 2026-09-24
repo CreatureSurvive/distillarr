@@ -85,6 +85,7 @@ func main() {
 	hubNotify = srv.Hub().Broadcast
 	srv.Notify = notify.New(cfg.Get, notify.Shoutrrr)
 	go srv.Notify.Run(context.Background())
+	jobs.Alert = srv.Notify.Send
 	pv.OnTuned = func(fileID int64, s encode.Settings, r tune.Result) {
 		f, err := st.GetFile(fileID)
 		if err != nil || f == nil {
@@ -158,6 +159,7 @@ func main() {
 	// always rescan immediately.
 	eng.OnFinished(srv.ArrRescanSubscriber())
 	eng.OnFinished(srv.BazarrRescanSubscriber())
+	eng.OnFinished(srv.JobDoneSubscriber())
 
 	// Sonarr/Radarr write-back: tag and/or unmonitor after a re-encode
 	// Both are off by default per instance, so this is a no-op
@@ -179,6 +181,7 @@ func main() {
 	pressureStop := make(chan struct{})
 	defer close(pressureStop)
 	go srv.DiskPressureLoop(pressureStop)
+	go srv.SummaryLoop(make(chan struct{}))
 	// Recommendations depend on settings + hardware + calibration;
 	// recompute once at boot so cached ones never go stale.
 	go func() {

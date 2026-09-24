@@ -85,6 +85,7 @@ export type FileItem = {
   lang_prune_exempt?: boolean; // opts this file out of language pruning
   sidecar_mode?: string; // "" | "extract_keep" | "extract_remove" (per-file override; "" = inherit)
   image_subs_mode?: string; // "" | "sidecar" | "ocr" (per-file override; "" = inherit)
+  upgrade_loop_at?: string; // on the upgrade-loop skip list since
   ocr?: OCRResult; // last OCR attempt on this file's image subtitle track, if any
 };
 
@@ -944,6 +945,7 @@ export const api = {
   plexTest: (body: { url?: string; token?: string; path_map?: string }) => post<PlexTest>("/api/v1/plex/test", body),
   plexSync: () => post<{ started: boolean }>("/api/v1/plex/sync"),
   bazarrTest: (body: { url?: string; key?: string; path_map?: string }) => post<BazarrTest>("/api/v1/bazarr/test", body),
+  clearUpgradeLoop: (id: number) => req<{ ok: boolean }>(`/api/v1/files/${id}/upgrade-loop`, { method: "DELETE" }),
   bazarrSearch: (id: number) => post<{ ok: boolean }>(`/api/v1/files/${id}/bazarr-search`),
 
   // id is the stored instance's id, or "new" for one not yet saved.
