@@ -118,6 +118,36 @@ func TestLangpruneApplyQueuesQuickFixOnly(t *testing.T) {
 	}
 }
 
+// Regression: the report handler re-derives "is this side active" from
+// keep-list non-emptiness (so the preview reflects a mode that was
+// never saved as "apply" — e.g. "report" globally but scoped custom).
+// A library-off override must survive that re-derivation. Found live
+// during live verification: with the global mode "apply" and a real
+// keep list, an "off" override on the movies library was silently
+// undone because it cleared the mode but (before the config.go fix)
+// left the still-global keep list behind.
+func TestLangpruneReportRespectsLibraryOffOverride(t *testing.T) {
+	s := newTestServer(t)
+	if err := s.cfg.Update(func(c *config.Config) {
+		*c = config.Default()
+		c.LangPolicy = config.LangPolicy{AudioMode: "apply", AudioKeep: []string{"eng"}}
+		c.LangLibraryOverrides = map[string]config.LangOverride{"movies": {Mode: "off"}}
+	}); err != nil {
+		t.Fatal(err)
+	}
+	mustUpsert(t, s.st, &store.File{Path: "/m/a.mkv", Library: "movies", Title: "A", Duration: 100,
+		Audio: []store.AudioStream{{Index: 0, Lang: "eng"}, {Index: 1, Lang: "jpn"}}})
+
+	rec := doJSON(t, s, "GET", "/api/v1/langprune/report", nil)
+	var out langpruneReport
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+		t.Fatal(err)
+	}
+	if out.Files != 0 || len(out.ByLanguage) != 0 {
+		t.Errorf("a library-off override must silence the report for that library: %+v", out)
+	}
+}
+
 func TestLangpruneReportEmptyKeepListDropsNothing(t *testing.T) {
 	s := newTestServer(t)
 	mustUpsert(t, s.st, &store.File{Path: "/m/a.mkv", Library: "movies", Title: "A", Duration: 100,

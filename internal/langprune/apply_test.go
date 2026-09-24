@@ -91,3 +91,20 @@ func TestForceDropsIgnoresMode(t *testing.T) {
 		t.Errorf("exemption should still win over a force-drop rule: %v", audio)
 	}
 }
+
+// Regression: ForceDrops re-derives "is this side active" from whether
+// the effective keep list is non-empty (so it can force pruning on even
+// with the global mode "report"/"off"). A library-off override must
+// still win — found live during live verification, where a scoped "off"
+// override was silently undone because it cleared the mode but left the
+// (still globally non-empty) keep list behind.
+func TestForceDropsRespectsLibraryOffOverride(t *testing.T) {
+	f := testFile()
+	cfg := config.Config{
+		LangPolicy:           config.LangPolicy{AudioMode: "off", AudioKeep: []string{"eng"}},
+		LangLibraryOverrides: map[string]config.LangOverride{"movies": {Mode: "off"}},
+	}
+	if audio, subs := ForceDrops(f, cfg, "", ""); audio != nil || subs != nil {
+		t.Errorf("a library-off override must survive ForceDrops' mode re-derivation: %v %v", audio, subs)
+	}
+}

@@ -85,7 +85,14 @@ type LangOverride struct {
 func applyLangOverride(p *LangPolicy, ov LangOverride) {
 	switch ov.Mode {
 	case "off":
+		// Clear the keep lists too, not just the modes: ForceDrops and
+		// the dry-run report both re-derive "is this side active" from
+		// whether a keep list is non-empty (so a rule or a preview can
+		// force pruning on even when the global mode is "report"/"off").
+		// If AudioKeep/SubsKeep survived an "off" override untouched,
+		// that re-derivation would silently undo the override.
 		p.AudioMode, p.SubsMode = "off", "off"
+		p.AudioKeep, p.SubsKeep = nil, nil
 	case "custom":
 		if len(ov.AudioKeep) > 0 {
 			p.AudioKeep = ov.AudioKeep
