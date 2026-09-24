@@ -299,7 +299,7 @@ export default function UpscaleView() {
                 <Fragment key={p.id}>
                   {p.tier === "neural" && all[i - 1]?.tier !== "neural" && (
                     <div className="up-group dim small">
-                      Neural: far more detail, but hours per file. Runs overnight{info.device ? ` on ${info.device}` : ""}.
+                      Neural: far more detail, but hours per file. Runs overnight{info.device ? ` on ${info.device}` : ""}.{" "}
                       {all.some((x) => x.tier === "neural" && x.measured)
                         ? "Estimates marked “measured” come from runs on this GPU."
                         : `Estimates come from benchmarks (reference: ${info.reference_device}) until this GPU has finished a few runs.`}
