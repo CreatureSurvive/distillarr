@@ -230,11 +230,12 @@ func (s *Scanner) probeOne(path string, cfg config.Config) {
 	f.TranscodeScore = rec.Score
 	f.RecJSON = rec.JSON()
 	forces, _ := s.st.ForcesTranscode(f.ID, issues.ForcesTranscodeLookbackDays)
-	origLang := ""
+	origLang, instanceName := "", ""
 	if item, _ := s.st.ArrItemByFileID(f.ID); item != nil {
 		origLang = item.OriginalLanguage
+		instanceName = instanceNameByID(cfg, item.InstanceID)
 	}
-	f.Issues = issues.Encode(issues.Detect(f, cfg, rec.Action == "transcode", rec.Limited, rec.UpgradePending, forces, origLang))
+	f.Issues = issues.Encode(issues.Detect(f, cfg, rec.Action == "transcode", rec.Limited, rec.UpgradePending, forces, origLang, instanceName))
 
 	if err := s.st.UpsertFile(f, buildStreams(f.ID, p)); err != nil {
 		log.Printf("scan: upsert %s: %v", path, err)
@@ -268,6 +269,19 @@ func nlinkOf(fi os.FileInfo) int {
 		return int(st.Nlink)
 	}
 	return 1
+}
+
+// instanceNameByID resolves an arr instance id to its configured display
+// name ("" if removed/unknown) — the form issues.Detect/ExtraLanguages
+// and EffectiveLangPolicy's scope key both expect, matching
+// api.ArrPolicyFor's own instance lookup.
+func instanceNameByID(cfg config.Config, id string) string {
+	for _, x := range cfg.ArrInstances {
+		if x.ID == id {
+			return x.Name
+		}
+	}
+	return ""
 }
 
 func buildFile(lib, path string, p *media.Probe) *store.File {
@@ -417,6 +431,14 @@ func (s *Scanner) RefreshRecs() {
 	if err != nil {
 		log.Printf("scan: refresh recs: original_language lookup: %v", err)
 	}
+	instanceIDs, err := s.st.ArrInstanceIDs()
+	if err != nil {
+		log.Printf("scan: refresh recs: instance id lookup: %v", err)
+	}
+	instanceNames := map[int64]string{}
+	for fileID, id := range instanceIDs {
+		instanceNames[fileID] = instanceNameByID(cfg, id)
+	}
 	batch := map[int64]store.RecUpdate{}
 	flush := func() {
 		if len(batch) > 0 {
@@ -429,7 +451,7 @@ func (s *Scanner) RefreshRecs() {
 	_ = s.st.EachFile(func(f *store.File) error {
 		r := recs.Recommend(f, cfg)
 		batch[f.ID] = store.RecUpdate{Score: r.Score, Rec: r.JSON(),
-			Issues: issues.Encode(issues.Detect(f, cfg, r.Action == "transcode", r.Limited, r.UpgradePending, forces[f.ID], origLangs[f.ID]))}
+			Issues: issues.Encode(issues.Detect(f, cfg, r.Action == "transcode", r.Limited, r.UpgradePending, forces[f.ID], origLangs[f.ID], instanceNames[f.ID]))}
 		if len(batch) >= 500 {
 			flush()
 		}

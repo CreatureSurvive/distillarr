@@ -79,9 +79,11 @@ func isMP4(container string) bool {
 // from its current recommendation; forcesTranscode comes from the
 // playback-events table; cfg supplies AudioRules for
 // audio_blocks_mp4; origLangName is the file's
-// arr_items.original_language display name ("" if unmanaged or unknown),
-// used to resolve extra_languages.
-func Detect(f *store.File, cfg config.Config, worth, measuredMiss, upgradePending, forcesTranscode bool, origLangName string) []string {
+// arr_items.original_language display name ("" if unmanaged or unknown);
+// instanceName is the owning arr instance's display name ("" if
+// unmanaged) — both feed extra_languages, instanceName resolving
+// the effective (scope-overridden) policy.
+func Detect(f *store.File, cfg config.Config, worth, measuredMiss, upgradePending, forcesTranscode bool, origLangName, instanceName string) []string {
 	var out []string
 	// Any tag other than hvc1 (hev1, blank-in-MP4 "[0][0][0][0]", ...);
 	// "" means the tag couldn't be read, so don't guess.
@@ -103,7 +105,7 @@ func Detect(f *store.File, cfg config.Config, worth, measuredMiss, upgradePendin
 	if audioBlocksMP4(f, cfg) {
 		out = append(out, "audio_blocks_mp4")
 	}
-	if has, _ := ExtraLanguages(f, cfg, origLangName); has {
+	if has, _ := ExtraLanguages(f, cfg, origLangName, instanceName); has {
 		out = append(out, "extra_languages")
 	}
 	if legacyCodecs[f.VideoCodec] {
@@ -216,14 +218,17 @@ func audioBlocksMP4(f *store.File, cfg config.Config) bool {
 	return false
 }
 
-// ExtraLanguages reports whether cfg's LangPolicy would drop any of f's
-// audio/subtitle tracks, and the estimated bytes dropping them would
-// save. Report-only: nothing here changes the file applies the
-// decision). origLangName is the arr_items.original_language display
-// name; langprune.Select falls back to the first audio track's language
-// when it's "" or unrecognized.
-func ExtraLanguages(f *store.File, cfg config.Config, origLangName string) (bool, int64) {
-	p := cfg.LangPolicy
+// ExtraLanguages reports whether f's effective LangPolicy (global policy,
+// library/instance scope overrides, per-file exemption) would
+// drop any of its audio/subtitle tracks, and the estimated bytes
+// dropping them would save. Report-only: nothing here changes the file
+// (Drops/ForceDrops in internal/langprune apply the decision).
+// origLangName is the arr_items.original_language display name;
+// langprune.Select falls back to the first audio track's language when
+// it's "" or unrecognized. instanceName is the owning arr instance's
+// display name ("" if unmanaged).
+func ExtraLanguages(f *store.File, cfg config.Config, origLangName, instanceName string) (bool, int64) {
+	p := cfg.EffectiveLangPolicy(f.Library, instanceName, f.LangPruneExempt)
 	if (p.AudioMode == "" || p.AudioMode == "off") && (p.SubsMode == "" || p.SubsMode == "off") {
 		return false, 0
 	}
