@@ -3,6 +3,7 @@
 package store
 
 import (
+	"fmt"
 	"encoding/json"
 	"strconv"
 	"strings"
@@ -298,4 +299,42 @@ func (s *Store) ArrTags(instanceID string) map[int64]string {
 		_ = json.Unmarshal([]byte(v), &out)
 	}
 	return out
+}
+
+// ArrPrior is the file an arr item slot (movie, or series episode)
+// pointed at before a sync, for upgrade-loop detection.
+type ArrPrior struct {
+	FileID    int64
+	Path      string
+	FileRecID int64
+}
+
+// ArrSlotKey identifies one slot of an arr item: the movie itself, or
+// one episode (by season/episode number) of a series.
+func ArrSlotKey(itemID int64, season, episode int) string {
+	return fmt.Sprintf("%d:%d:%d", itemID, season, episode)
+}
+
+// ArrPriors returns instanceID's current slot → file mapping.
+func (s *Store) ArrPriors(instanceID string) (map[string]ArrPrior, error) {
+	rows, err := s.dbR.Query(`SELECT a.item_id, a.kind, a.file_id, a.file_rec_id, f.path, f.season, f.episode
+		FROM arr_items a JOIN files f ON f.id=a.file_id WHERE a.instance_id=?`, instanceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string]ArrPrior{}
+	for rows.Next() {
+		var item, fid, rec int64
+		var kind, path string
+		var season, ep int
+		if err := rows.Scan(&item, &kind, &fid, &rec, &path, &season, &ep); err != nil {
+			return nil, err
+		}
+		if kind != "sonarr" {
+			season, ep = 0, 0
+		}
+		out[ArrSlotKey(item, season, ep)] = ArrPrior{FileID: fid, Path: path, FileRecID: rec}
+	}
+	return out, rows.Err()
 }

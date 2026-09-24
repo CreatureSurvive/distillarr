@@ -154,6 +154,7 @@ func (s *Server) syncOneArrInstance(ctx context.Context, inst config.ArrInstance
 		}
 	}
 
+	s.detectSyncUpgradeLoops(inst, items)
 	if err := s.st.UpsertArrItems(items); err != nil {
 		return 0, err
 	}
@@ -188,4 +189,38 @@ func (s *Server) syncOneArrInstance(ctx context.Context, inst config.ArrInstance
 	}
 
 	return len(items), nil
+}
+
+// detectSyncUpgradeLoops is the full-sync half of upgrade-loop detection
+// (the webhook half is in handleArrWebhookDownload). Before the
+// sync's rows replace the stored ones, each slot (a movie, or a series
+// episode by season/episode) whose file changed to a different file and
+// a different arr file record means Sonarr/Radarr swapped in a new
+// download; checkUpgradeLoop then decides whether the old file was a
+// recent re-encode. Distillarr's own replaces keep the file id (even
+// across an extension change), so they never look like a swap here.
+func (s *Server) detectSyncUpgradeLoops(inst config.ArrInstance, items []store.ArrItem) {
+	priors, err := s.st.ArrPriors(inst.ID)
+	if err != nil || len(priors) == 0 {
+		return
+	}
+	now := time.Now()
+	for _, it := range items {
+		f, err := s.st.GetFile(it.FileID)
+		if err != nil || f == nil {
+			continue
+		}
+		season, ep := 0, 0
+		if it.Kind == "sonarr" {
+			season, ep = f.Season, f.Episode
+		}
+		prev, ok := priors[store.ArrSlotKey(it.ItemID, season, ep)]
+		if !ok || prev.FileID == it.FileID || prev.FileRecID == it.FileRecID {
+			continue
+		}
+		if _, already, _ := s.st.KVGet(upgradeLoopKey(f.ID)); already {
+			continue // the webhook got there first
+		}
+		s.checkUpgradeLoop(inst, f, []string{prev.Path}, now)
+	}
 }

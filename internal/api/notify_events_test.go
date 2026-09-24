@@ -74,3 +74,38 @@ func TestUpgradeLoopDetection(t *testing.T) {
 		t.Error("no re-encode history: no loop")
 	}
 }
+
+func TestSyncUpgradeLoopDetection(t *testing.T) {
+	s := newTestServer(t)
+	inst := config.ArrInstance{ID: "sonarr", Name: "Sonarr", Kind: "sonarr"}
+	done := func(f *store.File) {
+		j := &store.Job{FileID: f.ID, SrcPath: f.Path, Priority: 100000, Backend: "sw", Codec: "hevc", MaxAttempts: 1}
+		if err := s.st.CreateJob(j); err != nil {
+			t.Fatal(err)
+		}
+		_ = s.st.FinishJob(j.ID, store.StatusDone, 100, "", "")
+	}
+	e1 := mustUpsert(t, s.st, &store.File{Path: "/tv/S/S01E01 WEB.mkv", Library: "tvshows", Title: "S", Season: 1, Episode: 1})
+	e2 := mustUpsert(t, s.st, &store.File{Path: "/tv/S/S01E02 WEB.mkv", Library: "tvshows", Title: "S", Season: 1, Episode: 2})
+	done(e1)
+	done(e2)
+	if err := s.st.UpsertArrItems([]store.ArrItem{
+		{FileID: e1.ID, InstanceID: "sonarr", Kind: "sonarr", ItemID: 5, FileRecID: 100},
+		{FileID: e2.ID, InstanceID: "sonarr", Kind: "sonarr", ItemID: 5, FileRecID: 101},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	// E01 was replaced by a new download; E02 got a new file record from
+	// Distillarr's own replace (same file id), which must not count.
+	e1new := mustUpsert(t, s.st, &store.File{Path: "/tv/S/S01E01 Bluray.mkv", Library: "tvshows", Title: "S", Season: 1, Episode: 1})
+	s.detectSyncUpgradeLoops(inst, []store.ArrItem{
+		{FileID: e1new.ID, InstanceID: "sonarr", Kind: "sonarr", ItemID: 5, FileRecID: 200},
+		{FileID: e2.ID, InstanceID: "sonarr", Kind: "sonarr", ItemID: 5, FileRecID: 201},
+	})
+	if _, ok, _ := s.st.KVGet(upgradeLoopKey(e1new.ID)); !ok {
+		t.Error("replaced episode not flagged")
+	}
+	if _, ok, _ := s.st.KVGet(upgradeLoopKey(e2.ID)); ok {
+		t.Error("Distillarr's own replace flagged as a loop")
+	}
+}
