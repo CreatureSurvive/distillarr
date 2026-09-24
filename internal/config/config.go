@@ -289,6 +289,12 @@ type Config struct {
 	// post-replace refresh if Plex changed it. Default on, like
 	// Jellyfin already does unconditionally; see PlexKeepAddedAtOn.
 	PlexKeepAddedAt *bool `json:"plex_keep_added_at,omitempty"`
+	// Bazarr: optional. Bazarr stays the subtitle source; these
+	// let Distillarr ask it to rescan after a replace and to search for
+	// missing subtitles. The key is masked like plex_token.
+	BazarrURL     string `json:"bazarr_url"`
+	BazarrKey     string `json:"bazarr_key"`
+	BazarrPathMap string `json:"bazarr_path_map"`
 
 	// DeferWhileTranscoding stops new encode jobs from starting while any
 	// Jellyfin/Plex session is transcoding video; it can only take
@@ -808,6 +814,12 @@ func (c Config) MapPlexPath(p string) string {
 func (c Config) ToPlexPath(p string) string {
 	m, _ := pathmap.Parse(c.PlexPathMap)
 	return m.ToRemote(p)
+}
+
+// MapBazarrPath rewrites a Bazarr-side path to the local view.
+func (c Config) MapBazarrPath(p string) string {
+	m, _ := pathmap.Parse(c.BazarrPathMap)
+	return m.ToLocal(p)
 }
 
 // PlexKeepAddedAtOn reports the effective setting (default on).

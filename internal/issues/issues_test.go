@@ -190,3 +190,23 @@ func TestQuickFix(t *testing.T) {
 		t.Errorf("decode %v", got)
 	}
 }
+
+func TestMissingSubs(t *testing.T) {
+	cfg := config.Default()
+	f := &store.File{Library: "movies",
+		Subs:     []store.SubStream{{Lang: "eng"}},
+		Sidecars: []store.Sidecar{{Name: "M.es.srt", Lang: "es"}}}
+	if got := MissingSubs(f, cfg, ""); got != nil {
+		t.Errorf("no SubsKeep list must mean off, got %v", got)
+	}
+	cfg.LangPolicy.SubsKeep = []string{"eng", "spa", "fre"}
+	got := MissingSubs(f, cfg, "")
+	if len(got) != 1 || got[0] != "fre" {
+		t.Errorf("got %v, want [fre] (eng embedded, spa via 'es' sidecar)", got)
+	}
+	// The per-file pruning exemption doesn't hide missing subtitles.
+	f.LangPruneExempt = true
+	if got := Encode(Detect(f, cfg, false, false, false, false, "", "")); got != ",missing_subs," {
+		t.Errorf("Detect = %s", got)
+	}
+}

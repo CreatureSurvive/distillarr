@@ -95,6 +95,7 @@ export const ISSUE_SHORT: Record<string, { label: string; fix: "quick" | "reenco
   upgrade_pending: { label: "upgrade pending", fix: "info" },
   forces_transcode: { label: "forces client transcode", fix: "info" },
   extra_languages: { label: "extra language tracks", fix: "info" },
+  missing_subs: { label: "missing subtitles", fix: "info" },
 };
 
 // Canonical reason category (issues.ReasonCategory on the Go side) ->

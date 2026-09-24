@@ -49,6 +49,7 @@ var Types = []Type{
 	{"extra_languages", "Extra language tracks", Info, "Audio or subtitle tracks in languages your language policy doesn't keep are still present. Report mode only counts them; switching a mode to apply drops them.", "file"},
 	{"mixed_season", "Mixed formats in a season", Reencode, "Episodes in the same season use different codecs, containers or resolutions, which can cause inconsistent playback or transcoding.", "season"},
 	{"forces_transcode", "Forces client transcode", Info, "A Jellyfin or Plex session played this file with a transcode in the last 30 days, so at least one client couldn't play it directly. See the file page for the reasons.", "file"},
+	{"missing_subs", "Missing subtitle language", Info, "A subtitle language your language policy keeps has no embedded track and no sidecar file. If Bazarr is connected, the file page can ask it to search.", "file"},
 	{"subs_ocr_low_confidence", "Image subtitle OCR came out low-confidence", Info, "The last OCR attempt on this file's image subtitle track scored below your confidence threshold, so the track was left untouched. See the file page for the score and a re-run option.", "file"},
 }
 
@@ -109,6 +110,9 @@ func Detect(f *store.File, cfg config.Config, worth, measuredMiss, upgradePendin
 	}
 	if has, _ := ExtraLanguages(f, cfg, origLangName, instanceName); has {
 		out = append(out, "extra_languages")
+	}
+	if len(MissingSubs(f, cfg, instanceName)) > 0 {
+		out = append(out, "missing_subs")
 	}
 	if r, ok := imagesubs.UnmarshalResult(f.OCRJSON); ok && r.Failed {
 		out = append(out, "subs_ocr_low_confidence")
@@ -239,6 +243,31 @@ func ExtraLanguages(f *store.File, cfg config.Config, origLangName, instanceName
 	}
 	res := langprune.Select(f.Audio, f.Subs, langprune.NameToCode(origLangName), f.Duration, p)
 	return len(res.DropAudio) > 0 || len(res.DropSubs) > 0, res.SavedBytes
+}
+
+// MissingSubs lists the subtitle languages in f's effective SubsKeep
+// list (with scoping; the per-file pruning exemption doesn't turn
+// this off) with no embedded track and no sidecar file. No list means
+// the check is off.
+func MissingSubs(f *store.File, cfg config.Config, instanceName string) []string {
+	p := cfg.EffectiveLangPolicy(f.Library, instanceName, false)
+	if len(p.SubsKeep) == 0 {
+		return nil
+	}
+	have := map[string]bool{}
+	for _, s := range f.Subs {
+		have[langprune.Normalize(s.Lang)] = true
+	}
+	for _, s := range f.Sidecars {
+		have[langprune.Normalize(s.Lang)] = true
+	}
+	var out []string
+	for _, l := range p.SubsKeep {
+		if n := langprune.Normalize(l); n != "" && !have[n] {
+			out = append(out, l)
+		}
+	}
+	return out
 }
 
 // HasQuick reports whether any of a file's issues has a quick fix.

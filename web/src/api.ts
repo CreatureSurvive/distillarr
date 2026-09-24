@@ -616,6 +616,11 @@ export type Config = {
   plex_token?: string;
   plex_token_set?: boolean;
   plex_path_map: string;
+  // optional Bazarr connection; the key is write-only like plex_token.
+  bazarr_url?: string;
+  bazarr_key?: string;
+  bazarr_key_set?: boolean;
+  bazarr_path_map?: string;
   plex_keep_added_at: boolean;
   defer_while_transcoding: boolean;
   hold_replace_while_playing: boolean;
@@ -728,6 +733,15 @@ export type PlexTest = {
   server_name?: string;
   version?: string;
   libraries?: { name: string; type: string; location: string; mapped: string; reachable: boolean }[];
+};
+
+export type BazarrTest = {
+  ok: boolean;
+  error?: string;
+  version?: string;
+  sonarr_version?: string;
+  radarr_version?: string;
+  paths?: { title: string; path: string; mapped: string; reachable: boolean }[];
 };
 
 export type TrashItem = {
@@ -929,6 +943,8 @@ export const api = {
   plexStatus: () => req<PlexStatus>("/api/v1/plex/status"),
   plexTest: (body: { url?: string; token?: string; path_map?: string }) => post<PlexTest>("/api/v1/plex/test", body),
   plexSync: () => post<{ started: boolean }>("/api/v1/plex/sync"),
+  bazarrTest: (body: { url?: string; key?: string; path_map?: string }) => post<BazarrTest>("/api/v1/bazarr/test", body),
+  bazarrSearch: (id: number) => post<{ ok: boolean }>(`/api/v1/files/${id}/bazarr-search`),
 
   // id is the stored instance's id, or "new" for one not yet saved.
   arrTest: (id: string, body: { url?: string; api_key?: string; kind?: string; path_map?: string }) =>

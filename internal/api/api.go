@@ -167,6 +167,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/v1/plex/status", s.plexStatus)
 	mux.HandleFunc("POST /api/v1/plex/test", s.plexTest)
 	mux.HandleFunc("POST /api/v1/plex/sync", s.plexSync)
+	mux.HandleFunc("POST /api/v1/bazarr/test", s.bazarrTest)
+	mux.HandleFunc("POST /api/v1/files/{id}/bazarr-search", s.bazarrSearch)
 
 	// sonarr / radarr
 	mux.HandleFunc("GET /api/v1/arr/{id}", s.arrGet)
@@ -267,6 +269,7 @@ type configOut struct {
 	config.Config
 	JellyfinKeySet bool             `json:"jellyfin_key_set"`
 	PlexTokenSet   bool             `json:"plex_token_set"`
+	BazarrKeySet   bool             `json:"bazarr_key_set"`
 	ArrInstances   []arrInstanceOut `json:"arr_instances"`
 }
 
@@ -276,11 +279,13 @@ func (s *Server) getConfig(w http.ResponseWriter, r *http.Request) {
 	c.JellyfinAPIKey = ""
 	plexTokSet := c.PlexToken != ""
 	c.PlexToken = ""
+	bazarrKeySet := c.BazarrKey != ""
+	c.BazarrKey = ""
 	arrOuts := make([]arrInstanceOut, len(c.ArrInstances))
 	for i, inst := range c.ArrInstances {
 		arrOuts[i] = arrOut(inst)
 	}
-	writeJSON(w, http.StatusOK, configOut{Config: c, JellyfinKeySet: keySet, PlexTokenSet: plexTokSet, ArrInstances: arrOuts})
+	writeJSON(w, http.StatusOK, configOut{Config: c, JellyfinKeySet: keySet, PlexTokenSet: plexTokSet, BazarrKeySet: bazarrKeySet, ArrInstances: arrOuts})
 }
 
 // putConfig merges a partial JSON object into the config: only the
@@ -307,6 +312,14 @@ func (s *Server) putConfig(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	delete(patch, "plex_token_set")
+	if k, ok := patch["bazarr_key"]; ok {
+		var key string
+		_ = json.Unmarshal(k, &key)
+		if strings.TrimSpace(key) == "" {
+			delete(patch, "bazarr_key") // blank never erases a saved key
+		}
+	}
+	delete(patch, "bazarr_key_set")
 	var perr error
 	err := s.cfg.Update(func(cur *config.Config) {
 		if raw, ok := patch["arr_instances"]; ok {

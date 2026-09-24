@@ -392,11 +392,15 @@ type FileStat struct {
 	Size    int64
 	MtimeNS int64
 	Nlink   int
+	// Sidecars is the stored sidecars_json, so a scan can refresh it for
+	// files it otherwise skips (Bazarr adding a subtitle doesn't touch
+	// the video's size or mtime).
+	Sidecars string
 }
 
 // ListFileStat loads path/size/mtime/nlink for one library.
 func (s *Store) ListFileStat(library string) ([]FileStat, error) {
-	rows, err := s.dbR.Query(`SELECT path, size, mtime_ns, nlink FROM files WHERE library=? AND missing=0`, library)
+	rows, err := s.dbR.Query(`SELECT path, size, mtime_ns, nlink, COALESCE(sidecars_json,'') FROM files WHERE library=? AND missing=0`, library)
 	if err != nil {
 		return nil, err
 	}
@@ -404,7 +408,7 @@ func (s *Store) ListFileStat(library string) ([]FileStat, error) {
 	out := []FileStat{}
 	for rows.Next() {
 		var f FileStat
-		if err := rows.Scan(&f.Path, &f.Size, &f.MtimeNS, &f.Nlink); err != nil {
+		if err := rows.Scan(&f.Path, &f.Size, &f.MtimeNS, &f.Nlink, &f.Sidecars); err != nil {
 			return nil, err
 		}
 		out = append(out, f)
@@ -433,6 +437,30 @@ func (s *Store) UpdateNlinks(updates map[string]int) error {
 	defer stmt.Close()
 	for path, n := range updates {
 		if _, err := stmt.Exec(nlinkOrDefault(n), path); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
+// UpdateSidecars batches sidecars_json updates (path -> JSON) for files
+// whose subtitle sidecars changed while the video itself didn't.
+func (s *Store) UpdateSidecars(updates map[string]string) error {
+	if len(updates) == 0 {
+		return nil
+	}
+	tx, err := s.dbW.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	stmt, err := tx.Prepare(`UPDATE files SET sidecars_json=? WHERE path=?`)
+	if err != nil {
+		return err
+	}
+	defer stmt.Close()
+	for path, js := range updates {
+		if _, err := stmt.Exec(js, path); err != nil {
 			return err
 		}
 	}

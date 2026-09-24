@@ -151,6 +151,20 @@ export default function FileDetail({ live }: { live: LiveState }) {
           {(file.issues || "").replace(/,/g, "") !== "" && (
             <div className="hero-issues">
               <IssueChips f={file} />
+              {(file.issues || "").includes(",missing_subs,") && file.arr && (
+                <button className="btn mini" disabled={busy !== ""} title="Ask Bazarr to search for missing subtitles on this series/movie"
+                  onClick={async () => {
+                    setBusy("bazarr");
+                    try {
+                      await api.bazarrSearch(file.id);
+                      toast("Bazarr is searching. New subtitles show up after the next scan.");
+                    } catch (e: any) {
+                      toast(e.message, "err");
+                    } finally {
+                      setBusy("");
+                    }
+                  }}>Search in Bazarr</button>
+              )}
               {hasQuickFix(file) && !file.queued && (
                 <button className="btn mini" disabled={busy !== ""} title="Remux with the video copied bit-exact: fixes hvc1 tagging, faststart, PCM audio and legacy containers in minutes"
                   onClick={async () => {

@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactNode } from "react";
-import { api, subscribe, type ArrInfo, type ArrInstance, type ArrTestResult, type AudioRule, type AutopilotPreviewGroup, type AutoRule, type Config, type HwInfo, type JfStatus, type JfTest, type LangOverride, type LangpruneReport, type LangPolicy, type PlexStatus, type PlexTest, type RuleAction, type RuleMatch, type TrashItem } from "../api";
+import { api, subscribe, type ArrInfo, type ArrInstance, type ArrTestResult, type AudioRule, type AutopilotPreviewGroup, type AutoRule, type BazarrTest, type Config, type HwInfo, type JfStatus, type JfTest, type LangOverride, type LangpruneReport, type LangPolicy, type PlexStatus, type PlexTest, type RuleAction, type RuleMatch, type TrashItem } from "../api";
 import { Copyable, ISSUE_SHORT, Seg, Toggle, toast } from "../components";
 import { ago, backendLabel, bytes, codecLabel } from "../format";
 import { LANGUAGES, langName } from "../langs";
@@ -62,6 +62,8 @@ export default function SettingsView({ live, onJellyfin, onPlex }: { live: LiveS
       <PlexSection cfg={cfg} setCfg={setCfg} live={live} onPlex={onPlex} />
 
       <ArrSection cfg={cfg} setCfg={setCfg} />
+
+      <BazarrSection cfg={cfg} setCfg={setCfg} />
 
       <AutopilotSection cfg={cfg} setCfg={setCfg} />
 
@@ -409,6 +411,96 @@ function PlexSection({ cfg, setCfg, live, onPlex }: { cfg: Config; setCfg: (c: C
       <div className="dim small" style={{ marginTop: 10 }}>
         {sync || (status?.cached ? `${status.cached.toLocaleString()} items cached · last sync ${ago(status.last_sync)}` : "Nothing synced yet.")}
       </div>
+    </section>
+  );
+}
+
+// Bazarr stays the subtitle source: this only lets Distillarr ask
+// it to rescan after a replace and to search for missing subtitles.
+function BazarrSection({ cfg, setCfg }: { cfg: Config; setCfg: (c: Config) => void }) {
+  const [url, setUrl] = useState(cfg.bazarr_url || "");
+  const [key, setKey] = useState("");
+  const [pathMap, setPathMap] = useState(cfg.bazarr_path_map || "");
+  const [test, setTest] = useState<BazarrTest | null>(null);
+  const [testing, setTesting] = useState(false);
+
+  const runTest = async () => {
+    setTesting(true);
+    setTest(null);
+    try {
+      setTest(await api.bazarrTest({ url, key, path_map: pathMap }));
+    } catch (e: any) {
+      setTest({ ok: false, error: e.message });
+    } finally {
+      setTesting(false);
+    }
+  };
+
+  const saveBazarr = async () => {
+    try {
+      setCfg(await api.saveConfig({ bazarr_url: url, bazarr_key: key || undefined, bazarr_path_map: pathMap }));
+      setKey("");
+      toast("Bazarr settings saved");
+    } catch (e: any) {
+      toast(e.message, "err");
+    }
+  };
+
+  const configured = !!cfg.bazarr_url && !!cfg.bazarr_key_set;
+  return (
+    <section className="panel" id="s-bazarr">
+      <div className="panel-head">
+        <h2 className="panel-title">Bazarr</h2>
+        <span className={`pill pill-${configured ? "ok" : "off"}`}><span className="dot" aria-hidden />{configured ? "Configured" : "Not connected"}</span>
+      </div>
+      <p className="dim small">
+        Optional. Bazarr keeps finding subtitles; Distillarr asks it to rescan a series or movie after a file is replaced,
+        and adds a <b>Search in Bazarr</b> button to files with the “missing subtitles” issue (languages from the
+        subtitle keep list under Languages). Items are matched by their Sonarr/Radarr ids.
+      </p>
+      <div className="form-grid">
+        <label className="field"><span>URL</span>
+          <input className="input" value={url} onChange={(e) => setUrl(e.target.value)} placeholder="http://bazarr:6767" spellCheck={false} />
+        </label>
+        <label className="field"><span>API key {cfg.bazarr_key_set && <span className="teal">· saved</span>}</span>
+          <input className="input" type="password" value={key} onChange={(e) => setKey(e.target.value)}
+            placeholder={cfg.bazarr_key_set ? "Leave blank to keep the saved key" : "Settings > General > Security"} autoComplete="off" />
+        </label>
+        <label className="field"><span>Path mapping <span className="dim">(Bazarr=here)</span></span>
+          <input className="input mono" value={pathMap} onChange={(e) => setPathMap(e.target.value)} placeholder="/data=/srv/media" spellCheck={false} />
+        </label>
+      </div>
+      <div className="toolbar">
+        <button className="btn" onClick={runTest} disabled={testing}>{testing ? "Testing…" : "Test connection"}</button>
+        <button className="btn btn-primary" onClick={saveBazarr}>Save</button>
+      </div>
+      {test && (
+        <div className={`test-result ${test.ok ? "ok" : "bad"}`}>
+          {test.ok ? (
+            <>
+              <div><b>Connected</b> to Bazarr {test.version}
+                {test.sonarr_version && <> · Sonarr {test.sonarr_version}</>}
+                {test.radarr_version && <> · Radarr {test.radarr_version}</>}.</div>
+              {test.paths && test.paths.length > 0 && (
+                <ul className="lib-check">
+                  {test.paths.map((p) => (
+                    <li key={p.path}>
+                      <span className={p.reachable ? "teal" : "warm"}>{p.reachable ? "✓" : "✗"}</span>
+                      <span>{p.title}</span>
+                      <span className="mono dim small">{p.path} → {p.mapped}</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+              {test.paths?.some((p) => !p.reachable) && (
+                <div className="dim small">Paths marked ✗ aren't visible here. Adjust the path mapping, then test again.</div>
+              )}
+            </>
+          ) : (
+            <div><b>Not connected.</b> {test.error}</div>
+          )}
+        </div>
+      )}
     </section>
   );
 }

@@ -2,6 +2,7 @@ package scan
 
 import (
 	"context"
+	"encoding/json"
 	"log"
 	"os"
 	"path/filepath"
@@ -147,15 +148,19 @@ func (s *Scanner) walkLibrary(lib config.Library, seen map[string]bool,
 	s.report(func(st *Stats) { st.Phase = "walking"; st.Library = lib.Name })
 
 	// existing size+mtime+nlink for change detection
-	type finfo struct{ size, mtime int64; nlink int }
+	type finfo struct{ size, mtime int64; nlink int; sidecars string }
 	existing := map[string]finfo{}
 	rows, err := s.st.ListFileStat(lib.Name)
 	if err != nil {
 		return err
 	}
 	for _, r := range rows {
-		existing[r.Path] = finfo{r.Size, r.MtimeNS, r.Nlink}
+		existing[r.Path] = finfo{r.Size, r.MtimeNS, r.Nlink, r.Sidecars}
 	}
+	// Subtitle files seen per directory, and the unchanged videos whose
+	// stored sidecar list is re-derived from them after the walk.
+	subsByDir := map[string][]string{}
+	var unchanged []string
 
 	// nlink can change (a torrent client adding or removing a hardlink)
 	// without size or mtime changing, so it's checked here even for
@@ -179,11 +184,17 @@ func (s *Scanner) walkLibrary(lib config.Library, seen map[string]bool,
 		if SkipFile(name, ext) {
 			return nil
 		}
+		if IsSubFile(name) {
+			dir := filepath.Dir(path)
+			subsByDir[dir] = append(subsByDir[dir], name)
+			return nil
+		}
 		if IsVideoFile(name) {
 			if fi, err := d.Info(); err == nil {
 				mt := fi.ModTime().UnixNano()
 				if ex, ok := existing[path]; ok && ex.size == fi.Size() && ex.mtime == mt {
 					seen[path] = true
+					unchanged = append(unchanged, path)
 					s.report(func(st *Stats) { st.Seen++ })
 					if nlink := nlinkOf(fi); nlink != ex.nlink {
 						nlinkUpdates[path] = nlink
@@ -200,6 +211,19 @@ func (s *Scanner) walkLibrary(lib config.Library, seen map[string]bool,
 
 	if err := s.st.UpdateNlinks(nlinkUpdates); err != nil {
 		return err
+	}
+	sidecarUpdates := map[string]string{}
+	for _, p := range unchanged {
+		js, _ := json.Marshal(sidecarsFrom(p, subsByDir[filepath.Dir(p)]))
+		if string(js) != existing[p].sidecars {
+			sidecarUpdates[p] = string(js)
+		}
+	}
+	if err := s.st.UpdateSidecars(sidecarUpdates); err != nil {
+		return err
+	}
+	if len(sidecarUpdates) > 0 {
+		s.RefreshRecsSoon() // missing_subs depends on sidecars
 	}
 
 	// Probed files are also "seen".
@@ -367,18 +391,25 @@ func buildStreams(fileID int64, p *media.Probe) []store.Stream {
 
 // findSidecars lists external subtitle files matching the media stem.
 func findSidecars(path string) []store.Sidecar {
-	dir := filepath.Dir(path)
-	stem := strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
-	entries, err := os.ReadDir(dir)
+	entries, err := os.ReadDir(filepath.Dir(path))
 	if err != nil {
 		return nil
 	}
-	out := []store.Sidecar{}
+	var names []string
 	for _, e := range entries {
-		name := e.Name()
-		if e.IsDir() || !IsSubFile(name) {
-			continue
+		if !e.IsDir() && IsSubFile(e.Name()) {
+			names = append(names, e.Name())
 		}
+	}
+	return sidecarsFrom(path, names)
+}
+
+// sidecarsFrom picks the subtitle file names (from path's directory)
+// that belong to path's stem.
+func sidecarsFrom(path string, names []string) []store.Sidecar {
+	stem := strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
+	out := []store.Sidecar{}
+	for _, name := range names {
 		s := strings.TrimSuffix(name, filepath.Ext(name))
 		if s != stem && !strings.HasPrefix(s, stem+".") {
 			continue

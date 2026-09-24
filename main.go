@@ -154,6 +154,7 @@ func main() {
 	// episode finishes settles, not one per episode; Radarr/movies
 	// always rescan immediately.
 	eng.OnFinished(srv.ArrRescanSubscriber())
+	eng.OnFinished(srv.BazarrRescanSubscriber())
 
 	// Sonarr/Radarr write-back: tag and/or unmonitor after a re-encode
 	// Both are off by default per instance, so this is a no-op
