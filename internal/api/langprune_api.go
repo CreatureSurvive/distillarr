@@ -1,10 +1,13 @@
 package api
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 
+	"mediatrans/internal/issues"
 	"mediatrans/internal/langprune"
+	"mediatrans/internal/recs"
 	"mediatrans/internal/store"
 )
 
@@ -132,4 +135,88 @@ func (s *Server) langpruneReportHandler(w http.ResponseWriter, r *http.Request) 
 		rows = append(rows, *r)
 	}
 	writeJSON(w, http.StatusOK, langpruneReport{Files: files, SavedBytes: savedBytes, ByLanguage: rows})
+}
+
+// POST /api/v1/langprune/apply {confirm} — queue video-copy quick-fix
+// jobs for every file whose only outstanding change right now is
+// language pruning under the effective (apply-mode) policy. A
+// file already queued, already recommended for a real re-encode, or
+// carrying another quick-fixable issue is left alone: that job (queued
+// manually, by autopilot, or by its own issue's fix) already folds
+// pruning in via recs.Recommend/applyLangPrune — this only picks up
+// files nothing else would ever touch. Requires confirm=true, matching
+// the plan's "applying needs explicit confirmation" — dropped tracks
+// only survive in the trash copy until the retention period ends.
+func (s *Server) langpruneApplyHandler(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Confirm bool `json:"confirm"`
+	}
+	if err := readJSON(r, &req); err != nil {
+		fail(w, 400, err)
+		return
+	}
+	if !req.Confirm {
+		fail(w, 400, fmt.Errorf("confirm is required"))
+		return
+	}
+	cfg := s.cfg.Get()
+	origLangs, err := s.st.ArrOriginalLanguages()
+	if err != nil {
+		fail(w, 500, err)
+		return
+	}
+	instanceIDs, err := s.st.ArrInstanceIDs()
+	if err != nil {
+		fail(w, 500, err)
+		return
+	}
+	instanceNames := map[int64]string{}
+	for fileID, id := range instanceIDs {
+		for _, x := range cfg.ArrInstances {
+			if x.ID == id {
+				instanceNames[fileID] = x.Name
+				break
+			}
+		}
+	}
+
+	queued, skipped := 0, 0
+	_ = s.st.EachFile(func(f *store.File) error {
+		if f.Missing {
+			return nil
+		}
+		audio, subs := langprune.Drops(f, cfg, instanceNames[f.ID], origLangs[f.ID])
+		if len(audio) == 0 && len(subs) == 0 {
+			return nil // nothing to prune, or report/off mode, or exempt
+		}
+		if issues.HasQuick(issues.Decode(f.Issues)) {
+			return nil // its own quick fix already folds pruning in
+		}
+		var rec recs.Recommendation
+		if f.RecJSON != "" {
+			_ = json.Unmarshal([]byte(f.RecJSON), &rec)
+		}
+		if rec.Action == "transcode" {
+			return nil // its re-encode already folds pruning in
+		}
+		if ok, _ := s.st.HasQueuedForFile(f.Path); ok {
+			skipped++
+			return nil
+		}
+		if f.Nlink > 1 {
+			skipped++ // needs explicit hardlink confirmation; a bulk apply skips rather than assumes
+			return nil
+		}
+		st := issues.QuickFix(f, cfg)
+		st.Audio = append(st.Audio, audio...)
+		st.Subs = append(st.Subs, subs...)
+		if _, err := s.enqueue(f, st, false, "issue-fix", "Language pruning"); err != nil {
+			skipped++
+			return nil
+		}
+		queued++
+		return nil
+	})
+	s.eng.Kick()
+	writeJSON(w, http.StatusOK, map[string]any{"queued": queued, "skipped": skipped})
 }

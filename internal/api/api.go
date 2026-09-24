@@ -104,6 +104,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/v1/files/{id}/fix", s.fixFile)
 	mux.HandleFunc("POST /api/v1/files/{id}/lang-exempt", s.setLangExempt)
 	mux.HandleFunc("GET /api/v1/langprune/report", s.langpruneReportHandler)
+	mux.HandleFunc("POST /api/v1/langprune/apply", s.langpruneApplyHandler)
 	mux.HandleFunc("GET /api/v1/issues", s.issueSummary)
 	mux.HandleFunc("GET /api/v1/stats", func(w http.ResponseWriter, r *http.Request) {
 		h, err := s.st.HistoryStats()

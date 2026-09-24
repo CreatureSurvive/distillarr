@@ -74,6 +74,50 @@ func TestLangpruneReport(t *testing.T) {
 	_ = f1
 }
 
+func TestLangpruneApplyQueuesQuickFixOnly(t *testing.T) {
+	s := newTestServer(t)
+	if err := s.cfg.Update(func(c *config.Config) {
+		*c = config.Default()
+		c.LangPolicy = config.LangPolicy{AudioMode: "apply", AudioKeep: []string{"eng"}}
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Requires confirm=true.
+	rec := doJSON(t, s, "POST", "/api/v1/langprune/apply", map[string]any{})
+	if rec.Code != 400 {
+		t.Fatalf("without confirm: status = %d, want 400", rec.Code)
+	}
+
+	onlyPrune := mustUpsert(t, s.st, &store.File{Path: "/m/a.mkv", Library: "movies", Title: "A",
+		VideoCodec: "hevc", Container: "mkv", Width: 1920, Height: 1080, Duration: 100,
+		Audio: []store.AudioStream{{Index: 0, Codec: "aac", Lang: "eng"}, {Index: 1, Codec: "aac", Lang: "jpn"}}})
+	nothingToDo := mustUpsert(t, s.st, &store.File{Path: "/m/b.mkv", Library: "movies", Title: "B",
+		VideoCodec: "hevc", Container: "mkv", Width: 1920, Height: 1080, Duration: 100,
+		Audio: []store.AudioStream{{Index: 0, Codec: "aac", Lang: "eng"}}})
+
+	rec = doJSON(t, s, "POST", "/api/v1/langprune/apply", map[string]any{"confirm": true})
+	if rec.Code != 200 {
+		t.Fatalf("status = %d, body=%s", rec.Code, rec.Body.String())
+	}
+	var out struct {
+		Queued  int `json:"queued"`
+		Skipped int `json:"skipped"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+		t.Fatal(err)
+	}
+	if out.Queued != 1 {
+		t.Fatalf("queued = %d, want 1 (only a.mkv has a droppable track)", out.Queued)
+	}
+	if queued, _ := s.st.HasQueuedForFile(onlyPrune.Path); !queued {
+		t.Error("a.mkv should have a queued job")
+	}
+	if queued, _ := s.st.HasQueuedForFile(nothingToDo.Path); queued {
+		t.Error("b.mkv has nothing to prune and should not be queued")
+	}
+}
+
 func TestLangpruneReportEmptyKeepListDropsNothing(t *testing.T) {
 	s := newTestServer(t)
 	mustUpsert(t, s.st, &store.File{Path: "/m/a.mkv", Library: "movies", Title: "A", Duration: 100,
