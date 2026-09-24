@@ -3,9 +3,9 @@ package recs
 import (
 	"testing"
 
-	"mediatrans/internal/config"
-	"mediatrans/internal/encode"
-	"mediatrans/internal/store"
+	"github.com/CreatureSurvive/distillarr/internal/config"
+	"github.com/CreatureSurvive/distillarr/internal/encode"
+	"github.com/CreatureSurvive/distillarr/internal/store"
 )
 
 func file(h int, br int64, codec string, year int) *store.File {

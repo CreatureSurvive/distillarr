@@ -4,9 +4,9 @@ import (
 	"testing"
 	"time"
 
-	"mediatrans/internal/config"
-	"mediatrans/internal/recs"
-	"mediatrans/internal/store"
+	"github.com/CreatureSurvive/distillarr/internal/config"
+	"github.com/CreatureSurvive/distillarr/internal/recs"
+	"github.com/CreatureSurvive/distillarr/internal/store"
 )
 
 func baseFile() *store.File {

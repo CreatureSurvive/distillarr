@@ -5,10 +5,10 @@ import (
 	"fmt"
 	"net/http"
 
-	"mediatrans/internal/issues"
-	"mediatrans/internal/langprune"
-	"mediatrans/internal/recs"
-	"mediatrans/internal/store"
+	"github.com/CreatureSurvive/distillarr/internal/issues"
+	"github.com/CreatureSurvive/distillarr/internal/langprune"
+	"github.com/CreatureSurvive/distillarr/internal/recs"
+	"github.com/CreatureSurvive/distillarr/internal/store"
 )
 
 // POST /api/v1/files/{id}/lang-exempt {exempt} — opt one file in/out of

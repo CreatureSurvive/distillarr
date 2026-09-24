@@ -1,4 +1,4 @@
-module mediatrans
+module github.com/CreatureSurvive/distillarr
 
 go 1.25.0
 

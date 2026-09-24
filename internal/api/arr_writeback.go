@@ -8,8 +8,8 @@ import (
 	"strings"
 	"time"
 
-	"mediatrans/internal/arr"
-	"mediatrans/internal/jobs"
+	"github.com/CreatureSurvive/distillarr/internal/arr"
+	"github.com/CreatureSurvive/distillarr/internal/jobs"
 )
 
 // ArrWriteBackSubscriber returns a jobs.OnFinished subscriber for // optional write-back: on a successful encode/remux/upscale-replace,

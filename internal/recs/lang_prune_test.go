@@ -3,8 +3,8 @@ package recs
 import (
 	"testing"
 
-	"mediatrans/internal/config"
-	"mediatrans/internal/store"
+	"github.com/CreatureSurvive/distillarr/internal/config"
+	"github.com/CreatureSurvive/distillarr/internal/store"
 )
 
 // withOriginalLanguage overrides the OriginalLanguage hook for one test.

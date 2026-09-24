@@ -1,9 +1,9 @@
 package langprune
 
 import (
-	"mediatrans/internal/config"
-	"mediatrans/internal/encode"
-	"mediatrans/internal/store"
+	"github.com/CreatureSurvive/distillarr/internal/config"
+	"github.com/CreatureSurvive/distillarr/internal/encode"
+	"github.com/CreatureSurvive/distillarr/internal/store"
 )
 
 // Drops resolves f's effective LangPolicy (global policy, library/

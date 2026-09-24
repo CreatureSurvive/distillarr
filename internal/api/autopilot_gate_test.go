@@ -6,11 +6,11 @@ import (
 	"testing"
 	"time"
 
-	"mediatrans/internal/arr"
-	"mediatrans/internal/config"
-	"mediatrans/internal/encode"
-	"mediatrans/internal/recs"
-	"mediatrans/internal/store"
+	"github.com/CreatureSurvive/distillarr/internal/arr"
+	"github.com/CreatureSurvive/distillarr/internal/config"
+	"github.com/CreatureSurvive/distillarr/internal/encode"
+	"github.com/CreatureSurvive/distillarr/internal/recs"
+	"github.com/CreatureSurvive/distillarr/internal/store"
 )
 
 // setPenaltyReport stores a codec-penalty report for instance id, the

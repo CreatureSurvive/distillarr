@@ -17,8 +17,8 @@ import (
 	"strings"
 	"sync"
 
-	"mediatrans/internal/encode"
-	"mediatrans/internal/media"
+	"github.com/CreatureSurvive/distillarr/internal/encode"
+	"github.com/CreatureSurvive/distillarr/internal/media"
 )
 
 // Sample placement: three 15 s spans spread through the file.

@@ -4,8 +4,8 @@ import (
 	"os"
 	"testing"
 
-	"mediatrans/internal/encode"
-	"mediatrans/internal/store"
+	"github.com/CreatureSurvive/distillarr/internal/encode"
+	"github.com/CreatureSurvive/distillarr/internal/store"
 )
 
 func testSubs() []store.SubStream {

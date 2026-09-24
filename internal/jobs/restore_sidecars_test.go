@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"mediatrans/internal/store"
+	"github.com/CreatureSurvive/distillarr/internal/store"
 )
 
 // TestRestoreTrashDeletesJobSidecars is restore test: reverting a

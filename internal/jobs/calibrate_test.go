@@ -4,10 +4,10 @@ import (
 	"path/filepath"
 	"testing"
 
-	"mediatrans/internal/config"
-	"mediatrans/internal/scan"
-	"mediatrans/internal/store"
-	"mediatrans/internal/upscale"
+	"github.com/CreatureSurvive/distillarr/internal/config"
+	"github.com/CreatureSurvive/distillarr/internal/scan"
+	"github.com/CreatureSurvive/distillarr/internal/store"
+	"github.com/CreatureSurvive/distillarr/internal/upscale"
 )
 
 func TestUpscaleCalibratedNeedsThreeSamples(t *testing.T) {

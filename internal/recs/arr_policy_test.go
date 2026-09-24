@@ -3,8 +3,8 @@ package recs
 import (
 	"testing"
 
-	"mediatrans/internal/config"
-	"mediatrans/internal/encode"
+	"github.com/CreatureSurvive/distillarr/internal/config"
+	"github.com/CreatureSurvive/distillarr/internal/encode"
 )
 
 // withPolicy overrides the ArrPolicy hook for one test and restores the

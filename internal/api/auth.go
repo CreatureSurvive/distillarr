@@ -11,8 +11,8 @@ import (
 	"sync"
 	"time"
 
-	"mediatrans/internal/config"
-	"mediatrans/internal/store"
+	"github.com/CreatureSurvive/distillarr/internal/config"
+	"github.com/CreatureSurvive/distillarr/internal/store"
 )
 
 // Authentication. One middleware in front of every route decides

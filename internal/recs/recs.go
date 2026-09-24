@@ -11,13 +11,13 @@ import (
 	"strings"
 	"sync"
 
-	"mediatrans/internal/config"
-	"mediatrans/internal/encode"
-	"mediatrans/internal/imagesubs"
-	"mediatrans/internal/langprune"
-	"mediatrans/internal/res"
-	"mediatrans/internal/sidecar"
-	"mediatrans/internal/store"
+	"github.com/CreatureSurvive/distillarr/internal/config"
+	"github.com/CreatureSurvive/distillarr/internal/encode"
+	"github.com/CreatureSurvive/distillarr/internal/imagesubs"
+	"github.com/CreatureSurvive/distillarr/internal/langprune"
+	"github.com/CreatureSurvive/distillarr/internal/res"
+	"github.com/CreatureSurvive/distillarr/internal/sidecar"
+	"github.com/CreatureSurvive/distillarr/internal/store"
 )
 
 // AudioPlan describes what happens to one audio track, for display.

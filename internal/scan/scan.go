@@ -11,11 +11,11 @@ import (
 	"syscall"
 	"time"
 
-	"mediatrans/internal/config"
-	"mediatrans/internal/issues"
-	"mediatrans/internal/media"
-	"mediatrans/internal/recs"
-	"mediatrans/internal/store"
+	"github.com/CreatureSurvive/distillarr/internal/config"
+	"github.com/CreatureSurvive/distillarr/internal/issues"
+	"github.com/CreatureSurvive/distillarr/internal/media"
+	"github.com/CreatureSurvive/distillarr/internal/recs"
+	"github.com/CreatureSurvive/distillarr/internal/store"
 )
 
 // Stats is scan progress, broadcast over SSE while running.

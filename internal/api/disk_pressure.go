@@ -6,8 +6,8 @@ import (
 	"syscall"
 	"time"
 
-	"mediatrans/internal/config"
-	"mediatrans/internal/notify"
+	"github.com/CreatureSurvive/distillarr/internal/config"
+	"github.com/CreatureSurvive/distillarr/internal/notify"
 )
 
 // statFreePct is overridable in tests so a fake filesystem's free-space

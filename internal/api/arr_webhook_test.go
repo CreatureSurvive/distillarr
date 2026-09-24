@@ -7,9 +7,9 @@ import (
 	"testing"
 	"time"
 
-	"mediatrans/internal/config"
-	"mediatrans/internal/encode"
-	"mediatrans/internal/store"
+	"github.com/CreatureSurvive/distillarr/internal/config"
+	"github.com/CreatureSurvive/distillarr/internal/encode"
+	"github.com/CreatureSurvive/distillarr/internal/store"
 )
 
 // Synthetic payloads shaped after the Sonarr wiki's documented examples

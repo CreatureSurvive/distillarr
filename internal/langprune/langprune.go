@@ -1,8 +1,8 @@
 package langprune
 
 import (
-	"mediatrans/internal/config"
-	"mediatrans/internal/store"
+	"github.com/CreatureSurvive/distillarr/internal/config"
+	"github.com/CreatureSurvive/distillarr/internal/store"
 )
 
 // Result is what Select decided for one file's tracks. Keep/Drop hold

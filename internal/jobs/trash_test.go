@@ -5,8 +5,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"mediatrans/internal/config"
-	"mediatrans/internal/replace"
+	"github.com/CreatureSurvive/distillarr/internal/config"
+	"github.com/CreatureSurvive/distillarr/internal/replace"
 )
 
 func TestTrashDirFor(t *testing.T) {

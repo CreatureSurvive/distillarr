@@ -6,8 +6,8 @@ import (
 	"sync"
 	"testing"
 
-	"mediatrans/internal/config"
-	"mediatrans/internal/store"
+	"github.com/CreatureSurvive/distillarr/internal/config"
+	"github.com/CreatureSurvive/distillarr/internal/store"
 )
 
 // walkLibrary must pick up a hardlink-count change on a file that is

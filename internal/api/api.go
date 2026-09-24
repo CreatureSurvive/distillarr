@@ -13,17 +13,17 @@ import (
 	"syscall"
 	"time"
 
-	"mediatrans/internal/config"
-	"mediatrans/internal/encode"
-	"mediatrans/internal/hwprobe"
-	"mediatrans/internal/jobs"
-	"mediatrans/internal/notify"
-	"mediatrans/internal/media"
-	"mediatrans/internal/preview"
-	"mediatrans/internal/recs"
-	"mediatrans/internal/scan"
-	"mediatrans/internal/still"
-	"mediatrans/internal/store"
+	"github.com/CreatureSurvive/distillarr/internal/config"
+	"github.com/CreatureSurvive/distillarr/internal/encode"
+	"github.com/CreatureSurvive/distillarr/internal/hwprobe"
+	"github.com/CreatureSurvive/distillarr/internal/jobs"
+	"github.com/CreatureSurvive/distillarr/internal/notify"
+	"github.com/CreatureSurvive/distillarr/internal/media"
+	"github.com/CreatureSurvive/distillarr/internal/preview"
+	"github.com/CreatureSurvive/distillarr/internal/recs"
+	"github.com/CreatureSurvive/distillarr/internal/scan"
+	"github.com/CreatureSurvive/distillarr/internal/still"
+	"github.com/CreatureSurvive/distillarr/internal/store"
 )
 
 // Server wires every subsystem into HTTP routes.

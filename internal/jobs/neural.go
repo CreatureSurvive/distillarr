@@ -11,11 +11,11 @@ import (
 	"strings"
 	"time"
 
-	"mediatrans/internal/encode"
-	"mediatrans/internal/media"
-	"mediatrans/internal/neural"
-	"mediatrans/internal/store"
-	"mediatrans/internal/upscale"
+	"github.com/CreatureSurvive/distillarr/internal/encode"
+	"github.com/CreatureSurvive/distillarr/internal/media"
+	"github.com/CreatureSurvive/distillarr/internal/neural"
+	"github.com/CreatureSurvive/distillarr/internal/store"
+	"github.com/CreatureSurvive/distillarr/internal/upscale"
 )
 
 // NeuralRoot holds each neural job's chunks between runs. It sits on the config

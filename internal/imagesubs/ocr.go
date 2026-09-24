@@ -14,7 +14,7 @@ import (
 	"strings"
 	"time"
 
-	"mediatrans/internal/store"
+	"github.com/CreatureSurvive/distillarr/internal/store"
 )
 
 // PgsRip is the CLI binary name (installed via pip in the Docker image).

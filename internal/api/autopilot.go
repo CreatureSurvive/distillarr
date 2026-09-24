@@ -6,11 +6,11 @@ import (
 	"sort"
 	"time"
 
-	"mediatrans/internal/autopilot"
-	"mediatrans/internal/encode"
-	"mediatrans/internal/issues"
-	"mediatrans/internal/recs"
-	"mediatrans/internal/store"
+	"github.com/CreatureSurvive/distillarr/internal/autopilot"
+	"github.com/CreatureSurvive/distillarr/internal/encode"
+	"github.com/CreatureSurvive/distillarr/internal/issues"
+	"github.com/CreatureSurvive/distillarr/internal/recs"
+	"github.com/CreatureSurvive/distillarr/internal/store"
 )
 
 const autopilotPreviewSampleSize = 8

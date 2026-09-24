@@ -4,8 +4,8 @@ import (
 	"encoding/json"
 	"testing"
 
-	"mediatrans/internal/imagesubs"
-	"mediatrans/internal/store"
+	"github.com/CreatureSurvive/distillarr/internal/imagesubs"
+	"github.com/CreatureSurvive/distillarr/internal/store"
 )
 
 func TestSetImageSubsMode(t *testing.T) {

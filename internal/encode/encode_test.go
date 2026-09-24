@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"mediatrans/internal/media"
+	"github.com/CreatureSurvive/distillarr/internal/media"
 )
 
 func probe(file, vcodec, pix, trc string, audio []string, subs []string) *media.Probe {

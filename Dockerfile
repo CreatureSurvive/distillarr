@@ -59,7 +59,7 @@ COPY main.go .
 COPY internal/ ./internal/
 COPY --from=web /web/dist ./web/dist/
 RUN CGO_ENABLED=0 GOFLAGS=-trimpath \
-    go build -ldflags="-s -w" -o /out/mediatrans .
+    go build -ldflags="-s -w" -o /out/distillarr .
 
 # ---- Stage 3: runtime ----
 FROM ubuntu:24.04
@@ -139,7 +139,7 @@ ENV LIBVA_DRIVERS_PATH="/usr/lib/x86_64-linux-gnu/dri" \
 # or keeps using an existing mediatrans.db (upgrades). Don't reintroduce
 # a hardcoded MEDIIATRANS_DB/DISTILLARR_DB default here.
 
-COPY --from=build /out/mediatrans /usr/local/bin/mediatrans
+COPY --from=build /out/distillarr /usr/local/bin/distillarr
 COPY --from=vmaf /ffmpeg-vmaf /usr/local/bin/ffmpeg-vmaf
 COPY --from=ncnn /opt/realesrgan /opt/realesrgan
 
@@ -149,4 +149,4 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=15s --retries=3 \
     CMD curl -fsS http://127.0.0.1:8080/api/v1/health || exit 1
 
 ENTRYPOINT ["/usr/bin/tini", "--"]
-CMD ["/usr/local/bin/mediatrans"]
+CMD ["/usr/local/bin/distillarr"]

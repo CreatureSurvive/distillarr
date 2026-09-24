@@ -3,9 +3,9 @@ package recs
 import (
 	"encoding/json"
 
-	"mediatrans/internal/encode"
-	"mediatrans/internal/media"
-	"mediatrans/internal/store"
+	"github.com/CreatureSurvive/distillarr/internal/encode"
+	"github.com/CreatureSurvive/distillarr/internal/media"
+	"github.com/CreatureSurvive/distillarr/internal/store"
 )
 
 // TuneRecord is a file's last VMAF quality search, stored in

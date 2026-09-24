@@ -16,12 +16,12 @@ import (
 	"fmt"
 	"time"
 
-	"mediatrans/internal/config"
-	"mediatrans/internal/encode"
-	"mediatrans/internal/issues"
-	"mediatrans/internal/recs"
-	"mediatrans/internal/res"
-	"mediatrans/internal/store"
+	"github.com/CreatureSurvive/distillarr/internal/config"
+	"github.com/CreatureSurvive/distillarr/internal/encode"
+	"github.com/CreatureSurvive/distillarr/internal/issues"
+	"github.com/CreatureSurvive/distillarr/internal/recs"
+	"github.com/CreatureSurvive/distillarr/internal/res"
+	"github.com/CreatureSurvive/distillarr/internal/store"
 )
 
 // Context carries the two pieces of per-evaluation information that

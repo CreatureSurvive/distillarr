@@ -4,10 +4,10 @@ import (
 	"fmt"
 	"net/http"
 
-	"mediatrans/internal/config"
-	"mediatrans/internal/encode"
-	"mediatrans/internal/sidecar"
-	"mediatrans/internal/store"
+	"github.com/CreatureSurvive/distillarr/internal/config"
+	"github.com/CreatureSurvive/distillarr/internal/encode"
+	"github.com/CreatureSurvive/distillarr/internal/sidecar"
+	"github.com/CreatureSurvive/distillarr/internal/store"
 )
 
 // POST /api/v1/files/{id}/sidecar-mode {mode} — per-file override of

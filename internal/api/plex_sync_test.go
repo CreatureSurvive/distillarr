@@ -6,9 +6,9 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"mediatrans/internal/config"
-	"mediatrans/internal/plex"
-	"mediatrans/internal/store"
+	"github.com/CreatureSurvive/distillarr/internal/config"
+	"github.com/CreatureSurvive/distillarr/internal/plex"
+	"github.com/CreatureSurvive/distillarr/internal/store"
 )
 
 // fakePlex serves one movie section (single Part) and one show section

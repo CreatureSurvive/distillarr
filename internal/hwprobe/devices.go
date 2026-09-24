@@ -6,7 +6,7 @@ import (
 	"regexp"
 	"strings"
 
-	"mediatrans/internal/encode"
+	"github.com/CreatureSurvive/distillarr/internal/encode"
 )
 
 // Device names an encoder device for display: a render node, the NVIDIA GPU

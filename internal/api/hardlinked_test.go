@@ -7,7 +7,7 @@ import (
 	"strconv"
 	"testing"
 
-	"mediatrans/internal/store"
+	"github.com/CreatureSurvive/distillarr/internal/store"
 )
 
 func mustUpsert(t *testing.T, st *store.Store, f *store.File) *store.File {

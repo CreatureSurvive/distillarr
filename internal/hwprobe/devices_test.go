@@ -3,7 +3,7 @@ package hwprobe
 import (
 	"testing"
 
-	"mediatrans/internal/encode"
+	"github.com/CreatureSurvive/distillarr/internal/encode"
 )
 
 func TestCleanName(t *testing.T) {

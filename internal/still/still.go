@@ -19,9 +19,9 @@ import (
 	"strings"
 	"time"
 
-	"mediatrans/internal/encode"
-	"mediatrans/internal/media"
-	"mediatrans/internal/neural"
+	"github.com/CreatureSurvive/distillarr/internal/encode"
+	"github.com/CreatureSurvive/distillarr/internal/media"
+	"github.com/CreatureSurvive/distillarr/internal/neural"
 )
 
 const (

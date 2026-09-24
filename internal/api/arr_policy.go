@@ -1,9 +1,9 @@
 package api
 
 import (
-	"mediatrans/internal/config"
-	"mediatrans/internal/recs"
-	"mediatrans/internal/store"
+	"github.com/CreatureSurvive/distillarr/internal/config"
+	"github.com/CreatureSurvive/distillarr/internal/recs"
+	"github.com/CreatureSurvive/distillarr/internal/store"
 )
 
 // ArrPolicyFor builds the recs.ArrPolicy hook (wired from main.go

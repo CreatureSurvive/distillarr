@@ -5,11 +5,11 @@ import (
 	"testing"
 	"time"
 
-	"mediatrans/internal/autopilot"
-	"mediatrans/internal/config"
-	"mediatrans/internal/encode"
-	"mediatrans/internal/recs"
-	"mediatrans/internal/store"
+	"github.com/CreatureSurvive/distillarr/internal/autopilot"
+	"github.com/CreatureSurvive/distillarr/internal/config"
+	"github.com/CreatureSurvive/distillarr/internal/encode"
+	"github.com/CreatureSurvive/distillarr/internal/recs"
+	"github.com/CreatureSurvive/distillarr/internal/store"
 )
 
 // newIntakeRow creates a real file + intake row in st (the FK on

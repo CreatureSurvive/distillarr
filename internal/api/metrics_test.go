@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"mediatrans/internal/store"
+	"github.com/CreatureSurvive/distillarr/internal/store"
 )
 
 func TestMetrics(t *testing.T) {

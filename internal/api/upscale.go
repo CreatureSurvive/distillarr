@@ -4,15 +4,15 @@ import (
 	"fmt"
 	"net/http"
 
-	"mediatrans/internal/encode"
-	"mediatrans/internal/hwprobe"
-	"mediatrans/internal/jobs"
-	"mediatrans/internal/media"
-	"mediatrans/internal/recs"
-	"mediatrans/internal/res"
-	"mediatrans/internal/still"
-	"mediatrans/internal/store"
-	"mediatrans/internal/upscale"
+	"github.com/CreatureSurvive/distillarr/internal/encode"
+	"github.com/CreatureSurvive/distillarr/internal/hwprobe"
+	"github.com/CreatureSurvive/distillarr/internal/jobs"
+	"github.com/CreatureSurvive/distillarr/internal/media"
+	"github.com/CreatureSurvive/distillarr/internal/recs"
+	"github.com/CreatureSurvive/distillarr/internal/res"
+	"github.com/CreatureSurvive/distillarr/internal/still"
+	"github.com/CreatureSurvive/distillarr/internal/store"
+	"github.com/CreatureSurvive/distillarr/internal/upscale"
 )
 
 // upscaleTarget is one resolution a file can be upscaled to.

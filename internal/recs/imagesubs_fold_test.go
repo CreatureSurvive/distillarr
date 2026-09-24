@@ -3,9 +3,9 @@ package recs
 import (
 	"testing"
 
-	"mediatrans/internal/config"
-	"mediatrans/internal/imagesubs"
-	"mediatrans/internal/store"
+	"github.com/CreatureSurvive/distillarr/internal/config"
+	"github.com/CreatureSurvive/distillarr/internal/imagesubs"
+	"github.com/CreatureSurvive/distillarr/internal/store"
 )
 
 func TestRecommendFoldsInImageSubsSidecarMode(t *testing.T) {

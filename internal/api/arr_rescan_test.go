@@ -9,9 +9,9 @@ import (
 	"testing"
 	"time"
 
-	"mediatrans/internal/config"
-	"mediatrans/internal/jobs"
-	"mediatrans/internal/store"
+	"github.com/CreatureSurvive/distillarr/internal/config"
+	"github.com/CreatureSurvive/distillarr/internal/jobs"
+	"github.com/CreatureSurvive/distillarr/internal/store"
 )
 
 // fastPolling overrides the poll timing for one test so it runs in

@@ -17,7 +17,7 @@ import (
 	"sync"
 	"time"
 
-	"mediatrans/internal/config"
+	"github.com/CreatureSurvive/distillarr/internal/config"
 )
 
 // Levels, lowest first.

@@ -8,11 +8,11 @@ import (
 	"sync"
 	"time"
 
-	"mediatrans/internal/arr"
-	"mediatrans/internal/config"
-	"mediatrans/internal/jobs"
-	"mediatrans/internal/notify"
-	"mediatrans/internal/pathmap"
+	"github.com/CreatureSurvive/distillarr/internal/arr"
+	"github.com/CreatureSurvive/distillarr/internal/config"
+	"github.com/CreatureSurvive/distillarr/internal/jobs"
+	"github.com/CreatureSurvive/distillarr/internal/notify"
+	"github.com/CreatureSurvive/distillarr/internal/pathmap"
 )
 
 // Polling tunables for arrPollNewPath, overridable in tests so they don't

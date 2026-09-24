@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"mediatrans/internal/config"
+	"github.com/CreatureSurvive/distillarr/internal/config"
 )
 
 func TestArrTestUnsavedInstance(t *testing.T) {

@@ -3,7 +3,7 @@ package encode
 import (
 	"fmt"
 
-	"mediatrans/internal/media"
+	"github.com/CreatureSurvive/distillarr/internal/media"
 )
 
 // Preview samples use Build(..., &Clip{...}) so the "B" side is encoded

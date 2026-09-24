@@ -12,9 +12,9 @@ import (
 	"strings"
 	"time"
 
-	"mediatrans/internal/arr"
-	"mediatrans/internal/config"
-	"mediatrans/internal/pathmap"
+	"github.com/CreatureSurvive/distillarr/internal/arr"
+	"github.com/CreatureSurvive/distillarr/internal/config"
+	"github.com/CreatureSurvive/distillarr/internal/pathmap"
 )
 
 // arrInstanceOut is an ArrInstance as returned by the API: the key and

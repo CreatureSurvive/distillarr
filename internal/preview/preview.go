@@ -14,9 +14,9 @@ import (
 	"sync"
 	"time"
 
-	"mediatrans/internal/encode"
-	"mediatrans/internal/media"
-	"mediatrans/internal/tune"
+	"github.com/CreatureSurvive/distillarr/internal/encode"
+	"github.com/CreatureSurvive/distillarr/internal/media"
+	"github.com/CreatureSurvive/distillarr/internal/tune"
 )
 
 // Segment is one A/B pair.

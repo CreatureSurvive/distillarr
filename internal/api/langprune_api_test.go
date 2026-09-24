@@ -4,8 +4,8 @@ import (
 	"encoding/json"
 	"testing"
 
-	"mediatrans/internal/config"
-	"mediatrans/internal/store"
+	"github.com/CreatureSurvive/distillarr/internal/config"
+	"github.com/CreatureSurvive/distillarr/internal/store"
 )
 
 func TestSetLangExempt(t *testing.T) {

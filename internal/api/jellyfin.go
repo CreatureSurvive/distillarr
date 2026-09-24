@@ -12,8 +12,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	"mediatrans/internal/jellyfin"
-	"mediatrans/internal/store"
+	"github.com/CreatureSurvive/distillarr/internal/jellyfin"
+	"github.com/CreatureSurvive/distillarr/internal/store"
 )
 
 var jfSyncing atomic.Bool

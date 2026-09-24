@@ -7,11 +7,11 @@ package issues
 import (
 	"strings"
 
-	"mediatrans/internal/config"
-	"mediatrans/internal/encode"
-	"mediatrans/internal/imagesubs"
-	"mediatrans/internal/langprune"
-	"mediatrans/internal/store"
+	"github.com/CreatureSurvive/distillarr/internal/config"
+	"github.com/CreatureSurvive/distillarr/internal/encode"
+	"github.com/CreatureSurvive/distillarr/internal/imagesubs"
+	"github.com/CreatureSurvive/distillarr/internal/langprune"
+	"github.com/CreatureSurvive/distillarr/internal/store"
 )
 
 // ForcesTranscodeLookbackDays is the forces_transcode issue's window: a

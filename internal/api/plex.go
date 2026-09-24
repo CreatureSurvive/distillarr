@@ -11,9 +11,9 @@ import (
 	"sync/atomic"
 	"time"
 
-	"mediatrans/internal/jobs"
-	"mediatrans/internal/plex"
-	"mediatrans/internal/store"
+	"github.com/CreatureSurvive/distillarr/internal/jobs"
+	"github.com/CreatureSurvive/distillarr/internal/plex"
+	"github.com/CreatureSurvive/distillarr/internal/store"
 )
 
 var plexSyncing atomic.Bool

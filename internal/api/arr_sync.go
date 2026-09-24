@@ -8,10 +8,10 @@ import (
 	"sync/atomic"
 	"time"
 
-	"mediatrans/internal/arr"
-	"mediatrans/internal/config"
-	"mediatrans/internal/pathmap"
-	"mediatrans/internal/store"
+	"github.com/CreatureSurvive/distillarr/internal/arr"
+	"github.com/CreatureSurvive/distillarr/internal/config"
+	"github.com/CreatureSurvive/distillarr/internal/pathmap"
+	"github.com/CreatureSurvive/distillarr/internal/store"
 )
 
 var arrSyncing atomic.Bool

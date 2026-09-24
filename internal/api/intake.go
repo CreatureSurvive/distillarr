@@ -7,13 +7,13 @@ import (
 	"net/http"
 	"time"
 
-	"mediatrans/internal/arr"
-	"mediatrans/internal/autopilot"
-	"mediatrans/internal/encode"
-	"mediatrans/internal/issues"
-	"mediatrans/internal/notify"
-	"mediatrans/internal/recs"
-	"mediatrans/internal/store"
+	"github.com/CreatureSurvive/distillarr/internal/arr"
+	"github.com/CreatureSurvive/distillarr/internal/autopilot"
+	"github.com/CreatureSurvive/distillarr/internal/encode"
+	"github.com/CreatureSurvive/distillarr/internal/issues"
+	"github.com/CreatureSurvive/distillarr/internal/notify"
+	"github.com/CreatureSurvive/distillarr/internal/recs"
+	"github.com/CreatureSurvive/distillarr/internal/store"
 )
 
 // intakePromoter runs one settle/confirm/queue pass over due intake rows

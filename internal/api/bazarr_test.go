@@ -7,9 +7,9 @@ import (
 	"testing"
 	"time"
 
-	"mediatrans/internal/config"
-	"mediatrans/internal/jobs"
-	"mediatrans/internal/store"
+	"github.com/CreatureSurvive/distillarr/internal/config"
+	"github.com/CreatureSurvive/distillarr/internal/jobs"
+	"github.com/CreatureSurvive/distillarr/internal/store"
 )
 
 // fakeBazarr records every PATCH as "path?query" and checks the API key.

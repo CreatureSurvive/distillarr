@@ -3,7 +3,7 @@ package api
 import (
 	"testing"
 
-	"mediatrans/internal/config"
+	"github.com/CreatureSurvive/distillarr/internal/config"
 )
 
 func withFakeFreePct(t *testing.T, pcts map[string]float64) {

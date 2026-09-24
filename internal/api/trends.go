@@ -8,8 +8,8 @@ import (
 	"syscall"
 	"time"
 
-	"mediatrans/internal/config"
-	"mediatrans/internal/store"
+	"github.com/CreatureSurvive/distillarr/internal/config"
+	"github.com/CreatureSurvive/distillarr/internal/store"
 )
 
 // statFS is overridable in tests: free bytes and device id of path's

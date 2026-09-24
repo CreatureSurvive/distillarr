@@ -10,8 +10,8 @@ import (
 	"strings"
 	"time"
 
-	"mediatrans/internal/encode"
-	"mediatrans/internal/store"
+	"github.com/CreatureSurvive/distillarr/internal/encode"
+	"github.com/CreatureSurvive/distillarr/internal/store"
 )
 
 // EncoderResult is the probe outcome for one backend×codec×node.

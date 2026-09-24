@@ -4,7 +4,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"mediatrans/internal/store"
+	"github.com/CreatureSurvive/distillarr/internal/store"
 )
 
 // a fresh install assumes nothing about paths; a stored config

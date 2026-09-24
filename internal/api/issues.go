@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"net/http"
 
-	"mediatrans/internal/issues"
-	"mediatrans/internal/store"
+	"github.com/CreatureSurvive/distillarr/internal/issues"
+	"github.com/CreatureSurvive/distillarr/internal/store"
 )
 
 type issueSummary struct {

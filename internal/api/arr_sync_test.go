@@ -7,8 +7,8 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"mediatrans/internal/config"
-	"mediatrans/internal/store"
+	"github.com/CreatureSurvive/distillarr/internal/config"
+	"github.com/CreatureSurvive/distillarr/internal/store"
 )
 
 // fakeSonarr serves a fixed series + episode file list, keyed by whether

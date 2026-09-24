@@ -17,9 +17,9 @@ import (
 	"strconv"
 	"strings"
 
-	"mediatrans/internal/encode"
-	"mediatrans/internal/media"
-	"mediatrans/internal/upscale"
+	"github.com/CreatureSurvive/distillarr/internal/encode"
+	"github.com/CreatureSurvive/distillarr/internal/media"
+	"github.com/CreatureSurvive/distillarr/internal/upscale"
 )
 
 // ErrPaused means the run stopped between chunks because its schedule window

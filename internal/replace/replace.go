@@ -23,7 +23,7 @@ import (
 
 	"golang.org/x/sys/unix"
 
-	"mediatrans/internal/media"
+	"github.com/CreatureSurvive/distillarr/internal/media"
 )
 
 // SrcStat is the pre-encode statx snapshot persisted with the job.

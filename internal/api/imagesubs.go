@@ -4,10 +4,10 @@ import (
 	"fmt"
 	"net/http"
 
-	"mediatrans/internal/config"
-	"mediatrans/internal/encode"
-	"mediatrans/internal/imagesubs"
-	"mediatrans/internal/store"
+	"github.com/CreatureSurvive/distillarr/internal/config"
+	"github.com/CreatureSurvive/distillarr/internal/encode"
+	"github.com/CreatureSurvive/distillarr/internal/imagesubs"
+	"github.com/CreatureSurvive/distillarr/internal/store"
 )
 
 // POST /api/v1/files/{id}/image-subs-mode {mode} — per-file override of

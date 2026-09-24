@@ -3,7 +3,7 @@ package api
 import (
 	"net/http"
 
-	"mediatrans/internal/recs"
+	"github.com/CreatureSurvive/distillarr/internal/recs"
 )
 
 // clearMeasurements resets every file's VMAF/CAMBI quality search

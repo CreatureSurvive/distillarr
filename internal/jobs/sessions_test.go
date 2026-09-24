@@ -10,10 +10,10 @@ import (
 	"testing"
 	"time"
 
-	"mediatrans/internal/config"
-	"mediatrans/internal/replace"
-	"mediatrans/internal/scan"
-	"mediatrans/internal/store"
+	"github.com/CreatureSurvive/distillarr/internal/config"
+	"github.com/CreatureSurvive/distillarr/internal/replace"
+	"github.com/CreatureSurvive/distillarr/internal/scan"
+	"github.com/CreatureSurvive/distillarr/internal/store"
 )
 
 func newTestEngine(t *testing.T) *Engine {

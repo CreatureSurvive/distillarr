@@ -5,10 +5,10 @@ import (
 	"path/filepath"
 	"testing"
 
-	"mediatrans/internal/config"
-	"mediatrans/internal/encode"
-	"mediatrans/internal/scan"
-	"mediatrans/internal/store"
+	"github.com/CreatureSurvive/distillarr/internal/config"
+	"github.com/CreatureSurvive/distillarr/internal/encode"
+	"github.com/CreatureSurvive/distillarr/internal/scan"
+	"github.com/CreatureSurvive/distillarr/internal/store"
 )
 
 // RetryConfirmHardlinked must mark the job's settings as confirmed and

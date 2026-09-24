@@ -9,9 +9,9 @@ import (
 	"strings"
 	"syscall"
 
-	"mediatrans/internal/config"
-	"mediatrans/internal/jobs"
-	"mediatrans/internal/replace"
+	"github.com/CreatureSurvive/distillarr/internal/config"
+	"github.com/CreatureSurvive/distillarr/internal/jobs"
+	"github.com/CreatureSurvive/distillarr/internal/replace"
 )
 
 // libraryDisks reports total/free space per filesystem the libraries

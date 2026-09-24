@@ -9,9 +9,9 @@ import (
 	"net/http"
 	"time"
 
-	"mediatrans/internal/config"
-	"mediatrans/internal/notify"
-	"mediatrans/internal/pathmap"
+	"github.com/CreatureSurvive/distillarr/internal/config"
+	"github.com/CreatureSurvive/distillarr/internal/notify"
+	"github.com/CreatureSurvive/distillarr/internal/pathmap"
 )
 
 // arrWebhookEnvelope covers the fields shared or event-specific across

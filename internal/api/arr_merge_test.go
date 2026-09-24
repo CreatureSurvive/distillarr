@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"testing"
 
-	"mediatrans/internal/config"
+	"github.com/CreatureSurvive/distillarr/internal/config"
 )
 
 func TestSlugify(t *testing.T) {

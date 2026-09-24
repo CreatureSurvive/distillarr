@@ -6,9 +6,9 @@ import (
 	"log"
 	"path/filepath"
 
-	"mediatrans/internal/imagesubs"
-	"mediatrans/internal/notify"
-	"mediatrans/internal/store"
+	"github.com/CreatureSurvive/distillarr/internal/imagesubs"
+	"github.com/CreatureSurvive/distillarr/internal/notify"
+	"github.com/CreatureSurvive/distillarr/internal/store"
 )
 
 // OCRTessdataDir is where per-language tesseract traineddata files are

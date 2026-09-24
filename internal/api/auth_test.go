@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"mediatrans/internal/config"
+	"github.com/CreatureSurvive/distillarr/internal/config"
 )
 
 type authClient struct {

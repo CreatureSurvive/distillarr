@@ -10,9 +10,9 @@ import (
 	"strings"
 	"time"
 
-	"mediatrans/internal/bazarr"
-	"mediatrans/internal/jobs"
-	"mediatrans/internal/store"
+	"github.com/CreatureSurvive/distillarr/internal/bazarr"
+	"github.com/CreatureSurvive/distillarr/internal/jobs"
+	"github.com/CreatureSurvive/distillarr/internal/store"
 )
 
 func (s *Server) bazarrClient() *bazarr.Client {

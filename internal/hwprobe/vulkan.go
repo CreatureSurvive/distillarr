@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"mediatrans/internal/media"
+	"github.com/CreatureSurvive/distillarr/internal/media"
 )
 
 // VulkanDevice is one Vulkan-capable GPU as libplacebo (the upscaler) sees

@@ -4,8 +4,8 @@ import (
 	"context"
 	"testing"
 
-	"mediatrans/internal/encode"
-	"mediatrans/internal/media"
+	"github.com/CreatureSurvive/distillarr/internal/encode"
+	"github.com/CreatureSurvive/distillarr/internal/media"
 )
 
 func TestCRFStep(t *testing.T) {

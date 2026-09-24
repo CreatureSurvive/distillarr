@@ -4,12 +4,12 @@ import (
 	"path/filepath"
 	"testing"
 
-	"mediatrans/internal/config"
-	"mediatrans/internal/jobs"
-	"mediatrans/internal/preview"
-	"mediatrans/internal/scan"
-	"mediatrans/internal/still"
-	"mediatrans/internal/store"
+	"github.com/CreatureSurvive/distillarr/internal/config"
+	"github.com/CreatureSurvive/distillarr/internal/jobs"
+	"github.com/CreatureSurvive/distillarr/internal/preview"
+	"github.com/CreatureSurvive/distillarr/internal/scan"
+	"github.com/CreatureSurvive/distillarr/internal/still"
+	"github.com/CreatureSurvive/distillarr/internal/store"
 )
 
 // newTestServer builds a real Server against a temp SQLite store, with no

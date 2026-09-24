@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"strings"
 
-	"mediatrans/internal/res"
+	"github.com/CreatureSurvive/distillarr/internal/res"
 )
 
 // AudioStream is the summary persisted in files.audio_json.

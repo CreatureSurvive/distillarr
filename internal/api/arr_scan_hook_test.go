@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"mediatrans/internal/config"
-	"mediatrans/internal/scan"
+	"github.com/CreatureSurvive/distillarr/internal/config"
+	"github.com/CreatureSurvive/distillarr/internal/scan"
 )
 
 // Regression test for a real bug: the post-scan arr-sync hook fired on

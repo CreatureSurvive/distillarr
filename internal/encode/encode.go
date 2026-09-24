@@ -11,9 +11,9 @@ import (
 	"sort"
 	"strings"
 
-	"mediatrans/internal/media"
-	"mediatrans/internal/res"
-	"mediatrans/internal/upscale"
+	"github.com/CreatureSurvive/distillarr/internal/media"
+	"github.com/CreatureSurvive/distillarr/internal/res"
+	"github.com/CreatureSurvive/distillarr/internal/upscale"
 )
 
 // Backend selects the encoder family.

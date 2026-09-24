@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"strings"
 
-	"mediatrans/internal/media"
-	"mediatrans/internal/upscale"
+	"github.com/CreatureSurvive/distillarr/internal/media"
+	"github.com/CreatureSurvive/distillarr/internal/upscale"
 )
 
 // The neural tier can't be one ffmpeg command: the upscaler is a separate

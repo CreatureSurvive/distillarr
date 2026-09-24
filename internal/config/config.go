@@ -9,9 +9,9 @@ import (
 	"sync"
 	"time"
 
-	"mediatrans/internal/encode"
-	"mediatrans/internal/pathmap"
-	"mediatrans/internal/store"
+	"github.com/CreatureSurvive/distillarr/internal/encode"
+	"github.com/CreatureSurvive/distillarr/internal/pathmap"
+	"github.com/CreatureSurvive/distillarr/internal/store"
 )
 
 // Library is one media root.

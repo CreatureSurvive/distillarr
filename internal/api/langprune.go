@@ -1,11 +1,11 @@
 package api
 
 import (
-	"mediatrans/internal/config"
-	"mediatrans/internal/encode"
-	"mediatrans/internal/langprune"
-	"mediatrans/internal/recs"
-	"mediatrans/internal/store"
+	"github.com/CreatureSurvive/distillarr/internal/config"
+	"github.com/CreatureSurvive/distillarr/internal/encode"
+	"github.com/CreatureSurvive/distillarr/internal/langprune"
+	"github.com/CreatureSurvive/distillarr/internal/recs"
+	"github.com/CreatureSurvive/distillarr/internal/store"
 )
 
 // applyLangPrune merges language-pruning drop entries into st,

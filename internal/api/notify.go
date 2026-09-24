@@ -6,8 +6,8 @@ import (
 	"net/http"
 	"strings"
 
-	"mediatrans/internal/config"
-	"mediatrans/internal/notify"
+	"github.com/CreatureSurvive/distillarr/internal/config"
+	"github.com/CreatureSurvive/distillarr/internal/notify"
 )
 
 // notifierOut masks a target's URL (it carries the service's token).

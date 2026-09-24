@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"mediatrans/internal/config"
+	"github.com/CreatureSurvive/distillarr/internal/config"
 )
 
 type sent struct{ url, title, body string }

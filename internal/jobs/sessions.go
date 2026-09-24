@@ -6,9 +6,9 @@ import (
 	"sync"
 	"time"
 
-	"mediatrans/internal/issues"
-	"mediatrans/internal/jellyfin"
-	"mediatrans/internal/plex"
+	"github.com/CreatureSurvive/distillarr/internal/issues"
+	"github.com/CreatureSurvive/distillarr/internal/jellyfin"
+	"github.com/CreatureSurvive/distillarr/internal/plex"
 )
 
 // sessionsState is the latest snapshot from the sessions poller:

@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"testing"
 
-	"mediatrans/internal/store"
+	"github.com/CreatureSurvive/distillarr/internal/store"
 )
 
 func TestSetSidecarMode(t *testing.T) {

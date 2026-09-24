@@ -10,11 +10,11 @@ import (
 	"sync"
 	"time"
 
-	"mediatrans/internal/hwprobe"
-	"mediatrans/internal/media"
-	"mediatrans/internal/recs"
-	"mediatrans/internal/store"
-	"mediatrans/internal/tune"
+	"github.com/CreatureSurvive/distillarr/internal/hwprobe"
+	"github.com/CreatureSurvive/distillarr/internal/media"
+	"github.com/CreatureSurvive/distillarr/internal/recs"
+	"github.com/CreatureSurvive/distillarr/internal/store"
+	"github.com/CreatureSurvive/distillarr/internal/tune"
 )
 
 // EvMeasure is the SSE event for overnight measuring.
