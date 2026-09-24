@@ -316,7 +316,7 @@ export default function FileDetail({ live }: { live: LiveState }) {
                 <div className="small">
                   <b>{codecPenaltyWarning}</b> scores re-encoded files as worth replacing again (an unacknowledged
                   codec-penalty warning). Queueing this is still allowed — autopilot and webhook auto-queue are the
-                  only things this blocks. See its card in <a href="#/settings" onClick={(e) => { e.preventDefault(); location.hash = "#/settings"; setTimeout(() => document.getElementById("s-arr")?.scrollIntoView({ behavior: "smooth" }), 50); }}>Settings → Sonarr / Radarr</a>.
+                  only things this blocks. See its card in <a href="#/settings" onClick={(e) => { e.preventDefault(); location.hash = "#/settings/connections"; setTimeout(() => document.getElementById("s-arr")?.scrollIntoView({ behavior: "smooth" }), 50); }}>Settings → Sonarr / Radarr</a>.
                 </div>
               </div>
             )}

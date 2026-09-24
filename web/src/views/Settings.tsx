@@ -1,4 +1,5 @@
 import { useEffect, useState, type ReactNode } from "react";
+import { NavLink, useParams } from "react-router-dom";
 import { api, subscribe, type ArrInfo, type ArrInstance, type ArrTestResult, type AudioRule, type AutopilotPreviewGroup, type AutoRule, type BazarrTest, type Config, type HwInfo, type JfStatus, type JfTest, type LangOverride, type LangpruneReport, type LangPolicy, type PlexStatus, type PlexTest, type RuleAction, type RuleMatch, type TrashItem } from "../api";
 import { Copyable, ISSUE_SHORT, Seg, Toggle, toast } from "../components";
 import { ago, backendLabel, bytes, codecLabel } from "../format";
@@ -16,9 +17,22 @@ function Field({ label, hint, children }: { label: string; hint?: string; childr
   );
 }
 
+// Settings grew past one scrolling page; each tab is its own route
+// (#/settings/<id>) so links and reloads land on the right one.
+const SETTINGS_TABS = [
+  { id: "connections", label: "Connections" },
+  { id: "automation", label: "Automation" },
+  { id: "encoding", label: "Encoding" },
+  { id: "tracks", label: "Languages & subtitles" },
+  { id: "upscaling", label: "Upscaling" },
+  { id: "system", label: "System" },
+];
+
 export default function SettingsView({ live, onJellyfin, onPlex }: { live: LiveState; onJellyfin: () => void; onPlex: () => void }) {
   const [cfg, setCfg] = useState<Config | null>(null);
   const [hw, setHw] = useState<HwInfo | null>(null);
+  const param = useParams().tab;
+  const tab = SETTINGS_TABS.some((t) => t.id === param) ? param! : SETTINGS_TABS[0].id;
 
   useEffect(() => { api.config().then(setCfg).catch(() => {}); }, []);
   useEffect(() => { api.hw().then(setHw).catch(() => {}); }, [live.hwVersion]);
@@ -42,21 +56,13 @@ export default function SettingsView({ live, onJellyfin, onPlex }: { live: LiveS
           <div className="page-sub">Changes save as you make them.</div>
         </div>
       </header>
-      <nav className="settings-nav">
-        <a href="#/settings" onClick={(e) => { e.preventDefault(); document.getElementById("s-jf")?.scrollIntoView({ behavior: "smooth" }); }}>Jellyfin</a>
-        <a href="#/settings" onClick={(e) => { e.preventDefault(); document.getElementById("s-plex")?.scrollIntoView({ behavior: "smooth" }); }}>Plex</a>
-        <a href="#/settings" onClick={(e) => { e.preventDefault(); document.getElementById("s-arr")?.scrollIntoView({ behavior: "smooth" }); }}>Sonarr / Radarr</a>
-        <a href="#/settings" onClick={(e) => { e.preventDefault(); document.getElementById("s-auto")?.scrollIntoView({ behavior: "smooth" }); }}>Autopilot</a>
-        <a href="#/settings" onClick={(e) => { e.preventDefault(); document.getElementById("s-lang")?.scrollIntoView({ behavior: "smooth" }); }}>Languages</a>
-        <a href="#/settings" onClick={(e) => { e.preventDefault(); document.getElementById("s-sidecar")?.scrollIntoView({ behavior: "smooth" }); }}>Subtitles</a>
-        <a href="#/settings" onClick={(e) => { e.preventDefault(); document.getElementById("s-imgsubs")?.scrollIntoView({ behavior: "smooth" }); }}>Image subtitles</a>
-        <a href="#/settings" onClick={(e) => { e.preventDefault(); document.getElementById("s-enc")?.scrollIntoView({ behavior: "smooth" }); }}>Encoding</a>
-        <a href="#/settings" onClick={(e) => { e.preventDefault(); document.getElementById("s-up")?.scrollIntoView({ behavior: "smooth" }); }}>Upscaling</a>
-        <a href="#/settings" onClick={(e) => { e.preventDefault(); document.getElementById("s-hw")?.scrollIntoView({ behavior: "smooth" }); }}>Hardware</a>
-        <a href="#/settings" onClick={(e) => { e.preventDefault(); document.getElementById("s-trash")?.scrollIntoView({ behavior: "smooth" }); }}>Storage &amp; trash</a>
-        <a href="#/settings" onClick={(e) => { e.preventDefault(); document.getElementById("s-maint")?.scrollIntoView({ behavior: "smooth" }); }}>Maintenance</a>
+      <nav className="settings-nav" aria-label="Settings sections">
+        {SETTINGS_TABS.map((t) => (
+          <NavLink key={t.id} to={`/settings/${t.id}`} className={t.id === tab ? "active" : undefined}>{t.label}</NavLink>
+        ))}
       </nav>
 
+      {tab === "connections" && <>
       <JellyfinSection cfg={cfg} setCfg={setCfg} live={live} onJellyfin={onJellyfin} />
 
       <PlexSection cfg={cfg} setCfg={setCfg} live={live} onPlex={onPlex} />
@@ -64,13 +70,19 @@ export default function SettingsView({ live, onJellyfin, onPlex }: { live: LiveS
       <ArrSection cfg={cfg} setCfg={setCfg} />
 
       <BazarrSection cfg={cfg} setCfg={setCfg} />
+      </>}
 
+      {tab === "automation" && <>
       <AutopilotSection cfg={cfg} setCfg={setCfg} />
+      </>}
 
+      {tab === "tracks" && <>
       <LangPolicySection cfg={cfg} save={save} />
       <SidecarSection cfg={cfg} save={save} />
       <ImageSubsSection cfg={cfg} save={save} />
+      </>}
 
+      {tab === "encoding" && <>
       <section className="panel" id="s-enc">
         <h2 className="panel-title">Encoding defaults</h2>
         <p className="dim small">Recommendations start from these and then tune quality per file. Changing them refreshes every recommendation.</p>
@@ -143,7 +155,9 @@ export default function SettingsView({ live, onJellyfin, onPlex }: { live: LiveS
         <AudioRulesSection cfg={cfg} save={save} />
         <Calibration />
       </section>
+      </>}
 
+      {tab === "upscaling" && <>
       <section className="panel" id="s-up">
         <h2 className="panel-title">Upscaling</h2>
         <p className="dim small">
@@ -174,10 +188,13 @@ export default function SettingsView({ live, onJellyfin, onPlex }: { live: LiveS
           </p>
         </ScheduleTimeline>
       </section>
+      </>}
 
+      {tab === "system" && <>
       <HardwareSection live={live} />
       <TrashSection cfg={cfg} save={save} />
       <MaintenanceSection />
+      </>}
     </div>
   );
 }

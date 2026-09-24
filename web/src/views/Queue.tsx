@@ -174,7 +174,7 @@ function holdReasonText(r: IntakeRow): ReactNode {
     return (
       <>
         {r.instance_name || "an instance"} hasn't acknowledged a codec-penalty warning — see{" "}
-        <a href="#/settings" onClick={(e) => { e.preventDefault(); location.hash = "#/settings"; setTimeout(() => document.getElementById("s-arr")?.scrollIntoView({ behavior: "smooth" }), 50); }}>
+        <a href="#/settings" onClick={(e) => { e.preventDefault(); location.hash = "#/settings/connections"; setTimeout(() => document.getElementById("s-arr")?.scrollIntoView({ behavior: "smooth" }), 50); }}>
           Settings → Sonarr / Radarr
         </a>
       </>

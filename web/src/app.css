@@ -419,6 +419,7 @@ details.panel[open] > summary { margin-bottom: 12px; }
 .settings-nav { display: flex; gap: 6px; overflow-x: auto; margin-bottom: 16px; padding-bottom: 4px; }
 .settings-nav a { flex: none; font-size: 13px; padding: 6px 12px; border: 1px solid var(--line); border-radius: 999px; color: var(--text-dim); }
 .settings-nav a:hover { color: var(--text); border-color: var(--text-faint); }
+.settings-nav a.active { color: var(--text); border-color: var(--text-dim); background: var(--panel-2, rgba(255,255,255,0.04)); }
 .settings .panel { scroll-margin-top: 16px; }
 .pill { display: inline-flex; align-items: center; gap: 8px; font-size: 12.5px; padding: 5px 10px; border: 1px solid var(--line); border-radius: 999px; color: var(--text-dim); }
 .pill-ok { color: var(--text); border-color: rgba(69, 214, 192, 0.45); }

@@ -135,7 +135,7 @@ export default function App() {
               <span className="pulse-dot" aria-hidden /> Scanning · {live.scan.probed} probed
             </div>
           )}
-          <a href="#/settings" className={`side-status jf-${jf?.connected ? "ok" : jf?.configured ? "bad" : "off"}`}>
+          <a href="#/settings/connections" className={`side-status jf-${jf?.connected ? "ok" : jf?.configured ? "bad" : "off"}`}>
             <span className="dot" aria-hidden />
             {jf?.connected ? `Jellyfin connected` : jf?.configured ? "Jellyfin unreachable" : "Jellyfin not set up"}
           </a>
@@ -152,7 +152,7 @@ export default function App() {
           <Route path="/queue" element={<Queue live={live} />} />
           <Route path="/preview/:id" element={<PreviewView live={live} />} />
           <Route path="/upscale/:id" element={<UpscaleView />} />
-          <Route path="/settings" element={<SettingsView live={live}
+          <Route path="/settings/:tab?" element={<SettingsView live={live}
             onJellyfin={() => setLive((l) => ({ ...l, jfVersion: l.jfVersion + 1 }))}
             onPlex={() => setLive((l) => ({ ...l, plexVersion: l.plexVersion + 1 }))} />} />
         </Routes>
