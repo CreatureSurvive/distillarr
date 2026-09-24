@@ -80,15 +80,17 @@ func Extract(ctx context.Context, srcPath string, subs []media.Stream, mode stri
 		if !s.IsTextSubtitle() {
 			continue
 		}
-		ext, codecArgs := ".srt", []string{"-c:s", "srt"}
+		ext, muxer, codecArgs := ".srt", "srt", []string{"-c:s", "srt"}
 		if s.CodecName == "ass" || s.CodecName == "ssa" {
-			ext, codecArgs = ".ass", []string{"-c:s", "copy"}
+			ext, muxer, codecArgs = ".ass", "ass", []string{"-c:s", "copy"}
 		}
 		name := sidecarName(dir, stem, s.Lang(), ext)
+		// The temp name has no subtitle extension on purpose (see tempPrefix),
+		// so ffmpeg can't infer the muxer from it: -f says so explicitly.
 		tmp := filepath.Join(dir, fmt.Sprintf("%s%d-%d.tmp", tempPrefix, os.Getpid(), s.Index))
 		args := []string{"-y", "-i", srcPath, "-map", fmt.Sprintf("0:%d", s.Index)}
 		args = append(args, codecArgs...)
-		args = append(args, tmp)
+		args = append(args, "-f", muxer, tmp)
 		if b, err := exec.CommandContext(ctx, encode.FFmpeg, args...).CombinedOutput(); err != nil {
 			os.Remove(tmp)
 			return out, fmt.Errorf("extract sub #%d: %w: %s", s.Index, err, strings.TrimSpace(string(b)))
