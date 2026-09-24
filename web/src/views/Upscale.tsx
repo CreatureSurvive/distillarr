@@ -298,7 +298,9 @@ export default function UpscaleView() {
                   {p.tier === "neural" && all[i - 1]?.tier !== "neural" && (
                     <div className="up-group dim small">
                       Neural: far more detail, but hours per file. Runs overnight{info.device ? ` on ${info.device}` : ""}.
-                      Time estimates come from benchmarks on an Intel Arc A380; other GPUs will be faster or slower.
+                      {all.some((x) => x.tier === "neural" && x.measured)
+                        ? "Estimates marked “measured” come from runs on this GPU."
+                        : `Estimates come from benchmarks (reference: ${info.reference_device}) until this GPU has finished a few runs.`}
                     </div>
                   )}
                 <button className={`up-preset${p.id === presetId ? " on" : ""}`}
@@ -314,7 +316,11 @@ export default function UpscaleView() {
                   {p.tier === "neural" && (
                     <span className={`mono small ${estHours(p) > info.max_neural_hours ? "warm" : "teal"}`}>
                       ≈ {fmtHours(estHours(p))} for this file{estHours(p) > info.max_neural_hours ? ": too long to queue" : ""}
+                      <span className="dim"> · {p.measured ? `measured (${p.samples} runs)` : `reference: ${info.reference_device}`}</span>
                     </span>
+                  )}
+                  {p.tier !== "neural" && p.measured && p.realtime && (
+                    <span className="mono small dim">≈ {p.realtime.toFixed(1)}x realtime here · measured ({p.samples} runs)</span>
                   )}
                 </button>
                 </Fragment>

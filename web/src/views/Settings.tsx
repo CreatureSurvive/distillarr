@@ -35,6 +35,8 @@ const SETTINGS_TABS = [
 export default function SettingsView({ live, onJellyfin, onPlex }: { live: LiveState; onJellyfin: () => void; onPlex: () => void }) {
   const [cfg, setCfg] = useState<Config | null>(null);
   const [hw, setHw] = useState<HwInfo | null>(null);
+  const [tuneCal, setTuneCal] = useState<Record<string, { tune_secs: number; samples: number }>>({});
+  useEffect(() => { api.speedCalibration().then((r) => setTuneCal(r.tune)).catch(() => {}); }, []);
   const param = useParams().tab;
   const tab = SETTINGS_TABS.some((t) => t.id === param) ? param! : SETTINGS_TABS[0].id;
 
@@ -51,6 +53,12 @@ export default function SettingsView({ live, onJellyfin, onPlex }: { live: LiveS
   };
 
   if (!cfg) return <div className="result-count mono dim">Loading…</div>;
+  // the measured quality-search time on this host once there are a
+  // few runs, else the reference figure.
+  const tuneRows = Object.entries(tuneCal);
+  const tuneHint = tuneRows.length
+    ? `Measured here: about ${tuneRows.map(([b, v]) => `${Math.max(1, Math.round(v.tune_secs / 60))} min (${backendLabel(b)})`).join(", ")} per job.`
+    : "Adds 1–2 minutes per job (reference: Intel Arc A380).";
 
   return (
     <div className="settings">
@@ -102,7 +110,7 @@ export default function SettingsView({ live, onJellyfin, onPlex }: { live: LiveS
             <Seg value={cfg.preferred_backend} onChange={(v) => save({ preferred_backend: v })}
               options={["auto", "qsv", "vaapi", "nvenc", "sw"].map((b) => ({ value: b, label: b === "auto" ? "Auto" : backendLabel(b) }))} />
           </Field>
-          <Field label="Quality target" hint="Every encode first scores short samples against the original (VMAF) and uses the smallest setting that meets this. Adds 1–2 minutes per job.">
+          <Field label="Quality target" hint={`Every encode first scores short samples against the original (VMAF) and uses the smallest setting that meets this. ${tuneHint}`}>
             <Seg value={cfg.vmaf_target || 0} onChange={(v) => save({ vmaf_target: v })}
               options={[
                 { value: 91, label: "91 smaller" },
@@ -170,7 +178,8 @@ export default function SettingsView({ live, onJellyfin, onPlex }: { live: LiveS
           Tune an upscale from a file's page (the Upscale button), then queue it. Upscaling only makes sense for
           sources below 4K, and it is slow.{" "}
           {hw?.upscale_device ? <>Upscales run on {hw.upscale_device}. </> : hw ? <>No Vulkan GPU passed the upscaler self-test, so upscaling is unavailable. </> : null}
-          For reference, the shader methods run at about 3x realtime to 1080p and roughly realtime to 4K on an Intel Arc A380; other GPUs will differ.
+          Shader methods run at about 3x realtime to 1080p and roughly realtime to 4K (reference: Intel Arc A380); each
+          method's page shows the speed measured here once a few upscales have finished.
         </p>
         <div className="opts">
           <Field label="When an upscale finishes" hint="Each queued upscale can override this">

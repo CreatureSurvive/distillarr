@@ -654,6 +654,9 @@ func (e *Engine) runJob(j *store.Job, resume bool) {
 			resClass := res.Class(v.Width, v.Height)
 			key := store.SpeedKey(string(settings.Backend), device, string(settings.Codec), resClass)
 			_ = e.st.RecordSpeedSample(key, src.DurationSec()/elapsed)
+			if settings.UpscaleTo > 0 && settings.UpscalePreset != "" {
+				_ = e.st.RecordSpeedSample(e.upscaleSpeedKey(upscale.ShaderKey(settings.UpscalePreset)), src.DurationSec()/elapsed)
+			}
 		}
 	}
 
@@ -713,6 +716,7 @@ func (e *Engine) tuneQuality(ctx context.Context, j *store.Job, s encode.Setting
 	}
 	e.notify(EvJob, map[string]any{"id": j.ID, "status": "running",
 		"note": fmt.Sprintf("measuring quality (target VMAF %.0f)", s.VMAFTarget)})
+	tuneStart := time.Now()
 	res, _, err := tune.Search(ctx, tune.Options{
 		Settings: s, Probe: src, Target: s.VMAFTarget,
 		WorkDir: filepath.Join("/config/tune", fmt.Sprintf("job-%d", j.ID)),
@@ -731,6 +735,7 @@ func (e *Engine) tuneQuality(ctx context.Context, j *store.Job, s encode.Setting
 	}
 	s.Quality = res.Quality
 	e.saveJobSettings(j, s)
+	_ = e.st.RecordSpeedSample(TuneKey(string(s.Backend)), time.Since(tuneStart).Seconds())
 	if f != nil {
 		rec := recs.TuneRecord{Target: s.VMAFTarget, Codec: string(s.Codec), Backend: string(s.Backend),
 			Crop: s.Crop, MaxHeight: s.MaxHeight, Quality: res.Quality, Ratio: res.Ratio, VMAF: res.VMAF,
@@ -1373,3 +1378,23 @@ func trashRootOf(trashPath, global string) string {
 	}
 	return filepath.Dir(trashPath)
 }
+
+// upscaleSpeedKey scopes an upscale speed key to the device upscales run
+// on, so a GPU swap starts a fresh calibration.
+func (e *Engine) upscaleSpeedKey(key string) string {
+	return key + "@" + e.Report().UpscaleDevice()
+}
+
+// UpscaleCalibrated is upscale.Calibrated for this engine's device: the
+// median once there are at least MinCalibrationSamples.
+func (e *Engine) UpscaleCalibrated(key string) (float64, int, bool) {
+	m, n, ok := e.st.SpeedMedian(e.upscaleSpeedKey(key))
+	return m, n, ok && n >= MinCalibrationSamples
+}
+
+// MinCalibrationSamples is how many runs a measured speed needs before it
+// replaces the reference figure.
+const MinCalibrationSamples = 3
+
+// TuneKey is the speed-history key for a quality search's wall seconds.
+func TuneKey(backend string) string { return "tune:" + backend }

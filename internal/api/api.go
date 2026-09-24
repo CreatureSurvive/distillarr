@@ -206,6 +206,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/v1/previews/{id}/{clip}", s.previewClip)
 
 	mux.HandleFunc("GET /api/v1/calibration", s.calibration)
+	mux.HandleFunc("GET /api/v1/calibration/speed", s.speedCalibration)
 
 	// maintenance: reset caches/derived state that a pipeline change can
 	// make stale, without touching the media files themselves.

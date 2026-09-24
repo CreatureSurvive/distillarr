@@ -15,6 +15,7 @@ import (
 	"mediatrans/internal/media"
 	"mediatrans/internal/neural"
 	"mediatrans/internal/store"
+	"mediatrans/internal/upscale"
 )
 
 // NeuralRoot holds each neural job's chunks between runs. It sits on the config
@@ -69,7 +70,7 @@ func (e *Engine) runNeural(ctx context.Context, j *store.Job, s encode.Settings,
 		}
 	}()
 
-	return neural.Run(ctx, neural.Job{
+	err := neural.Run(ctx, neural.Job{
 		Src: src, Settings: s, Plan: plan, Work: neuralWorkDir(j.ID), Out: out, GPU: s.VulkanDevice,
 		Acquire: e.AcquireSem,
 		Keep:    func() bool { return forced || e.neuralOpen.Load() },
@@ -97,6 +98,14 @@ func (e *Engine) runNeural(ctx context.Context, j *store.Job, s encode.Settings,
 			}
 		},
 	})
+	// Calibrate the model's speed on this device: the frames this
+	// run actually processed, normalised to RefPixels.
+	if err == nil && first >= 0 && first < 0.9 && plan.Frames > 0 && plan.InW > 0 {
+		frames := (1 - first) * float64(plan.Frames)
+		spf := time.Since(began).Seconds() / frames * upscale.RefPixels / float64(plan.InW*plan.InH)
+		_ = e.st.RecordSpeedSample(e.upscaleSpeedKey(upscale.NeuralKey(plan.Model)), spf)
+	}
+	return err
 }
 
 // sweepNeuralWork removes the chunks of jobs that will never resume (finished,

@@ -225,7 +225,10 @@ export type UpscalePreset = {
   tier: string;
   content: "film" | "anime" | "any";
   params: UpscaleParam[];
-  sec_per_frame?: number; // neural presets: measured cost at ref_pixels of input
+  sec_per_frame?: number; // neural presets: cost at ref_pixels of input
+  measured?: boolean; // from this host's own runs (else reference hardware)
+  samples?: number;
+  realtime?: number; // shader presets, measured: source seconds per wall second
 };
 export type UpscaleInfo = {
   source: { w: number; h: number; class: number };
@@ -238,6 +241,7 @@ export type UpscaleInfo = {
   neural: boolean;
   ref_pixels: number;
   max_neural_hours: number;
+  reference_device: string;
 };
 export type Still = { key: string; w: number; h: number; at: number; ms: number; cached: boolean; a_url: string; b_url: string };
 
@@ -911,6 +915,7 @@ export const api = {
     req<HwInfo>("/api/v1/hw"),
   reprobe: () => post<{ started: boolean }>("/api/v1/hw"),
   resetBackend: (b: string) => post<{ ok: boolean }>(`/api/v1/hw/${b}/reset`),
+  speedCalibration: () => req<{ tune: Record<string, { tune_secs: number; samples: number }>; reference_device: string }>("/api/v1/calibration/speed"),
   calibration: () => req<Record<string, { samples: number; factor: number }>>("/api/v1/calibration"),
 
   files: (p: Record<string, string | number | boolean | undefined>) =>

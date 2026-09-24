@@ -27,6 +27,7 @@ import (
 	"mediatrans/internal/still"
 	"mediatrans/internal/store"
 	"mediatrans/internal/tune"
+	"mediatrans/internal/upscale"
 )
 
 //go:embed all:web/dist
@@ -69,6 +70,7 @@ func main() {
 	recs.InitCalibration(st)
 	recs.ResolveBackend = func(pref string, c encode.Codec) encode.Backend { return eng.ResolveFor(pref, c) }
 	recs.Genres = st.GenresFor
+	upscale.Calibrated = eng.UpscaleCalibrated
 	recs.ArrPolicy = api.ArrPolicyFor(st, cfg)
 	recs.OriginalLanguage = st.ArrOriginalLanguageFor
 

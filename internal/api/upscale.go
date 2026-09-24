@@ -6,6 +6,7 @@ import (
 
 	"mediatrans/internal/encode"
 	"mediatrans/internal/hwprobe"
+	"mediatrans/internal/jobs"
 	"mediatrans/internal/media"
 	"mediatrans/internal/recs"
 	"mediatrans/internal/res"
@@ -68,6 +69,18 @@ func (s *Server) upscaleInfo(w http.ResponseWriter, r *http.Request) {
 	var presets []upscale.Preset
 	for _, p := range upscale.All() {
 		if !p.Neural() || upscale.NeuralAvailable() {
+			key := upscale.ShaderKey(p.ID)
+			if p.Neural() {
+				key = upscale.NeuralKey(p.Model())
+			}
+			if v, n, ok := upscale.Calibrated(key); ok {
+				p.Measured, p.Samples = true, n
+				if p.Neural() {
+					p.SPF = v
+				} else {
+					p.Realtime = v
+				}
+			}
 			presets = append(presets, p)
 		}
 	}
@@ -82,6 +95,7 @@ func (s *Server) upscaleInfo(w http.ResponseWriter, r *http.Request) {
 		"neural":           upscale.NeuralAvailable(),
 		"ref_pixels":       upscale.RefPixels,
 		"max_neural_hours": upscale.MaxNeuralHours,
+		"reference_device": upscale.ReferenceDevice,
 	})
 }
 
@@ -134,8 +148,14 @@ func checkNeural(st encode.Settings, src *media.Probe) error {
 		return err
 	}
 	if h := plan.EstimateSecs / 3600; h > upscale.MaxNeuralHours {
-		return fmt.Errorf("a neural upscale of this file would take about %.0f hours (%.1f days) on this GPU, over the %d-hour limit; use a shader preset, or a shorter file",
-			h, h/24, upscale.MaxNeuralHours)
+		basis := "measured on this GPU"
+		if p, ok := upscale.Get(st.UpscalePreset); ok {
+			if _, measured := p.SPFOn(); !measured {
+				basis = "estimated from " + upscale.ReferenceDevice + " benchmarks"
+			}
+		}
+		return fmt.Errorf("a neural upscale of this file would take about %.0f hours (%.1f days, %s), over the %d-hour limit; use a shader preset, or a shorter file",
+			h, h/24, basis, upscale.MaxNeuralHours)
 	}
 	_, err = encode.BuildNeuralMux(st, src, "/path/to/list.txt", "/path/to/output")
 	return err
@@ -194,4 +214,17 @@ func (s *Server) stillFile(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
 	http.ServeFile(w, r, path)
+}
+
+// speedCalibration reports this host's measured quality-search time per
+// backend for the Settings hint; empty until a backend has
+// jobs.MinCalibrationSamples runs.
+func (s *Server) speedCalibration(w http.ResponseWriter, r *http.Request) {
+	out := map[string]any{}
+	for _, b := range []string{"qsv", "vaapi", "nvenc", "sw"} {
+		if m, n, ok := s.st.SpeedMedian(jobs.TuneKey(b)); ok && n >= jobs.MinCalibrationSamples {
+			out[b] = map[string]any{"tune_secs": m, "samples": n}
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"tune": out, "reference_device": upscale.ReferenceDevice})
 }

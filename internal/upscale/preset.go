@@ -51,6 +51,12 @@ type Preset struct {
 	// (0 for shader presets, which run at encode speed). Clients scale it by the
 	// file's own size to show a time estimate before anything is queued.
 	SPF float64 `json:"sec_per_frame,omitempty"`
+	// Set by the API from this host's speed history: Measured means
+	// SPF (neural) or Realtime (shader, source seconds per wall second) is
+	// a median of Samples runs on this device, not the reference figure.
+	Measured bool    `json:"measured,omitempty"`
+	Samples  int     `json:"samples,omitempty"`
+	Realtime float64 `json:"realtime,omitempty"`
 
 	scaler  string   // libplacebo upscaler for the residual scale
 	shaders []string // embedded .glsl files, concatenated in order
@@ -162,9 +168,36 @@ func (p Preset) PickScale(srcW, targetW int) int {
 	return best
 }
 
+// Calibrated returns this host's measured value for a speed key (see
+// NeuralKey/ShaderKey) once there are enough samples; main wires it
+// to the store's speed history for the device upscales run on. Until
+// then the reference figures (Intel Arc A380) apply.
+var Calibrated = func(key string) (value float64, samples int, ok bool) { return 0, 0, false }
+
+// ReferenceDevice names the hardware the built-in figures were measured on.
+const ReferenceDevice = "Intel Arc A380"
+
+// NeuralKey is the speed-history key for a neural model's seconds per
+// frame at RefPixels.
+func NeuralKey(model string) string { return "neural:" + model }
+
+// ShaderKey is the speed-history key for a shader preset's speed
+// (source seconds per wall second).
+func ShaderKey(id string) string { return "shader:" + id }
+
+// SPFOn returns the seconds per frame to estimate with: measured on this
+// host when calibrated, else the reference figure.
+func (p Preset) SPFOn() (spf float64, measured bool) {
+	if v, _, ok := Calibrated(NeuralKey(p.model)); ok && v > 0 {
+		return v, true
+	}
+	return p.SPF, false
+}
+
 // EstimateSeconds is the expected run time for frames of w×h input.
 func (p Preset) EstimateSeconds(frames float64, w, h int) float64 {
-	return frames * p.SPF * float64(w*h) / RefPixels
+	spf, _ := p.SPFOn()
+	return frames * spf * float64(w*h) / RefPixels
 }
 
 var presets = []Preset{
