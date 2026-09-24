@@ -51,7 +51,7 @@ RUN curl -fsSL -o /tmp/rg.zip \
     && chmod +x /opt/realesrgan/realesrgan-ncnn-vulkan
 
 # ---- Stage 2: backend ----
-FROM golang:1.23-bookworm AS build
+FROM golang:1.25-bookworm AS build
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download

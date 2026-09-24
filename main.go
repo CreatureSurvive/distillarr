@@ -20,6 +20,7 @@ import (
 	"mediatrans/internal/encode"
 	"mediatrans/internal/jellyfin"
 	"mediatrans/internal/jobs"
+	"mediatrans/internal/notify"
 	"mediatrans/internal/preview"
 	"mediatrans/internal/recs"
 	"mediatrans/internal/scan"
@@ -82,6 +83,8 @@ func main() {
 	stl := still.New(filepath.Join(prevRoot, "still"), eng.AcquireSem)
 	srv := api.NewServer(st, cfg, sc, eng, pv, stl, webFS())
 	hubNotify = srv.Hub().Broadcast
+	srv.Notify = notify.New(cfg.Get, notify.Shoutrrr)
+	go srv.Notify.Run(context.Background())
 	pv.OnTuned = func(fileID int64, s encode.Settings, r tune.Result) {
 		f, err := st.GetFile(fileID)
 		if err != nil || f == nil {

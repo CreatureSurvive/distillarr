@@ -17,6 +17,7 @@ import (
 	"mediatrans/internal/encode"
 	"mediatrans/internal/hwprobe"
 	"mediatrans/internal/jobs"
+	"mediatrans/internal/notify"
 	"mediatrans/internal/media"
 	"mediatrans/internal/preview"
 	"mediatrans/internal/recs"
@@ -50,6 +51,9 @@ type Server struct {
 	// multiplier, quick-fix-first ordering) and the intake promoter
 	// (job priority), and reported by GET /api/v1/system.
 	diskPressure atomic.Bool
+
+	// Notify delivers notifications; set from main. Nil-safe.
+	Notify *notify.Service
 }
 
 func NewServer(st *store.Store, cfg *config.Manager, sc *scan.Scanner,
@@ -168,6 +172,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/v1/plex/test", s.plexTest)
 	mux.HandleFunc("POST /api/v1/plex/sync", s.plexSync)
 	mux.HandleFunc("POST /api/v1/bazarr/test", s.bazarrTest)
+	mux.HandleFunc("POST /api/v1/notify/{id}/test", s.notifyTest)
+	mux.HandleFunc("GET /api/v1/notify/status", s.notifyStatus)
 	mux.HandleFunc("POST /api/v1/files/{id}/bazarr-search", s.bazarrSearch)
 
 	// sonarr / radarr
@@ -271,6 +277,7 @@ type configOut struct {
 	PlexTokenSet   bool             `json:"plex_token_set"`
 	BazarrKeySet   bool             `json:"bazarr_key_set"`
 	ArrInstances   []arrInstanceOut `json:"arr_instances"`
+	Notifiers      []notifierOut    `json:"notifiers"`
 }
 
 func (s *Server) getConfig(w http.ResponseWriter, r *http.Request) {
@@ -281,11 +288,15 @@ func (s *Server) getConfig(w http.ResponseWriter, r *http.Request) {
 	c.PlexToken = ""
 	bazarrKeySet := c.BazarrKey != ""
 	c.BazarrKey = ""
+	notOuts := make([]notifierOut, len(c.Notifiers))
+	for i, n := range c.Notifiers {
+		notOuts[i] = notifierOutOf(n)
+	}
 	arrOuts := make([]arrInstanceOut, len(c.ArrInstances))
 	for i, inst := range c.ArrInstances {
 		arrOuts[i] = arrOut(inst)
 	}
-	writeJSON(w, http.StatusOK, configOut{Config: c, JellyfinKeySet: keySet, PlexTokenSet: plexTokSet, BazarrKeySet: bazarrKeySet, ArrInstances: arrOuts})
+	writeJSON(w, http.StatusOK, configOut{Config: c, JellyfinKeySet: keySet, PlexTokenSet: plexTokSet, BazarrKeySet: bazarrKeySet, ArrInstances: arrOuts, Notifiers: notOuts})
 }
 
 // putConfig merges a partial JSON object into the config: only the
@@ -330,6 +341,15 @@ func (s *Server) putConfig(w http.ResponseWriter, r *http.Request) {
 			}
 			b, _ := json.Marshal(merged)
 			patch["arr_instances"] = b
+		}
+		if raw, ok := patch["notifiers"]; ok {
+			merged, err := mergeNotifiers(cur.Notifiers, raw)
+			if err != nil {
+				perr = err
+				return
+			}
+			b, _ := json.Marshal(merged)
+			patch["notifiers"] = b
 		}
 		b, _ := json.Marshal(cur)
 		var merged map[string]json.RawMessage

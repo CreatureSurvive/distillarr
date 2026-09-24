@@ -5,6 +5,7 @@ package config
 
 import (
 	"log"
+	"strings"
 	"sync"
 	"time"
 
@@ -317,6 +318,11 @@ type Config struct {
 	// needed when that's wrong for Sonarr/Radarr, e.g. they see this
 	// container under a different Docker-network hostname.
 	WebhookBaseURL string `json:"webhook_base_url,omitempty"`
+
+	// Notifiers are notification targets, merged by id in
+	// putConfig like arr_instances; URL is secret (masked, url_set).
+	// Notification links are built from WebhookBaseURL (see PublicURL).
+	Notifiers []Notifier `json:"notifiers,omitempty"`
 
 	// AutopilotEnabled turns on rule-driven unattended queueing,
 	// off by default. AutoRules are evaluated in order, first match
@@ -814,6 +820,29 @@ func (c Config) MapPlexPath(p string) string {
 func (c Config) ToPlexPath(p string) string {
 	m, _ := pathmap.Parse(c.PlexPathMap)
 	return m.ToRemote(p)
+}
+
+// Notifier is one notification target (a shoutrrr service URL).
+type Notifier struct {
+	ID      string `json:"id"`
+	Name    string `json:"name"`
+	URL     string `json:"url"`
+	Enabled bool   `json:"enabled"`
+	// Events lists the event keys delivered to this target; empty
+	// means none.
+	Events   []string `json:"events"`
+	MinLevel string   `json:"min_level"` // info|warning|error; "" = info
+	// QuietStart/QuietEnd are minutes after local midnight; info events
+	// inside the window wait until it ends. Equal values = no quiet hours.
+	QuietStart int `json:"quiet_start"`
+	QuietEnd   int `json:"quiet_end"`
+}
+
+// PublicURL is the base notification links are built from: the
+// webhook base URL override, since both name the address other
+// systems reach this app at. "" means links are left relative.
+func (c Config) PublicURL() string {
+	return strings.TrimRight(c.WebhookBaseURL, "/")
 }
 
 // MapBazarrPath rewrites a Bazarr-side path to the local view.
