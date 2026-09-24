@@ -622,6 +622,7 @@ export type Config = {
   bazarr_key?: string;
   bazarr_key_set?: boolean;
   bazarr_path_map?: string;
+  notifiers?: Notifier[];
   plex_keep_added_at: boolean;
   defer_while_transcoding: boolean;
   hold_replace_while_playing: boolean;
@@ -735,6 +736,24 @@ export type PlexTest = {
   version?: string;
   libraries?: { name: string; type: string; location: string; mapped: string; reachable: boolean }[];
 };
+
+// a notification target. url is write-only (blank keeps the
+// saved one); url_set/service come back instead.
+export type Notifier = {
+  id: string;
+  name: string;
+  url?: string;
+  url_set?: boolean;
+  service?: string;
+  enabled: boolean;
+  events: string[];
+  min_level: string; // "" | info | warning | error
+  quiet_start: number; // minutes after midnight; equal = no quiet hours
+  quiet_end: number;
+};
+
+export type NotifyEventType = { key: string; level: string; label: string; help: string; default_on: boolean };
+export type NotifyStatus = Record<string, { last_sent_at?: string; last_error?: string; last_error_at?: string }>;
 
 export type BazarrTest = {
   ok: boolean;
@@ -944,6 +963,9 @@ export const api = {
   plexStatus: () => req<PlexStatus>("/api/v1/plex/status"),
   plexTest: (body: { url?: string; token?: string; path_map?: string }) => post<PlexTest>("/api/v1/plex/test", body),
   plexSync: () => post<{ started: boolean }>("/api/v1/plex/sync"),
+  notifyEvents: () => req<NotifyEventType[]>("/api/v1/notify/events"),
+  notifyStatus: () => req<NotifyStatus>("/api/v1/notify/status"),
+  notifyTest: (id: string, url?: string) => post<{ ok: boolean; error?: string }>(`/api/v1/notify/${id || "new"}/test`, { url }),
   bazarrTest: (body: { url?: string; key?: string; path_map?: string }) => post<BazarrTest>("/api/v1/bazarr/test", body),
   clearUpgradeLoop: (id: number) => req<{ ok: boolean }>(`/api/v1/files/${id}/upgrade-loop`, { method: "DELETE" }),
   bazarrSearch: (id: number) => post<{ ok: boolean }>(`/api/v1/files/${id}/bazarr-search`),
