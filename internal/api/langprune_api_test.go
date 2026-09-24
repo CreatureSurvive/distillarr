@@ -35,7 +35,7 @@ func TestSetLangExempt(t *testing.T) {
 func TestLangpruneReport(t *testing.T) {
 	s := newTestServer(t)
 	must := func(cfg *config.Config) {
-		if err := s.cfg.Update(func(c *config.Config) { *c = *cfg }); err != nil {
+		if err := s.cfg.Update(func(c *config.Config) { *c = *cfg; c.AuthMode = config.AuthDisabled }); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -78,6 +78,7 @@ func TestLangpruneApplyQueuesQuickFixOnly(t *testing.T) {
 	s := newTestServer(t)
 	if err := s.cfg.Update(func(c *config.Config) {
 		*c = config.Default()
+		c.AuthMode = config.AuthDisabled
 		c.LangPolicy = config.LangPolicy{AudioMode: "apply", AudioKeep: []string{"eng"}}
 	}); err != nil {
 		t.Fatal(err)

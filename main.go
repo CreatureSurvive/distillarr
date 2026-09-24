@@ -86,6 +86,7 @@ func main() {
 	srv.Notify = notify.New(cfg.Get, notify.Shoutrrr)
 	go srv.Notify.Run(context.Background())
 	jobs.Alert = srv.Notify.Send
+	srv.WarnIfNoAdmin()
 	pv.OnTuned = func(fileID int64, s encode.Settings, r tune.Result) {
 		f, err := st.GetFile(fileID)
 		if err != nil || f == nil {

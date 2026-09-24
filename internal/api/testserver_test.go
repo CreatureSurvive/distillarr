@@ -27,5 +27,7 @@ func newTestServer(t *testing.T) *Server {
 	eng := jobs.New(st, cfg, sc)
 	pv := preview.NewManager(t.TempDir(), eng.AcquireSem, func(string, any) {})
 	stl := still.New(t.TempDir(), eng.AcquireSem)
+	// Handler tests run without auth; auth has its own tests (auth_test.go).
+	_ = cfg.Update(func(c *config.Config) { c.AuthMode = config.AuthDisabled })
 	return NewServer(st, cfg, sc, eng, pv, stl, nil)
 }

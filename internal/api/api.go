@@ -80,6 +80,14 @@ func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("GET /api/v1/health", s.health)
+	mux.HandleFunc("GET /api/v1/auth/status", s.authStatus)
+	mux.HandleFunc("POST /api/v1/auth/setup", s.authSetup)
+	mux.HandleFunc("POST /api/v1/auth/login", s.authLogin)
+	mux.HandleFunc("POST /api/v1/auth/logout", s.authLogout)
+	mux.HandleFunc("POST /api/v1/auth/password", s.authPassword)
+	mux.HandleFunc("GET /api/v1/auth/keys", s.authKeys)
+	mux.HandleFunc("POST /api/v1/auth/keys", s.authCreateKey)
+	mux.HandleFunc("DELETE /api/v1/auth/keys/{id}", s.authDeleteKey)
 	mux.HandleFunc("GET /api/v1/events", s.hub.ServeHTTP)
 	mux.HandleFunc("GET /api/v1/system", s.system)
 
@@ -209,7 +217,7 @@ func (s *Server) Handler() http.Handler {
 	if s.ui != nil {
 		mux.Handle("GET /", s.spaHandler())
 	}
-	return mux
+	return s.authMiddleware(mux)
 }
 
 func (s *Server) health(w http.ResponseWriter, r *http.Request) {
@@ -364,6 +372,9 @@ func (s *Server) putConfig(w http.ResponseWriter, r *http.Request) {
 		b, _ = json.Marshal(merged)
 		next := *cur
 		if perr = json.Unmarshal(b, &next); perr != nil {
+			return
+		}
+		if perr = validateAuth(next); perr != nil {
 			return
 		}
 		if perr = validateLangPolicy(next.LangPolicy); perr != nil {

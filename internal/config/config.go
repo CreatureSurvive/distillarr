@@ -323,6 +323,18 @@ type Config struct {
 	// putConfig like arr_instances; URL is secret (masked, url_set).
 	// Notification links are built from WebhookBaseURL (see PublicURL).
 	Notifiers []Notifier `json:"notifiers,omitempty"`
+
+	// Authentication. AuthMode: "required" (log in always),
+	// "lan_bypass" (no login from AuthCIDRs, default the private ranges),
+	// "proxy_header" (trust ProxyHeader from TrustedProxies, e.g.
+	// Authelia/Authentik), or "disabled" (no auth at all). "" = required;
+	// see AuthModeOn. Accounts, sessions and API keys live in the DB.
+	AuthMode       string   `json:"auth_mode,omitempty"`
+	AuthCIDRs      []string `json:"auth_cidrs,omitempty"`
+	TrustedProxies []string `json:"trusted_proxies,omitempty"`
+	ProxyHeader    string   `json:"proxy_header,omitempty"`
+	// MetricsPublic leaves /metrics reachable without auth.
+	MetricsPublic bool `json:"metrics_public,omitempty"`
 	// UpgradeLoopDays: a Sonarr/Radarr download replacing a file
 	// Distillarr re-encoded within this many days counts as an upgrade
 	// loop. 0 = default 14; see UpgradeLoopDaysOn.
@@ -881,6 +893,42 @@ func (m *Manager) WindowOpen(t time.Time) bool {
 		return true
 	}
 	return inWindows(c.Schedules, t)
+}
+
+// Auth modes.
+const (
+	AuthRequired    = "required"
+	AuthLANBypass   = "lan_bypass"
+	AuthProxyHeader = "proxy_header"
+	AuthDisabled    = "disabled"
+)
+
+// DefaultAuthCIDRs are the private ranges lan_bypass trusts by default.
+var DefaultAuthCIDRs = []string{"127.0.0.0/8", "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "::1/128", "fc00::/7", "fe80::/10"}
+
+// AuthModeOn returns the effective mode ("" = required).
+func (c Config) AuthModeOn() string {
+	switch c.AuthMode {
+	case AuthLANBypass, AuthProxyHeader, AuthDisabled:
+		return c.AuthMode
+	}
+	return AuthRequired
+}
+
+// AuthCIDRsOn returns the lan_bypass ranges (default: private ranges).
+func (c Config) AuthCIDRsOn() []string {
+	if len(c.AuthCIDRs) == 0 {
+		return DefaultAuthCIDRs
+	}
+	return c.AuthCIDRs
+}
+
+// ProxyHeaderOn returns the trusted username header (default Remote-User).
+func (c Config) ProxyHeaderOn() string {
+	if c.ProxyHeader == "" {
+		return "Remote-User"
+	}
+	return c.ProxyHeader
 }
 
 // UpgradeLoopDaysOn returns the effective upgrade-loop window.
