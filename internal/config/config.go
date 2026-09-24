@@ -31,6 +31,43 @@ type Schedule struct {
 	End   int    `json:"end"`   // minutes from midnight (may wrap)
 }
 
+// LangPolicy decides which audio/subtitle tracks langprune.Select keeps
+// AudioMode/SubsMode are independent: "off" (default, untouched)
+// | "report" (compute the extra_languages issue, change nothing) |
+// "apply" (acts on the decision). Deliberately no default keep list —
+// the API rejects report/apply while the matching list is empty.
+type LangPolicy struct {
+	AudioMode string   `json:"audio_mode,omitempty"` // off|report|apply
+	SubsMode  string   `json:"subs_mode,omitempty"`  // off|report|apply
+	AudioKeep []string `json:"audio_keep,omitempty"` // ISO 639-2 codes, user-entered
+	SubsKeep  []string `json:"subs_keep,omitempty"`
+	// KeepUndetermined keeps tracks with no/"und" language tag rather than
+	// dropping them as unmatched. Default on: safer when the tag is just
+	// missing metadata, not really a foreign track.
+	KeepUndetermined *bool `json:"keep_undetermined,omitempty"`
+	// KeepCommentary keeps commentary tracks that match the language list
+	// like any other track. Default off: commentary is usually redundant
+	// even in a kept language.
+	KeepCommentary bool `json:"keep_commentary,omitempty"`
+	// BestPerLanguage keeps only the single best track per language
+	// (audio: most channels then highest bitrate; subtitles: the default
+	// track) instead of every matching track.
+	BestPerLanguage bool `json:"best_per_language,omitempty"`
+	// KeepSDH keeps hearing-impaired subtitle tracks that match the
+	// language list like any other track. Default on.
+	KeepSDH *bool `json:"keep_sdh,omitempty"`
+}
+
+// KeepUndeterminedOn reports the effective setting (default on).
+func (p LangPolicy) KeepUndeterminedOn() bool {
+	return p.KeepUndetermined == nil || *p.KeepUndetermined
+}
+
+// KeepSDHOn reports the effective setting (default on).
+func (p LangPolicy) KeepSDHOn() bool {
+	return p.KeepSDH == nil || *p.KeepSDH
+}
+
 // Config is the whole persisted configuration.
 type Config struct {
 	Libraries []Library `json:"libraries"`
@@ -96,6 +133,10 @@ type Config struct {
 	// default) instead of the encode schedule. Empty means never on their own;
 	// "Upscale now" always runs.
 	UpscaleSchedules []Schedule `json:"upscale_schedules"`
+
+	// LangPolicy: which audio/subtitle tracks to drop by language.
+	// Everything off/empty by default — deliberately no default keep list.
+	LangPolicy LangPolicy `json:"lang_policy,omitempty"`
 
 	JellyfinURL    string `json:"jellyfin_url"`
 	JellyfinAPIKey string `json:"jellyfin_api_key"`
