@@ -291,6 +291,12 @@ var alters = []string{
 	// Sidecar files a job created, JSON string array; RestoreTrash
 	// deletes exactly these and only these.
 	`ALTER TABLE jobs ADD COLUMN sidecars_json TEXT NOT NULL DEFAULT '[]'`,
+	// Per-file override of image_subs_mode; "" = inherit. Same
+	// reprobe-safety reasoning as sidecar_mode.
+	`ALTER TABLE files ADD COLUMN image_subs_mode TEXT NOT NULL DEFAULT ''`,
+	// Cached OCR attempt result, same no-retry-every-cycle
+	// reasoning as tune_json.
+	`ALTER TABLE files ADD COLUMN ocr_json TEXT NOT NULL DEFAULT ''`,
 }
 
 func (s *Store) migrate() error {

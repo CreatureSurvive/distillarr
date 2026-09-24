@@ -9,6 +9,7 @@ import (
 
 	"mediatrans/internal/config"
 	"mediatrans/internal/encode"
+	"mediatrans/internal/imagesubs"
 	"mediatrans/internal/langprune"
 	"mediatrans/internal/store"
 )
@@ -48,6 +49,7 @@ var Types = []Type{
 	{"extra_languages", "Extra language tracks", Info, "Audio or subtitle tracks in languages your language policy doesn't keep are still present. Report mode only counts them; switching a mode to apply drops them.", "file"},
 	{"mixed_season", "Mixed formats in a season", Reencode, "Episodes in the same season use different codecs, containers or resolutions, which can cause inconsistent playback or transcoding.", "season"},
 	{"forces_transcode", "Forces client transcode", Info, "A Jellyfin or Plex session played this file with a transcode in the last 30 days, so at least one client couldn't play it directly. See the file page for the reasons.", "file"},
+	{"subs_ocr_low_confidence", "Image subtitle OCR came out low-confidence", Info, "The last OCR attempt on this file's image subtitle track scored below your confidence threshold, so the track was left untouched. See the file page for the score and a re-run option.", "file"},
 }
 
 // ByKey finds a type.
@@ -107,6 +109,9 @@ func Detect(f *store.File, cfg config.Config, worth, measuredMiss, upgradePendin
 	}
 	if has, _ := ExtraLanguages(f, cfg, origLangName, instanceName); has {
 		out = append(out, "extra_languages")
+	}
+	if r, ok := imagesubs.UnmarshalResult(f.OCRJSON); ok && r.Failed {
+		out = append(out, "subs_ocr_low_confidence")
 	}
 	if legacyCodecs[f.VideoCodec] {
 		out = append(out, "legacy_codec")

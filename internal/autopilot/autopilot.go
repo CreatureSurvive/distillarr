@@ -50,7 +50,10 @@ type Decision struct {
 	// SidecarMode is the rule's subtitle-sidecar override (// RuleAction.SidecarMode); "" means "use the file/global resolution
 	// as-is".
 	SidecarMode string `json:"sidecar_mode,omitempty"`
-	Reason      string `json:"reason"`
+	// ImageSubsMode is the rule's image-subtitle override (// RuleAction.ImageSubsMode); "" means "use the file/global resolution
+	// as-is".
+	ImageSubsMode string `json:"image_subs_mode,omitempty"`
+	Reason        string `json:"reason"`
 }
 
 // Evaluate walks rules in order and returns the first enabled match.
@@ -68,6 +71,7 @@ func Evaluate(f *store.File, rec recs.Recommendation, policy *recs.Policy, ctx C
 				Codec: r.Then.Codec, Quality: r.Then.Quality, AudioRules: r.Then.AudioRules,
 				PruneLanguages: r.Then.PruneLanguages,
 				SidecarMode:    r.Then.SidecarMode,
+				ImageSubsMode:  r.Then.ImageSubsMode,
 				Reason:         fmt.Sprintf("rule %q matched", r.Name),
 			}
 		}

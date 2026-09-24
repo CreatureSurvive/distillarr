@@ -13,6 +13,7 @@ import (
 
 	"mediatrans/internal/config"
 	"mediatrans/internal/encode"
+	"mediatrans/internal/imagesubs"
 	"mediatrans/internal/langprune"
 	"mediatrans/internal/res"
 	"mediatrans/internal/sidecar"
@@ -345,6 +346,20 @@ func Recommend(f *store.File, cfg config.Config) Recommendation {
 	sidecarMode := cfg.EffectiveSidecarMode(f.SidecarMode, "")
 	s.SidecarMode = sidecarMode
 	s.Subs = append(s.Subs, sidecar.DropEntries(f.Subs, sidecarMode, s.Subs)...)
+	// Image subtitle handling: resolved mode rides on Settings too
+	// (ImageSubsMode), for the engine to know whether to extract
+	// PGS/VobSub sidecars. "ocr" mode's own drop (of the one
+	// successfully-OCR'd track, if the user turned off keeping the
+	// original) reads the cached OCR result — OCR runs as its own job
+	// kind (see jobs.Engine), not through this recommendation.
+	imgMode := cfg.EffectiveImageSubsMode(f.ImageSubsMode, "")
+	s.ImageSubsMode = imgMode
+	var ocrTrackIndex int
+	var ocrSucceeded bool
+	if r, ok := imagesubs.UnmarshalResult(f.OCRJSON); ok && !r.Failed {
+		ocrTrackIndex, ocrSucceeded = r.TrackIndex, true
+	}
+	s.Subs = append(s.Subs, imagesubs.DropEntries(f.Subs, imgMode, cfg.ImageSubsKeepOriginalOn(), ocrTrackIndex, ocrSucceeded, s.Subs)...)
 	if f.HDR == "dolby_vision" {
 		r.Action = "caution"
 		r.Reason = "Dolby Vision source: re-encoding drops the Dolby Vision layer. Skipped unless you queue it by hand."

@@ -141,6 +141,14 @@ type Settings struct {
 	// pruning's are; this field only tells the engine whether/how to
 	// extract.
 	SidecarMode string `json:"sidecar_mode,omitempty"`
+
+	// ImageSubsMode: "" | "sidecar" | "ocr". Carries the resolved
+	// image_subs_mode through to the engine, same pattern as SidecarMode.
+	// "sidecar" extracts PGS/VobSub tracks right before replace, exactly
+	// like SidecarMode's text extraction. "ocr" does nothing here — OCR
+	// runs as its own job kind (see jobs.Engine), not folded into a
+	// regular encode/remux job.
+	ImageSubsMode string `json:"image_subs_mode,omitempty"`
 }
 
 // DefaultRenderNode is a last-resort fallback for when no probe has chosen a

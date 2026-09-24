@@ -41,6 +41,9 @@ type intakePromoter struct {
 	// forceSidecar applies a rule's subtitle-sidecar override (// RuleAction.SidecarMode) for a "queue_override" action. nil means
 	// "do nothing".
 	forceSidecar func(f *store.File, mode string, st *encode.Settings)
+	// forceImageSubs applies a rule's image-subtitle override (// RuleAction.ImageSubsMode) for a "queue_override" action. nil means
+	// "do nothing".
+	forceImageSubs func(f *store.File, mode string, st *encode.Settings)
 	// codecPenaltyBlocked reports whether f's settings must be held for
 	// confirmation instead of queued: the owning arr instance has
 	// an unacknowledged codec penalty and settings is a real HEVC/AV1
@@ -73,6 +76,7 @@ func (s *Server) newIntakePromoter() *intakePromoter {
 			st := issues.QuickFix(f, cfg)
 			applyLangPrune(f, cfg, &st)
 			applySidecar(f, cfg, &st)
+			applyImageSubs(f, cfg, &st)
 			return st
 		},
 		forcePrune: func(f *store.File, st *encode.Settings) {
@@ -80,6 +84,9 @@ func (s *Server) newIntakePromoter() *intakePromoter {
 		},
 		forceSidecar: func(f *store.File, mode string, st *encode.Settings) {
 			forceSidecarMode(f, s.cfg.Get(), mode, st)
+		},
+		forceImageSubs: func(f *store.File, mode string, st *encode.Settings) {
+			forceImageSubsMode(f, s.cfg.Get(), mode, st)
 		},
 		codecPenaltyBlocked: s.codecPenaltyBlocked,
 		estimateSeconds:     s.eng.EstimateSeconds,
@@ -204,6 +211,9 @@ func (p *intakePromoter) promoteOne(st *store.Store, row store.Intake) {
 				}
 				if d.SidecarMode != "" && p.forceSidecar != nil {
 					p.forceSidecar(f, d.SidecarMode, &settings)
+				}
+				if d.ImageSubsMode != "" && p.forceImageSubs != nil {
+					p.forceImageSubs(f, d.ImageSubsMode, &settings)
 				}
 			}
 			// The rule engine decided this, not whatever put the row in

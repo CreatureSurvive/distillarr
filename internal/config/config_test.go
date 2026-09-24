@@ -42,6 +42,42 @@ func TestEffectiveSidecarMode(t *testing.T) {
 	}
 }
 
+func TestEffectiveImageSubsMode(t *testing.T) {
+	c := Config{ImageSubsMode: "sidecar"}
+	if got := c.EffectiveImageSubsMode("", ""); got != "sidecar" {
+		t.Errorf("no overrides: got %q, want global sidecar", got)
+	}
+	if got := c.EffectiveImageSubsMode("", "ocr"); got != "ocr" {
+		t.Errorf("rule override should win over global: got %q", got)
+	}
+	if got := c.EffectiveImageSubsMode("ocr", "sidecar"); got != "ocr" {
+		t.Errorf("file override should win over both rule and global: got %q", got)
+	}
+	if got := (Config{}).EffectiveImageSubsMode("", ""); got != "keep" {
+		t.Errorf("nothing set anywhere: got %q, want keep", got)
+	}
+}
+
+func TestImageSubsKeepOriginalOnDefault(t *testing.T) {
+	if !(Config{}).ImageSubsKeepOriginalOn() {
+		t.Error("default should be on (the safer choice)")
+	}
+	off := false
+	if (Config{ImageSubsKeepOriginal: &off}).ImageSubsKeepOriginalOn() {
+		t.Error("explicit false should be respected")
+	}
+}
+
+func TestOCRMinConfidenceOnDefault(t *testing.T) {
+	if got := (Config{}).OCRMinConfidenceOn(); got != 80 {
+		t.Errorf("default = %v, want 80", got)
+	}
+	v := 65.0
+	if got := (Config{OCRMinConfidence: &v}).OCRMinConfidenceOn(); got != 65 {
+		t.Errorf("explicit value = %v, want 65", got)
+	}
+}
+
 func TestPlexPathMapBothWays(t *testing.T) {
 	c := Config{PlexPathMap: "/media=/srv/media"} // Plex mounts /srv/media as /media
 	for _, tc := range []struct{ plex, local string }{

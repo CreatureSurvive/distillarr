@@ -109,6 +109,17 @@ type File struct {
 	// resolution". User-set only; never touched by scan/probe, same
 	// reprobe-safety reasoning as LangPruneExempt.
 	SidecarMode string `json:"sidecar_mode,omitempty"`
+	// ImageSubsMode overrides image_subs_mode for this file: "" |
+	// "sidecar" | "ocr". User-set only; same reprobe-safety reasoning as
+	// LangPruneExempt/SidecarMode.
+	ImageSubsMode string `json:"image_subs_mode,omitempty"`
+	// OCRJSON caches the last OCR attempt on this file's primary image
+	// subtitle track: {"track_index":8,"lang":"eng","confidence":87.3,
+	// "srt_name":"Movie.eng.srt","failed":false,"attempted_at":"..."}.
+	// Mirrors TuneJSON's cache-so-no-retry-every-cycle pattern. Cleared to
+	// re-queue for another attempt (e.g. after raising the track's own
+	// quality isn't possible, but a confidence-threshold change is).
+	OCRJSON string `json:"-"`
 }
 
 // HasBars reports detected black bars inside the encoded frame.
@@ -136,7 +147,8 @@ const fileCols = `id, path, library, title, year, season, episode, ep_title, qua
 	size, mtime_ns, container, duration, video_codec, width, height, bit_depth, fps, hdr,
 	video_bitrate, total_bitrate, audio_json, sub_count, sidecars_json, transcode_score,
 	rec_json, missing, scanned_at, updated_at, interlaced, crop_w, crop_h, crop_x, crop_y, crop_checked, tune_json,
-	video_tag, faststart, meta_checked, issues, nlink, subs_json, lang_prune_exempt, sidecar_mode`
+	video_tag, faststart, meta_checked, issues, nlink, subs_json, lang_prune_exempt, sidecar_mode,
+	image_subs_mode, ocr_json`
 
 func scanFile(row interface{ Scan(...any) error }) (*File, error) {
 	f := &File{}
@@ -148,7 +160,8 @@ func scanFile(row interface{ Scan(...any) error }) (*File, error) {
 		&f.VideoBitrate, &f.TotalBitrate, &audio, &f.SubCount, &sidecars,
 		&f.TranscodeScore, &f.RecJSON, &missing, &f.ScannedAt, &f.UpdatedAt, &interlaced,
 		&f.CropW, &f.CropH, &f.CropX, &f.CropY, &cropChecked, &f.TuneJSON,
-		&f.VideoTag, &f.Faststart, &metaChecked, &f.Issues, &f.Nlink, &subs, &langPruneExempt, &f.SidecarMode)
+		&f.VideoTag, &f.Faststart, &metaChecked, &f.Issues, &f.Nlink, &subs, &langPruneExempt, &f.SidecarMode,
+		&f.ImageSubsMode, &f.OCRJSON)
 	if err != nil {
 		return nil, err
 	}
@@ -322,6 +335,20 @@ func (s *Store) SetLangPruneExempt(id int64, exempt bool) error {
 // "" clears it back to "inherit the rule/global resolution".
 func (s *Store) SetSidecarMode(id int64, mode string) error {
 	_, err := s.dbW.Exec(`UPDATE files SET sidecar_mode=? WHERE id=?`, mode, id)
+	return err
+}
+
+// SetImageSubsMode sets or clears a file's image_subs_mode override
+// "" clears it back to "inherit the rule/global resolution".
+func (s *Store) SetImageSubsMode(id int64, mode string) error {
+	_, err := s.dbW.Exec(`UPDATE files SET image_subs_mode=? WHERE id=?`, mode, id)
+	return err
+}
+
+// SetOCRResult caches an OCR attempt; "" re-queues the file for
+// another attempt.
+func (s *Store) SetOCRResult(id int64, ocrJSON string) error {
+	_, err := s.dbW.Exec(`UPDATE files SET ocr_json=? WHERE id=?`, ocrJSON, id)
 	return err
 }
 

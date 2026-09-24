@@ -9,6 +9,7 @@ import (
 	"mediatrans/internal/config"
 	"mediatrans/internal/encode"
 	"mediatrans/internal/hwprobe"
+	"mediatrans/internal/imagesubs"
 	"mediatrans/internal/issues"
 	"mediatrans/internal/recs"
 	"mediatrans/internal/store"
@@ -38,6 +39,9 @@ type fileOut struct {
 	Upscaled *store.UpscaleRecord `json:"upscaled,omitempty"`
 	// Arr is set when a connected Sonarr/Radarr instance manages this file.
 	Arr *arrItemOut `json:"arr,omitempty"`
+	// OCR is the last OCR attempt on this file's image subtitle track
+	// parsed from the internal-only OCRJSON cache.
+	OCR *imagesubs.OCRResult `json:"ocr,omitempty"`
 }
 
 // arrItemOut is a store.ArrItem shaped for display: the instance name and
@@ -133,6 +137,9 @@ func (s *Server) decorate(files []*store.File) []fileOut {
 		}
 		if a, ok := arrOuts[f.ID]; ok {
 			fo.Arr = &a
+		}
+		if r, ok := imagesubs.UnmarshalResult(f.OCRJSON); ok {
+			fo.OCR = &r
 		}
 		out = append(out, fo)
 	}

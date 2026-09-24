@@ -104,6 +104,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/v1/files/{id}/fix", s.fixFile)
 	mux.HandleFunc("POST /api/v1/files/{id}/lang-exempt", s.setLangExempt)
 	mux.HandleFunc("POST /api/v1/files/{id}/sidecar-mode", s.setSidecarMode)
+	mux.HandleFunc("POST /api/v1/files/{id}/image-subs-mode", s.setImageSubsMode)
+	mux.HandleFunc("POST /api/v1/files/{id}/ocr", s.ocrFile)
 	mux.HandleFunc("GET /api/v1/langprune/report", s.langpruneReportHandler)
 	mux.HandleFunc("POST /api/v1/langprune/apply", s.langpruneApplyHandler)
 	mux.HandleFunc("GET /api/v1/issues", s.issueSummary)
@@ -342,7 +344,8 @@ func (s *Server) putConfig(w http.ResponseWriter, r *http.Request) {
 	s.eng.Kick()
 	for _, k := range []string{"default_codec", "default_quality", "preferred_backend", "min_savings_pct",
 		"audio_pcm_target", "recompress_hevc", "max_height", "tonemap_hdr", "default_speed", "prefer_mp4", "crop_bars",
-		"lang_policy", "lang_library_overrides", "lang_instance_overrides", "subs_sidecar_mode"} {
+		"lang_policy", "lang_library_overrides", "lang_instance_overrides", "subs_sidecar_mode",
+		"image_subs_mode", "image_subs_keep_original", "ocr_min_confidence"} {
 		if _, ok := patch[k]; ok {
 			s.scan.RefreshRecsSoon()
 			break

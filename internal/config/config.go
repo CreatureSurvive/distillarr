@@ -142,6 +142,35 @@ func (c Config) EffectiveSidecarMode(fileOverride, ruleOverride string) string {
 	}
 }
 
+// EffectiveImageSubsMode resolves image_subs_mode the same way
+// EffectiveSidecarMode does: file override > rule override > global
+// default. "" resolves to "keep" (do nothing).
+func (c Config) EffectiveImageSubsMode(fileOverride, ruleOverride string) string {
+	switch {
+	case fileOverride != "":
+		return fileOverride
+	case ruleOverride != "":
+		return ruleOverride
+	case c.ImageSubsMode != "":
+		return c.ImageSubsMode
+	default:
+		return "keep"
+	}
+}
+
+// ImageSubsKeepOriginalOn reports the effective setting (default on).
+func (c Config) ImageSubsKeepOriginalOn() bool {
+	return c.ImageSubsKeepOriginal == nil || *c.ImageSubsKeepOriginal
+}
+
+// OCRMinConfidenceOn reports the effective threshold (default 80).
+func (c Config) OCRMinConfidenceOn() float64 {
+	if c.OCRMinConfidence == nil {
+		return 80
+	}
+	return *c.OCRMinConfidence
+}
+
 // Config is the whole persisted configuration.
 type Config struct {
 	Libraries []Library `json:"libraries"`
@@ -223,6 +252,25 @@ type Config struct {
 	// fit MP4 as mov_text, so this is only for users who want sidecar
 	// files too. Resolved per file by EffectiveSidecarMode.
 	SubsSidecarMode string `json:"subs_sidecar_mode,omitempty"`
+
+	// ImageSubsMode: "" (keep, default) | "sidecar" | "ocr". PGS
+	// and VobSub sidecar files are not known to be selectable in Jellyfin
+	// or Plex — "sidecar" is
+	// offered anyway, gated by a UI warning, per user direction rather
+	// than dropping it. Resolved per file
+	// by EffectiveImageSubsMode (file override > rule override > this).
+	ImageSubsMode string `json:"image_subs_mode,omitempty"`
+	// ImageSubsKeepOriginal keeps the source image subtitle track in the
+	// output alongside whatever sidecar/OCR mode produces. Default on
+	// (the safer choice — dropping is a one-way loss of the original
+	// bitmap); see ImageSubsKeepOriginalOn.
+	ImageSubsKeepOriginal *bool `json:"image_subs_keep_original,omitempty"`
+	// OCRMinConfidence gates whether an OCR result is used: below this,
+	// the track stays untouched and the file gets the
+	// subs_ocr_low_confidence info issue instead. Default 80 (see
+	// OCRMinConfidenceOn); real tesseract word
+	// confidence measures in the high 80s/low 90s for clean PGS tracks.
+	OCRMinConfidence *float64 `json:"ocr_min_confidence,omitempty"`
 
 	JellyfinURL    string `json:"jellyfin_url"`
 	JellyfinAPIKey string `json:"jellyfin_api_key"`
@@ -328,6 +376,12 @@ type RuleAction struct {
 	// Kind == "queue_override"; still loses to an explicit per-file
 	// override (see EffectiveSidecarMode).
 	SidecarMode string `json:"sidecar_mode,omitempty"`
+	// ImageSubsMode overrides image_subs_mode for files this rule matches
+	// same values as Config.ImageSubsMode. "" means "use the
+	// file/global resolution unchanged". Only applies with
+	// Kind == "queue_override"; still loses to an explicit per-file
+	// override (see EffectiveImageSubsMode).
+	ImageSubsMode string `json:"image_subs_mode,omitempty"`
 }
 
 // AutoRule is one ordered entry in Config.AutoRules.

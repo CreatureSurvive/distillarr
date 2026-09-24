@@ -20,6 +20,7 @@ import (
 	"mediatrans/internal/config"
 	"mediatrans/internal/encode"
 	"mediatrans/internal/hwprobe"
+	"mediatrans/internal/imagesubs"
 	"mediatrans/internal/media"
 	"mediatrans/internal/neural"
 	"mediatrans/internal/recs"
@@ -312,6 +313,13 @@ func (e *Engine) runJob(j *store.Job, resume bool) {
 
 	e.notify(EvJob, map[string]any{"id": j.ID, "status": store.StatusRunning})
 
+	// OCR is its own job kind: no probe/tune/verify/replace at
+	// all, since it never touches the video file — see runOCRJob.
+	if j.Backend == "ocr" {
+		e.runOCRJob(ctx, j)
+		return
+	}
+
 	var settings encode.Settings
 	if err := json.Unmarshal([]byte(j.SettingsJSON), &settings); err != nil {
 		e.fail(j, fmt.Sprintf("bad settings json: %v", err), "")
@@ -524,18 +532,30 @@ func (e *Engine) runJob(j *store.Job, resume bool) {
 		return
 	}
 
-	// Subtitle sidecar extraction: runs against the untouched
-	// original source, right before Replace swaps it out, so it never
-	// races the encode. Best-effort: a failure here doesn't fail the
-	// encode/replace that's the reason this job exists.
+	// Subtitle sidecar extraction (text and image): runs against
+	// the untouched original source, right before Replace swaps it out,
+	// so it never races the encode. Best-effort: a failure here doesn't
+	// fail the encode/replace that's the reason this job exists. Both
+	// kinds feed the same jobs.sidecars_json, so their paths are
+	// collected together before the one call that records them —
+	// SetJobSidecars replaces the column, it doesn't append.
+	var sidecarPaths []string
 	if created, serr := sidecar.Extract(ctx, j.SrcPath, src.Subtitles(), settings.SidecarMode); serr != nil {
-		log.Printf("jobs: sidecar extraction for job %d: %v", j.ID, serr)
-	} else if len(created) > 0 {
-		paths := make([]string, len(created))
-		for i, c := range created {
-			paths[i] = c.Path
+		log.Printf("jobs: text sidecar extraction for job %d: %v", j.ID, serr)
+	} else {
+		for _, c := range created {
+			sidecarPaths = append(sidecarPaths, c.Path)
 		}
-		_ = e.st.SetJobSidecars(j.ID, paths)
+	}
+	if created, serr := imagesubs.ExtractSidecars(ctx, j.SrcPath, src.Subtitles(), settings.ImageSubsMode); serr != nil {
+		log.Printf("jobs: image sidecar extraction for job %d: %v", j.ID, serr)
+	} else {
+		for _, c := range created {
+			sidecarPaths = append(sidecarPaths, c.Path)
+		}
+	}
+	if len(sidecarPaths) > 0 {
+		_ = e.st.SetJobSidecars(j.ID, sidecarPaths)
 	}
 
 	// Replace.

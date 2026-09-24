@@ -111,6 +111,27 @@ RUN echo "=== ffmpeg ===" && ffmpeg -version | head -1 && \
     echo "=== hw encoders ===" && \
     ffmpeg -encoders 2>/dev/null | grep -oE '[a-z0-9_]+_(qsv|nvenc|vaapi)' | sort -u || true
 
+# ---- Tesseract OCR (image-subtitle OCR mode) ----
+# pgsrip drives PGS bitmap decode + tesseract; it needs mkvextract on
+# PATH even for raw .sup input, and its opencv-python dependency needs
+# libgl1/libglib2.0-0 to import at all in this non-X image (without
+# them, `import cv2` fails outright).
+# Only the eng traineddata is bundled; internal/imagesubs downloads
+# other languages on first use into OCRTessdataDir (/config/tessdata),
+# same as the neural upscaler's shader-cache pattern, to keep a fresh
+# install's image small.
+RUN apt-get update -qq && \
+    apt-get install -y --no-install-recommends \
+        python3 \
+        python3-pip \
+        tesseract-ocr \
+        tesseract-ocr-eng \
+        libgl1 \
+        libglib2.0-0 \
+        mkvtoolnix \
+    && pip3 install --no-cache-dir --break-system-packages pgsrip \
+    && rm -rf /var/lib/apt/lists/*
+
 ENV LIBVA_DRIVERS_PATH="/usr/lib/x86_64-linux-gnu/dri" \
     LIBVA_DRIVER_NAME="iHD" \
     DISTILLARR_LISTEN=":8080"
