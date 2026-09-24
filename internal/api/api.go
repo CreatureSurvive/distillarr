@@ -396,6 +396,10 @@ func (s *Server) putConfig(w http.ResponseWriter, r *http.Request) {
 		if perr = validateAuth(next); perr != nil {
 			return
 		}
+		if next.AutopilotOrder != "" && next.AutopilotOrder != "popular" {
+			perr = fmt.Errorf("unknown autopilot order %q", next.AutopilotOrder)
+			return
+		}
 		if perr = validateLangPolicy(next.LangPolicy); perr != nil {
 			return
 		}

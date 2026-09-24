@@ -23,6 +23,9 @@ import (
 // in a fake clock and fake nlink/recommendation behavior without a real
 // file on disk; NewIntakePromoter wires the real ones.
 type intakePromoter struct {
+	// plays returns a file's play count when autopilot_order is
+	// "popular" (ok=false otherwise); nil in tests that don't care.
+	plays   func(fileID int64) (int, bool)
 	now     func() time.Time
 	reprobe func(path string) error
 	getFile func(fileID int64) (*store.File, error)
@@ -94,6 +97,12 @@ func (s *Server) newIntakePromoter() *intakePromoter {
 		codecPenaltyBlocked: s.codecPenaltyBlocked,
 		estimateSeconds:     s.eng.EstimateSeconds,
 		pressure:            s.diskPressure.Load,
+		plays: func(fileID int64) (int, bool) {
+			if s.cfg.Get().AutopilotOrder != "popular" {
+				return 0, false
+			}
+			return s.st.PlayStatFor(fileID).Plays, true
+		},
 	}
 }
 
@@ -228,6 +237,11 @@ func (p *intakePromoter) promoteOne(st *store.Store, row store.Intake) {
 				secs, _ := p.estimateSeconds(f, settings)
 				pressure := p.pressure != nil && p.pressure()
 				priority = autopilotPriority(f.Size-rec.EstOut, secs, d.Action == "quick_fix", pressure)
+				if p.plays != nil {
+					if n, ok := p.plays(f.ID); ok {
+						priority = popularPriority(priority, n)
+					}
+				}
 			}
 			p.enqueueNow(st, row, f, settings, "autopilot", priority)
 			return
@@ -468,4 +482,21 @@ func (s *Server) intakeDismissBulk(w http.ResponseWriter, r *http.Request) {
 	}
 	s.hub.Broadcast("intake", map[string]any{"bulk": "dismiss"})
 	writeJSON(w, http.StatusOK, map[string]any{"dismissed": ok})
+}
+
+// popularPriority reorders an autopilot priority for autopilot_order
+// "popular": the autopilot range is split into ten bands by play
+// count (0 … 9+ plays, most-watched in the front band) and the value
+// order is scaled into its band, so play count always wins and value per
+// GPU-second orders files with the same count. A zero (no override)
+// priority stays zero.
+func popularPriority(p, plays int) int {
+	if p == 0 {
+		return 0
+	}
+	const bands = 10
+	width := (autopilotPriorityMax - autopilotPriorityBase) / bands
+	band := bands - 1 - min(plays, bands-1)
+	inBand := (p - autopilotPriorityBase) * (width - 1) / (autopilotPriorityMax - autopilotPriorityBase)
+	return autopilotPriorityBase + 1 + band*width + inBand
 }

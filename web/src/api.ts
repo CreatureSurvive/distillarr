@@ -656,6 +656,9 @@ export type Config = {
   // off (0) unless the user sets a free-space threshold.
   disk_pressure_pct?: number;
   disk_pressure_budget_x?: number;
+  autopilot_budget_gb?: number;
+  autopilot_budget_hours?: number;
+  autopilot_order?: string; // "" (value per GPU-second) | "popular"
 };
 
 // One connected Sonarr or Radarr. api_key is never sent by the server

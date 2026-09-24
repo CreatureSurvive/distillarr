@@ -99,6 +99,7 @@ type autopilotBacklogFile struct {
 	Action     string  `json:"action"`
 	EstSeconds float64 `json:"est_seconds"`
 	EstSavedGB float64 `json:"est_saved_gb"`
+	Plays      int     `json:"plays"`
 }
 
 func (c autopilotBacklogFile) valuePerSec() float64 {
@@ -184,6 +185,7 @@ func (s *Server) autopilotBacklog(w http.ResponseWriter, r *http.Request) {
 			FileID: f.ID, Title: f.Title, Path: f.Path,
 			RuleID: d.RuleID, Rule: d.Rule, Action: d.Action,
 			EstSeconds: secs, EstSavedGB: float64(saved) / (1 << 30),
+			Plays: plays[f.ID].Plays,
 		})
 		return nil
 	})
@@ -196,6 +198,9 @@ func (s *Server) autopilotBacklog(w http.ResponseWriter, r *http.Request) {
 	// ahead of everything else regardless of value per GPU-second — see
 	// — with value per GPU-second still
 	// deciding order within each group.
+	// autopilot_order "popular" puts the most-watched files first
+	// (after quick fixes under pressure), value breaking ties.
+	popular := cfg.AutopilotOrder == "popular"
 	sort.SliceStable(candidates, func(i, j int) bool {
 		if pressure {
 			qi := candidates[i].Action == "quick_fix"
@@ -203,6 +208,9 @@ func (s *Server) autopilotBacklog(w http.ResponseWriter, r *http.Request) {
 			if qi != qj {
 				return qi
 			}
+		}
+		if popular && candidates[i].Plays != candidates[j].Plays {
+			return candidates[i].Plays > candidates[j].Plays
 		}
 		return candidates[i].valuePerSec() > candidates[j].valuePerSec()
 	})
@@ -243,6 +251,7 @@ func (s *Server) autopilotBacklog(w http.ResponseWriter, r *http.Request) {
 		"budget_hours":      cfg.AutopilotBudgetHours,
 		"disk_pressure":     pressure,
 		"budget_multiplier": mult,
+		"order":             map[bool]string{true: "popular", false: "value"}[popular],
 		"total_candidates":  len(candidates),
 		"selected_count":    len(picked),
 		"est_saved_gb":      float64(spentBytes) / (1 << 30),

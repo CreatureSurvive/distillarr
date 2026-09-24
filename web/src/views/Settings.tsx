@@ -1230,6 +1230,20 @@ function AutopilotSection({ cfg, setCfg }: { cfg: Config; setCfg: (c: Config) =>
         {" "}An instance with an unacknowledged codec-penalty warning never gets an autopilot-queued HEVC/AV1
         re-encode — those go to Queue → Needs confirmation instead.
       </p>
+      <div className="opts">
+        <Field label="Order" hint="Most watched first uses play counts from Jellyfin sessions, Jellystat history and Plex. Value still decides between files watched equally often.">
+          <Seg value={cfg.autopilot_order || ""} onChange={(v) => api.saveConfig({ autopilot_order: v }).then(setCfg).catch((e) => toast(e.message, "err"))}
+            options={[{ value: "", label: "Most space per GPU-hour" }, { value: "popular", label: "Most watched first" }]} />
+        </Field>
+        <Field label="Budget per window" hint="Caps what autopilot queues per processing window. 0 = no limit.">
+          <span style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+            <input className="input" type="number" min={0} style={{ width: 90 }} defaultValue={cfg.autopilot_budget_gb || 0} aria-label="Budget GB"
+              onBlur={(e) => api.saveConfig({ autopilot_budget_gb: Number(e.target.value) || 0 }).then(setCfg).catch((er) => toast(er.message, "err"))} /> GB saved
+            <input className="input" type="number" min={0} style={{ width: 90 }} defaultValue={cfg.autopilot_budget_hours || 0} aria-label="Budget hours"
+              onBlur={(e) => api.saveConfig({ autopilot_budget_hours: Number(e.target.value) || 0 }).then(setCfg).catch((er) => toast(er.message, "err"))} /> encode hours
+          </span>
+        </Field>
+      </div>
 
       {rules.length === 0 ? (
         <p className="dim small">No rules yet — every candidate falls through to the built-in default.</p>

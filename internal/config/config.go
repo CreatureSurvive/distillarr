@@ -364,6 +364,9 @@ type Config struct {
 	// needed the way the default-on settings above need one.
 	AutopilotBudgetGB    float64 `json:"autopilot_budget_gb,omitempty"`
 	AutopilotBudgetHours float64 `json:"autopilot_budget_hours,omitempty"`
+	// AutopilotOrder: "" (value, the default: bytes saved per GPU-second)
+	// or "popular" (most-watched first, value breaking ties).
+	AutopilotOrder string `json:"autopilot_order,omitempty"`
 
 	// DiskPressurePct turns on disk-pressure mode once any
 	// library's filesystem free space drops to this percentage or

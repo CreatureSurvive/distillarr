@@ -622,3 +622,25 @@ func TestIntakeListHandlerFiltersAndIncludesFileInfo(t *testing.T) {
 		t.Errorf("body = %s, want file_title included", rec.Body.String())
 	}
 }
+
+func TestPopularPriority(t *testing.T) {
+	a := autopilotPriority(10<<30, 3600, false, false) // good value
+	b := autopilotPriority(1<<30, 3600, false, false)  // poorer value
+	if !(a < b) {
+		t.Fatalf("value order broken: %d %d", a, b)
+	}
+	// Watched 5 times beats better value never watched.
+	if !(popularPriority(b, 5) < popularPriority(a, 0)) {
+		t.Errorf("popular: %d vs %d", popularPriority(b, 5), popularPriority(a, 0))
+	}
+	// Same count: value still decides.
+	if !(popularPriority(a, 2) < popularPriority(b, 2)) {
+		t.Error("ties must keep value order")
+	}
+	if popularPriority(0, 3) != 0 {
+		t.Error("no-override priority must stay 0")
+	}
+	if p := popularPriority(a, 1000000); p <= autopilotPriorityBase {
+		t.Errorf("must stay after manual jobs: %d", p)
+	}
+}

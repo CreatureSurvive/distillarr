@@ -116,6 +116,7 @@ instead, and a blank value in a `PUT` keeps the saved one.
 | `autopilot_enabled` | off | Rule-driven queueing of new and existing files. |
 | `auto_rules` | none | Ordered rules; first match wins (see the Automation tab). |
 | `autopilot_budget_gb`, `autopilot_budget_hours` | `0` (unlimited) | Per-window cap on what autopilot queues. |
+| `autopilot_order` | blank (value) | Blank: most space saved per GPU-second first. `popular`: most-watched first (play counts from Jellyfin sessions, Jellystat and Plex), value breaking ties. |
 
 ## Notifications
 
