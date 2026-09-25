@@ -65,8 +65,15 @@ const doneRows = `FROM jobs j LEFT JOIN files f ON f.id=j.file_id WHERE j.status
 // file gives that file's total reduction from its original size to its
 // current size without needing to track the very first job specially.
 // Joined by file_id wherever a movie/season/show needs "already saved".
-const encodedSavingsSub = `SELECT file_id, COUNT(*) AS jobs, SUM(src_size-output_size) AS saved
-	FROM jobs WHERE status='done' AND reverted_at='' AND output_size>0 AND NOT (` + isUpscale + `) GROUP BY file_id`
+//
+// A job that changed the container (a.mkv -> a.mp4) keeps its file_id on
+// the old, now-missing row while the rescan files the output under a new
+// id, so each job is attributed to the live row at its dest_path first and
+// only falls back to file_id when there is none.
+const encodedSavingsSub = `SELECT file_id, COUNT(*) AS jobs, SUM(saved) AS saved FROM (
+	SELECT COALESCE((SELECT f2.id FROM files f2 WHERE f2.path=jobs.dest_path AND f2.missing=0), file_id) AS file_id,
+		src_size-output_size AS saved
+	FROM jobs WHERE status='done' AND reverted_at='' AND output_size>0 AND NOT (` + isUpscale + `)) GROUP BY file_id`
 const hoursExpr = `COALESCE(SUM(CASE WHEN j.started_at!='' AND j.finished_at!=''
 	THEN (julianday(j.finished_at)-julianday(j.started_at))*24 ELSE 0 END),0)`
 
