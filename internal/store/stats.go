@@ -2,6 +2,14 @@
 
 package store
 
+// EncodedSavings is one file/season/show's history-verified "already
+// saved": jobs counts every done job that ever replaced the file(s), and
+// Saved is the resulting byte reduction (see encodedSavingsSub).
+type EncodedSavings struct {
+	Jobs  int   `json:"jobs"`
+	Saved int64 `json:"saved"`
+}
+
 // HistoryTotals summarizes finished jobs.
 type HistoryTotals struct {
 	Done        int     `json:"done"`
@@ -50,6 +58,15 @@ type HistoryStats struct {
 const isUpscale = `settings_json LIKE '%"upscale_to"%'`
 
 const doneRows = `FROM jobs j LEFT JOIN files f ON f.id=j.file_id WHERE j.status='done' AND j.reverted_at='' AND j.output_size>0 AND NOT (j.` + isUpscale + `)`
+
+// encodedSavingsSub is a per-file rollup of every done, kept (non-reverted,
+// non-upscale) job's src_size-output_size. It telescopes across repeat
+// encodes (job2's src_size equals job1's output_size), so summing it for a
+// file gives that file's total reduction from its original size to its
+// current size without needing to track the very first job specially.
+// Joined by file_id wherever a movie/season/show needs "already saved".
+const encodedSavingsSub = `SELECT file_id, COUNT(*) AS jobs, SUM(src_size-output_size) AS saved
+	FROM jobs WHERE status='done' AND reverted_at='' AND output_size>0 AND NOT (` + isUpscale + `) GROUP BY file_id`
 const hoursExpr = `COALESCE(SUM(CASE WHEN j.started_at!='' AND j.finished_at!=''
 	THEN (julianday(j.finished_at)-julianday(j.started_at))*24 ELSE 0 END),0)`
 

@@ -900,8 +900,14 @@ type Series struct {
 	Height      int    `json:"height"`
 	WorthCount  int    `json:"worth_count"`
 	Reclaimable int64  `json:"reclaimable"`
-	SeriesID    string `json:"series_id,omitempty"`
-	Overview    string `json:"overview,omitempty"`
+	// EncodedJobs/EncodedSaved are the show's history-verified totals: how
+	// many done jobs ever replaced one of its files, and how many bytes
+	// that already saved (see encodedSavingsSub). Unlike Reclaimable (a
+	// projection for files not yet encoded), these reflect actual results.
+	EncodedJobs  int    `json:"encoded_jobs,omitempty"`
+	EncodedSaved int64  `json:"encoded_saved,omitempty"`
+	SeriesID     string `json:"series_id,omitempty"`
+	Overview     string `json:"overview,omitempty"`
 }
 
 var seriesSort = map[string]string{
@@ -935,8 +941,10 @@ func (s *Store) ListSeries(titleLike, sort string, onlyWorth bool) ([]Series, er
 		COALESCE(MAX(j.series_id),''), SUM(f.size),
 		CAST(COALESCE(AVG(NULLIF(f.video_bitrate,0)),0) AS INTEGER),
 		COALESCE(GROUP_CONCAT(DISTINCT f.video_codec),''), MAX(f.width), MAX(f.height),
-		SUM(`+worthExpr+`), CAST(SUM(`+savedExpr+`) AS INTEGER)
+		SUM(`+worthExpr+`), CAST(SUM(`+savedExpr+`) AS INTEGER),
+		CAST(COALESCE(SUM(je.jobs),0) AS INTEGER), CAST(COALESCE(SUM(je.saved),0) AS INTEGER)
 		FROM files f LEFT JOIN jellyfin j ON j.path=f.path
+		LEFT JOIN (`+encodedSavingsSub+`) je ON je.file_id=f.id
 		WHERE `+where+` GROUP BY f.title COLLATE NOCASE`+having+` ORDER BY `+order, args...)
 	if err != nil {
 		return nil, err
@@ -947,7 +955,8 @@ func (s *Store) ListSeries(titleLike, sort string, onlyWorth bool) ([]Series, er
 		var se Series
 		var w, h int
 		if err := rows.Scan(&se.Title, &se.Year, &se.Seasons, &se.Episodes, &se.SeriesID,
-			&se.TotalSize, &se.AvgBitrate, &se.Codecs, &w, &h, &se.WorthCount, &se.Reclaimable); err != nil {
+			&se.TotalSize, &se.AvgBitrate, &se.Codecs, &w, &h, &se.WorthCount, &se.Reclaimable,
+			&se.EncodedJobs, &se.EncodedSaved); err != nil {
 			return nil, err
 		}
 		se.Height = res.Class(w, h)
@@ -966,7 +975,10 @@ type SeasonStat struct {
 	Codecs      string `json:"codecs"`
 	WorthCount  int    `json:"worth_count"`
 	Reclaimable int64  `json:"reclaimable"`
-	SeasonID    string `json:"season_id,omitempty"`
+	// EncodedJobs/EncodedSaved: see Series.EncodedJobs/EncodedSaved.
+	EncodedJobs  int    `json:"encoded_jobs,omitempty"`
+	EncodedSaved int64  `json:"encoded_saved,omitempty"`
+	SeasonID     string `json:"season_id,omitempty"`
 }
 
 // ListSeasons returns per-season aggregates for a show.
@@ -974,8 +986,10 @@ func (s *Store) ListSeasons(show string) ([]SeasonStat, error) {
 	rows, err := s.dbR.Query(`SELECT f.season, COUNT(*), SUM(f.size),
 		CAST(COALESCE(AVG(NULLIF(f.video_bitrate,0)),0) AS INTEGER), MAX(f.width), MAX(f.height),
 		COALESCE(GROUP_CONCAT(DISTINCT f.video_codec),''),
-		SUM(`+worthExpr+`), CAST(SUM(`+savedExpr+`) AS INTEGER), COALESCE(MAX(j.season_id),'')
+		SUM(`+worthExpr+`), CAST(SUM(`+savedExpr+`) AS INTEGER), COALESCE(MAX(j.season_id),''),
+		CAST(COALESCE(SUM(je.jobs),0) AS INTEGER), CAST(COALESCE(SUM(je.saved),0) AS INTEGER)
 		FROM files f LEFT JOIN jellyfin j ON j.path=f.path
+		LEFT JOIN (`+encodedSavingsSub+`) je ON je.file_id=f.id
 		WHERE f.missing=0 AND f.library='tvshows' AND f.title=? COLLATE NOCASE
 		GROUP BY f.season ORDER BY f.season`, show)
 	if err != nil {
@@ -987,13 +1001,46 @@ func (s *Store) ListSeasons(show string) ([]SeasonStat, error) {
 		var se SeasonStat
 		var w, h int
 		if err := rows.Scan(&se.Season, &se.Episodes, &se.TotalSize, &se.AvgBitrate, &w, &h,
-			&se.Codecs, &se.WorthCount, &se.Reclaimable, &se.SeasonID); err != nil {
+			&se.Codecs, &se.WorthCount, &se.Reclaimable, &se.SeasonID,
+			&se.EncodedJobs, &se.EncodedSaved); err != nil {
 			return nil, err
 		}
 		se.Height = res.Class(w, h)
 		out = append(out, se)
 	}
 	return out, rows.Err()
+}
+
+// EncodedSavingsMap batches per-file "already saved" lookups (see
+// encodedSavingsSub) for a movie/episode detail page: how many done jobs
+// ever replaced this file, and how many bytes that already saved. Files
+// never encoded are simply absent from the result.
+func (s *Store) EncodedSavingsMap(fileIDs []int64) (map[int64]EncodedSavings, error) {
+	out := map[int64]EncodedSavings{}
+	const chunk = 400
+	for i := 0; i < len(fileIDs); i += chunk {
+		end := min(i+chunk, len(fileIDs))
+		args := make([]any, 0, end-i)
+		for _, id := range fileIDs[i:end] {
+			args = append(args, id)
+		}
+		rows, err := s.dbR.Query(`SELECT file_id, jobs, saved FROM (`+encodedSavingsSub+`) WHERE file_id IN (`+
+			strings.TrimSuffix(strings.Repeat("?,", end-i), ",")+`)`, args...)
+		if err != nil {
+			return out, err
+		}
+		for rows.Next() {
+			var id int64
+			var es EncodedSavings
+			if err := rows.Scan(&id, &es.Jobs, &es.Saved); err != nil {
+				rows.Close()
+				return out, err
+			}
+			out[id] = es
+		}
+		rows.Close()
+	}
+	return out, nil
 }
 
 // LibraryStat summarizes a library for the dashboard.

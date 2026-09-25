@@ -107,6 +107,9 @@ export default function ShowView({ live }: { live: LiveState }) {
             <span>{show.seasons.length} season{show.seasons.length === 1 ? "" : "s"}</span>
             <span>{show.seasons.reduce((a, s) => a + s.episodes, 0)} episodes</span>
             <span>{bytes(show.seasons.reduce((a, s) => a + s.total_size, 0))}</span>
+            {show.seasons.reduce((a, s) => a + (s.encoded_saved || 0), 0) > 0 && (
+              <span className="teal">−{bytes(show.seasons.reduce((a, s) => a + (s.encoded_saved || 0), 0))} saved</span>
+            )}
             {show.seasons.reduce((a, s) => a + s.reclaimable, 0) > 0 && (
               <span className="teal">−{bytes(show.seasons.reduce((a, s) => a + s.reclaimable, 0))} possible</span>
             )}
@@ -123,6 +126,7 @@ export default function ShowView({ live }: { live: LiveState }) {
             <Art src={s.image} title={seasonName(s.season)} ratio="2 / 3" />
             <div className="season-name">{seasonName(s.season)}</div>
             <div className="season-meta mono">{s.episodes} ep · {bytes(s.total_size)}</div>
+            {(s.encoded_saved || 0) > 0 && <div className="season-meta mono teal">−{bytes(s.encoded_saved || 0)} saved</div>}
             {s.reclaimable > 0 && <div className="season-meta mono teal">−{bytes(s.reclaimable)}</div>}
           </button>
         ))}
@@ -248,6 +252,11 @@ export default function ShowView({ live }: { live: LiveState }) {
                     <>
                       <span className="dim">{bytes(f.size)}</span>
                       <span className="teal">→ {bytes(p.est_out_bytes)}</span>
+                    </>
+                  ) : f.encoded && f.encoded.saved > 0 ? (
+                    <>
+                      <span className="dim">{bytes(f.size + f.encoded.saved)}</span>
+                      <span className="teal">→ {bytes(f.size)}</span>
                     </>
                   ) : (
                     <>

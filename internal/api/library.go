@@ -48,6 +48,9 @@ type fileOut struct {
 	// UpgradeLoopAt is when this file was put on the upgrade-loop skip
 	// list; "" when it isn't.
 	UpgradeLoopAt string `json:"upgrade_loop_at,omitempty"`
+	// Encoded is this file's history-verified "already saved" (absent if
+	// it was never successfully encoded/remuxed).
+	Encoded *store.EncodedSavings `json:"encoded,omitempty"`
 }
 
 // arrItemOut is a store.ArrItem shaped for display: the instance name and
@@ -117,6 +120,7 @@ func (s *Server) decorate(files []*store.File) []fileOut {
 	ups, _ := s.st.UpscaledFiles(paths)
 	arrItems, _ := s.st.ArrItemsMap(ids)
 	arrOuts := s.arrItemOuts(arrItems)
+	encoded, _ := s.st.EncodedSavingsMap(ids)
 	out := make([]fileOut, 0, len(files))
 	for _, f := range files {
 		fo := fileOut{File: f}
@@ -147,6 +151,9 @@ func (s *Server) decorate(files []*store.File) []fileOut {
 		}
 		if r, ok := imagesubs.UnmarshalResult(f.OCRJSON); ok {
 			fo.OCR = &r
+		}
+		if es, ok := encoded[f.ID]; ok {
+			fo.Encoded = &es
 		}
 		out = append(out, fo)
 	}

@@ -89,6 +89,16 @@ export type FileItem = {
   image_subs_mode?: string; // "" | "sidecar" | "ocr" (per-file override; "" = inherit)
   upgrade_loop_at?: string; // on the upgrade-loop skip list since
   ocr?: OCRResult; // last OCR attempt on this file's image subtitle track, if any
+  encoded?: EncodedSavings; // history-verified original→current size, absent if never encoded
+};
+
+// EncodedSavings is a history-verified "already saved": how many done jobs
+// ever replaced a file (or a season's/show's files), and the resulting
+// byte reduction. Unlike a Recommendation's projected savings, this is
+// what actually happened, from job history.
+export type EncodedSavings = {
+  jobs: number;
+  saved: number;
 };
 
 // OCRResult: cached result of the last OCR attempt.
@@ -313,6 +323,8 @@ export type Series = {
   height: number;
   worth_count: number;
   reclaimable: number;
+  encoded_jobs?: number;
+  encoded_saved?: number;
   image?: string;
 };
 
@@ -325,6 +337,8 @@ export type SeasonStat = {
   codecs: string;
   worth_count: number;
   reclaimable: number;
+  encoded_jobs?: number;
+  encoded_saved?: number;
   image?: string;
 };
 

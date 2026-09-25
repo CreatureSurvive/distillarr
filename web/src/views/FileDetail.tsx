@@ -354,6 +354,21 @@ export default function FileDetail({ live }: { live: LiveState }) {
             {custom && <button className="btn mini linkish" onClick={reset}>Reset to recommended</button>}
           </section>
 
+          {file.encoded && file.encoded.saved > 0 && (
+            <section className="panel">
+              <div className="eyebrow">Already encoded</div>
+              <div className="verdict-sizes">
+                <span className="mono">{bytes(file.size + file.encoded.saved)}</span>
+                <span className="arrow">→</span>
+                <span className="mono teal">{bytes(file.size)}</span>
+              </div>
+              <div className="dim small">
+                {bytes(file.encoded.saved)} saved ({((file.encoded.saved / (file.size + file.encoded.saved)) * 100).toFixed(0)}%)
+                {" · "}{file.encoded.jobs} job{file.encoded.jobs === 1 ? "" : "s"}
+              </div>
+            </section>
+          )}
+
           {plan?.warnings && plan.warnings.length > 0 && (
             <div className="alert">
               {plan.warnings.map((w, i) => <div key={i} className="small">{w}</div>)}
