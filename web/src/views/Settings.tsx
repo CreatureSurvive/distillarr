@@ -9,6 +9,7 @@ import { LANGUAGES, langName } from "../langs";
 import { qualityWord } from "../options";
 import type { LiveState } from "../App";
 import { ScheduleTimeline } from "./Queue";
+import { TrashList } from "./TrashList";
 import { NotificationsSection } from "./SettingsNotify";
 import { SecuritySection } from "./SettingsSecurity";
 
@@ -1410,20 +1411,7 @@ function TrashSection({ cfg, save }: { cfg: Config; save: (p: Partial<Config>, m
       </div>
       {items.length > 0 && (
         <>
-          <ul className="trash-list">
-            {items.map((t) => (
-              <li key={t.id}>
-                <div className="trash-name">
-                  <div>{t.orig_path.split("/").pop()}</div>
-                  <div className="mono faint small">{bytes(t.size)} · {ago(t.created_at)}</div>
-                </div>
-                <div className="toolbar">
-                  <button className="btn mini" onClick={() => confirm("Put the original back and delete the encoded version?") && act(() => api.restoreTrash(t.id), "Original restored")}>Restore</button>
-                  <button className="btn mini btn-danger" onClick={() => confirm("Delete this original permanently?") && act(() => api.deleteTrash(t.id), "Deleted")}>Delete</button>
-                </div>
-              </li>
-            ))}
-          </ul>
+          <TrashList items={items} act={act} />
           <button className="btn btn-danger" onClick={() => confirm(`Permanently delete all ${items.length} originals (${bytes(total)})?`) && act(() => api.purgeTrash(true), "Trash emptied")}>
             Empty trash
           </button>

@@ -449,6 +449,18 @@ details.panel[open] > summary { margin-bottom: 12px; }
 .trash-list { list-style: none; margin: 12px 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
 .trash-list li { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; border: 1px solid var(--line-soft); border-radius: var(--r-md); padding: 8px 10px; }
 .trash-name { min-width: 0; flex: 1; font-size: 13.5px; overflow-wrap: anywhere; }
+.trash-lib { margin: 16px 0; }
+.trash-lib-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding-bottom: 6px; border-bottom: 1px solid var(--line-soft); margin-bottom: 8px; }
+.trash-lib-head h3 { margin: 0; font-size: 15px; }
+.trash-lib-head .toolbar, .trash-group > summary .toolbar { margin-left: auto; }
+.trash-group { border: 1px solid var(--line-soft); border-radius: var(--r-md); margin: 6px 0; }
+.trash-group > summary { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 8px 10px; cursor: pointer; font-size: 13.5px; }
+.trash-group > summary::before { content: "▸"; color: var(--text-dim); }
+.trash-group[open] > summary::before { content: "▾"; }
+.trash-group > summary::-webkit-details-marker { display: none; }
+.trash-group { list-style: none; }
+.trash-group-title { font-weight: 600; min-width: 0; overflow-wrap: anywhere; }
+.trash-children, .trash-group > .trash-list { padding: 0 10px 8px 22px; margin: 0; }
 .calib { margin: 8px 0 0; padding-left: 18px; color: var(--text-dim); line-height: 1.6; }
 
 /* ---------- A/B compare ---------- */

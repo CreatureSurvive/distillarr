@@ -827,7 +827,17 @@ export type TrashItem = {
   size: number;
   job_id: number;
   created_at: string;
+  // The file this original belongs to, for grouping by library/show/season;
+  // blank/zero once the file has left the library.
+  library: string;
+  title: string;
+  year: number;
+  season: number;
+  episode: number;
+  ep_title: string;
 };
+
+export type TrashBulkResult = { count: number; failed: number; errors: string[] };
 
 export type Preview = {
   id: string;
@@ -1034,6 +1044,8 @@ export const api = {
   trash: () => req<{ items: TrashItem[]; retention_days: number }>("/api/v1/trash"),
   restoreTrash: (id: number) => post<{ ok: boolean }>(`/api/v1/trash/${id}/restore`),
   deleteTrash: (id: number) => req<{ ok: boolean }>(`/api/v1/trash/${id}`, { method: "DELETE" }),
+  restoreTrashMany: (ids: number[]) => post<TrashBulkResult>("/api/v1/trash/restore", { ids }),
+  deleteTrashMany: (ids: number[]) => post<TrashBulkResult>("/api/v1/trash/delete", { ids }),
   purgeTrash: (all: boolean) => post<{ freed: number; count: number }>(`/api/v1/trash/purge${all ? "?all=1" : ""}`),
 
   jellyfinStatus: () => req<JfStatus>("/api/v1/jellyfin/status"),

@@ -171,6 +171,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/v1/trash/{id}/restore", s.restoreTrash)
 	mux.HandleFunc("DELETE /api/v1/trash/{id}", s.deleteTrash)
 	mux.HandleFunc("POST /api/v1/trash/purge", s.purgeTrash)
+	mux.HandleFunc("POST /api/v1/trash/restore", s.restoreTrashBulk)
+	mux.HandleFunc("POST /api/v1/trash/delete", s.deleteTrashBulk)
 
 	// jellyfin
 	mux.HandleFunc("GET /api/v1/jellyfin/status", s.jfStatus)
@@ -640,6 +642,42 @@ func (s *Server) deleteTrash(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+// trashBulk applies fn to every id in a {"ids":[…]} body (a whole show,
+// season or library from the grouped trash view). It keeps going past a
+// failed item and reports how many succeeded plus the first few errors.
+func (s *Server) trashBulk(w http.ResponseWriter, r *http.Request, fn func(int64) error) {
+	var body struct {
+		IDs []int64 `json:"ids"`
+	}
+	if err := readJSON(r, &body); err != nil {
+		fail(w, 400, err)
+		return
+	}
+	if len(body.IDs) == 0 {
+		fail(w, 400, fmt.Errorf("no trash items given"))
+		return
+	}
+	done, errs := 0, []string{}
+	for _, id := range body.IDs {
+		if err := fn(id); err != nil {
+			if len(errs) < 5 {
+				errs = append(errs, err.Error())
+			}
+			continue
+		}
+		done++
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"count": done, "failed": len(body.IDs) - done, "errors": errs})
+}
+
+func (s *Server) restoreTrashBulk(w http.ResponseWriter, r *http.Request) {
+	s.trashBulk(w, r, s.eng.RestoreTrash)
+}
+
+func (s *Server) deleteTrashBulk(w http.ResponseWriter, r *http.Request) {
+	s.trashBulk(w, r, s.eng.DeleteTrashItem)
 }
 
 func (s *Server) purgeTrash(w http.ResponseWriter, r *http.Request) {

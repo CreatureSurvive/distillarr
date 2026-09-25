@@ -11,6 +11,16 @@ type TrashItem struct {
 	Size        int64  `json:"size"`
 	JobID       int64  `json:"job_id"`
 	CreatedAt   string `json:"created_at"`
+	// Library/Title/Year/Season/Episode/EpTitle describe the file the item
+	// belongs to (looked up at current_path, else orig_path), so the trash
+	// can be grouped by library, show and season. Blank/zero when the file
+	// is no longer in the library.
+	Library string `json:"library"`
+	Title   string `json:"title"`
+	Year    int    `json:"year"`
+	Season  int    `json:"season"`
+	Episode int    `json:"episode"`
+	EpTitle string `json:"ep_title"`
 }
 
 // AddTrash records a retained original (idempotent on trash_path).
@@ -22,8 +32,12 @@ func (s *Store) AddTrash(t TrashItem) error {
 }
 
 func (s *Store) trashQuery(where string, args ...any) ([]TrashItem, error) {
-	rows, err := s.dbR.Query(`SELECT id, orig_path, trash_path, current_path, size, job_id, created_at
-		FROM trash WHERE `+where+` ORDER BY id DESC`, args...)
+	rows, err := s.dbR.Query(`SELECT t.id, t.orig_path, t.trash_path, t.current_path, t.size, t.job_id, t.created_at,
+		COALESCE(f.library,''), COALESCE(f.title,''), COALESCE(f.year,0), COALESCE(f.season,0),
+		COALESCE(f.episode,0), COALESCE(f.ep_title,'')
+		FROM trash t LEFT JOIN files f ON f.id=COALESCE(
+			(SELECT id FROM files WHERE path=t.current_path), (SELECT id FROM files WHERE path=t.orig_path))
+		WHERE `+where+` ORDER BY t.id DESC`, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -31,7 +45,8 @@ func (s *Store) trashQuery(where string, args ...any) ([]TrashItem, error) {
 	out := []TrashItem{}
 	for rows.Next() {
 		var t TrashItem
-		if err := rows.Scan(&t.ID, &t.OrigPath, &t.TrashPath, &t.CurrentPath, &t.Size, &t.JobID, &t.CreatedAt); err != nil {
+		if err := rows.Scan(&t.ID, &t.OrigPath, &t.TrashPath, &t.CurrentPath, &t.Size, &t.JobID, &t.CreatedAt,
+			&t.Library, &t.Title, &t.Year, &t.Season, &t.Episode, &t.EpTitle); err != nil {
 			return nil, err
 		}
 		out = append(out, t)
@@ -44,12 +59,12 @@ func (s *Store) ListTrash() ([]TrashItem, error) { return s.trashQuery("1=1") }
 
 // ExpiredTrash returns items older than days.
 func (s *Store) ExpiredTrash(days int) ([]TrashItem, error) {
-	return s.trashQuery(`created_at < strftime('%Y-%m-%dT%H:%M:%fZ','now', ?)`, "-"+itoaDays(days)+" days")
+	return s.trashQuery(`t.created_at < strftime('%Y-%m-%dT%H:%M:%fZ','now', ?)`, "-"+itoaDays(days)+" days")
 }
 
 // GetTrash fetches one item.
 func (s *Store) GetTrash(id int64) (*TrashItem, error) {
-	items, err := s.trashQuery("id=?", id)
+	items, err := s.trashQuery("t.id=?", id)
 	if err != nil || len(items) == 0 {
 		return nil, err
 	}
