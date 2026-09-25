@@ -334,6 +334,10 @@ var alters = []string{
 	// Plex play counts for popularity rules, refreshed by each sync.
 	`ALTER TABLE plex_items ADD COLUMN view_count INTEGER NOT NULL DEFAULT 0`,
 	`ALTER TABLE plex_items ADD COLUMN last_viewed_at INTEGER NOT NULL DEFAULT 0`,
+	// At most one active job per file, enforced by the DB so no queueing
+	// path (bulk, autopilot, retry, a double click) can race past it.
+	`CREATE UNIQUE INDEX IF NOT EXISTS jobs_one_active_per_file ON jobs(file_id)
+		WHERE file_id IS NOT NULL AND status IN ('queued','running','verifying','replacing')`,
 }
 
 func (s *Store) migrate() error {

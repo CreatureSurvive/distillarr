@@ -102,7 +102,7 @@ func (s *Server) ocrFile(w http.ResponseWriter, r *http.Request) {
 	_ = readJSON(r, &req)
 	j, err := s.enqueue(f, encode.Settings{Backend: "ocr"}, req.RunNow, "issue-fix", "OCR image subtitles")
 	if err != nil {
-		fail(w, 500, err)
+		enqueueFail(w, err)
 		return
 	}
 	s.eng.Kick()

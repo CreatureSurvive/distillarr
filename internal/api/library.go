@@ -4,6 +4,7 @@ package api
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -608,7 +609,15 @@ func (s *Server) filePlan(w http.ResponseWriter, r *http.Request) {
 // enqueue creates a job. origin records why it exists ("manual",
 // "issue-fix", "upscale", and later "webhook" / "autopilot" / "playback");
 // reason is a short free-text note shown in the UI and may be "".
+// ErrAlreadyReencoded refuses a second re-encode of the same file.
+var ErrAlreadyReencoded = errors.New("already re-encoded by Distillarr; restore the original from the trash first to encode it again")
+
 func (s *Server) enqueue(f *store.File, st encode.Settings, runNow bool, origin, reason string) (*store.Job, error) {
+	// Re-encoding Distillarr's own output only loses quality. Remuxes,
+	// OCR and upscales don't touch the encoded video that way.
+	if !st.VideoCopy && st.UpscaleTo <= 0 && st.Backend != "ocr" && s.st.HasReencode(f.ID) {
+		return nil, ErrAlreadyReencoded
+	}
 	cfg := s.cfg.Get()
 	sj, _ := json.Marshal(st)
 	priority := 100000
@@ -664,7 +673,7 @@ func (s *Server) queueFile(w http.ResponseWriter, r *http.Request) {
 	}
 	j, err := s.enqueue(f, st, req.RunNow, origin, reason)
 	if err != nil {
-		fail(w, 500, err)
+		enqueueFail(w, err)
 		return
 	}
 	s.eng.Kick()
@@ -718,3 +727,13 @@ func (s *Server) createPreview(w http.ResponseWriter, r *http.Request) {
 }
 
 var _ = config.Default
+
+// enqueueFail answers a refused enqueue: 409 for a file that's already
+// queued or already re-encoded, 500 otherwise.
+func enqueueFail(w http.ResponseWriter, err error) {
+	if errors.Is(err, store.ErrActiveJob) || errors.Is(err, ErrAlreadyReencoded) {
+		fail(w, http.StatusConflict, err)
+		return
+	}
+	fail(w, 500, err)
+}

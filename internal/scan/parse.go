@@ -23,8 +23,14 @@ type Parsed struct {
 }
 
 var (
-	// "Show - S01E02 - Red Coast WEBDL-1080p" and "the.bear.s01e03..."
-	epRe = regexp.MustCompile(`^(?P<show>.*?)[\s._-]*[Ss](?P<season>\d{1,2})[Ee](?P<ep>\d{1,4})(?P<rest>.*)$`)
+	// "Show - S01E02 - Red Coast WEBDL-1080p", "the.bear.s01e03...",
+	// "Show - S01 E02 - Title" and "Show.S01.E02" (a separator between
+	// the season and episode parts).
+	epRe = regexp.MustCompile(`^(?P<show>.*?)[\s._-]*[Ss](?P<season>\d{1,4})[\s._-]?[Ee](?P<ep>\d{1,4})(?P<rest>.*)$`)
+	// "101 - Pilot": season digits + two-digit episode, then the title.
+	numEpRe = regexp.MustCompile(`^(\d{3,4})\b(.*)$`)
+	// "Show - 1x02 - Title": the older scene form.
+	epXRe = regexp.MustCompile(`^(?P<show>.*?)[\s._-]+(?P<season>\d{1,2})[xX](?P<ep>\d{2,3})\b(?P<rest>.*)$`)
 	// "Season 1", "Season 01", "Specials"
 	seasonDirRe = regexp.MustCompile(`(?i)^season[ ._]*(\d{1,2})$`)
 	// "Movie Title (2008)" or "Movie Title 2008"
@@ -109,16 +115,38 @@ func Parse(library, path string) Parsed {
 		}
 		showTitle := titleFromYearDir(showDir)
 
-		if m := epRe.FindStringSubmatch(stem); m != nil {
+		m := epRe.FindStringSubmatch(stem)
+		if m == nil {
+			m = epXRe.FindStringSubmatch(stem)
+		}
+		if m != nil {
 			p.Title = firstNonEmpty(showTitle, cleanTitle(m[1]))
 			p.Season, _ = strconv.Atoi(m[2])
 			p.Episode, _ = strconv.Atoi(m[3])
+			// Year-numbered seasons ("S2004E05"): the "Season 02" folder is
+			// what Sonarr and the media servers use.
+			if p.Season > 99 {
+				if sd := seasonDirRe.FindStringSubmatch(parent); sd != nil {
+					p.Season, _ = strconv.Atoi(sd[1])
+				} else if sd := seasonDirRe.FindStringSubmatch(grandparent); sd != nil {
+					p.Season, _ = strconv.Atoi(sd[1])
+				}
+			}
 			rest := strings.TrimLeft(strings.TrimSpace(m[4]), "- _.")
 			p.EpTitle, p.QualityTag = splitQuality(rest)
 		} else if sd := seasonDirRe.FindStringSubmatch(parent); sd != nil {
 			p.Title = showTitle
 			p.Season, _ = strconv.Atoi(sd[1])
 			p.EpTitle, p.QualityTag = splitQuality(stem)
+			// "101 - Pilot" / "1203 - Title" inside "Season 01"/"Season 12":
+			// the leading digits are the season followed by a two-digit
+			// episode. Only trusted when they agree with the folder.
+			if nm := numEpRe.FindStringSubmatch(stem); nm != nil {
+				if s := strings.TrimLeft(nm[1][:len(nm[1])-2], "0"); s == strconv.Itoa(p.Season) {
+					p.Episode, _ = strconv.Atoi(nm[1][len(nm[1])-2:])
+					p.EpTitle, p.QualityTag = splitQuality(strings.TrimLeft(nm[2], " -_."))
+				}
+			}
 		} else if strings.EqualFold(parent, "specials") {
 			p.Title = showTitle
 			p.Season = 0

@@ -5,6 +5,7 @@ package store
 import (
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 )
@@ -86,6 +87,19 @@ func scanJob(row interface{ Scan(...any) error }) (*Job, error) {
 }
 
 // CreateJob enqueues a job.
+// ErrActiveJob: the file already has a queued or running job.
+var ErrActiveJob = errors.New("already in the queue")
+
+// HasReencode reports whether Distillarr already re-encoded this file's
+// video (a done, unreverted job that wasn't a remux, OCR or upscale):
+// encoding that output again would only lose quality.
+func (s *Store) HasReencode(fileID int64) bool {
+	var n int
+	_ = s.dbR.QueryRow(`SELECT COUNT(*) FROM jobs WHERE file_id=? AND status='done' AND reverted_at=''
+		AND backend NOT IN ('remux','ocr') AND NOT (`+isUpscale+`)`, fileID).Scan(&n)
+	return n > 0
+}
+
 func (s *Store) CreateJob(j *Job) error {
 	origin := j.Origin
 	if origin == "" {
@@ -97,6 +111,9 @@ func (s *Store) CreateJob(j *Job) error {
 		nullID(j.FileID), j.SrcPath, StatusQueued, j.Priority, b2i(j.RunNow),
 		j.Backend, j.Codec, j.Quality, j.SettingsJSON, j.MaxAttempts, j.SrcSize, origin, j.Reason)
 	if err != nil {
+		if strings.Contains(err.Error(), "UNIQUE constraint failed") {
+			return ErrActiveJob
+		}
 		return err
 	}
 	j.ID, err = res.LastInsertId()
@@ -318,7 +335,8 @@ func (s *Store) ListJobs(statuses []string, beforeID int64, limit int) ([]*Job, 
 		order = "run_now DESC, priority, id"
 	}
 	rows, err := s.dbR.Query(`SELECT `+jobCols+`, COALESCE((SELECT CASE WHEN library='tvshows'
-			THEN title || ' · S' || printf('%02d', season) || 'E' || printf('%02d', episode) ELSE title END
+			THEN title || ' · ' || CASE WHEN episode >= 0 THEN 'S' || printf('%02d', season) || 'E' || printf('%02d', episode)
+				ELSE COALESCE(NULLIF(ep_title,''), 'S' || printf('%02d', season)) END ELSE title END
 			FROM files WHERE id=jobs.file_id),'')
 		FROM jobs WHERE `+where+` ORDER BY `+order+` LIMIT ?`, append(args, limit)...)
 	if err != nil {

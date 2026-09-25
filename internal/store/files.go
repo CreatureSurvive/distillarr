@@ -1071,3 +1071,11 @@ func (s *Store) MeasureProgress(minPct float64) (measured, remaining int) {
 		FROM files WHERE missing=0`, minPct).Scan(&measured, &remaining)
 	return
 }
+
+// UpdateParsed rewrites a file's name-derived fields after the filename
+// parser improves (no re-probe needed).
+func (s *Store) UpdateParsed(id int64, title string, year, season, episode int, epTitle, qualityTag string) error {
+	_, err := s.dbW.Exec(`UPDATE files SET title=?, year=?, season=?, episode=?, ep_title=?, quality_tag=? WHERE id=?`,
+		title, year, season, episode, epTitle, qualityTag, id)
+	return err
+}

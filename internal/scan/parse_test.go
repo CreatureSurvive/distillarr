@@ -2,7 +2,13 @@
 
 package scan
 
-import "testing"
+import (
+	"path/filepath"
+	"testing"
+
+	"github.com/CreatureSurvive/distillarr/internal/config"
+	"github.com/CreatureSurvive/distillarr/internal/store"
+)
 
 func TestParseTV(t *testing.T) {
 	cases := []struct {
@@ -21,6 +27,20 @@ func TestParseTV(t *testing.T) {
 			"Adventure Time", 5, 12, "Something", "WEBRIP 720P PROPER"},
 		{"/srv/media/tvshows/Dexter's Laboratory (1996)/Specials/Dexter - S00E01 - Pilot.avi",
 			"Dexter's Laboratory", 0, 1, "Pilot", ""},
+		{"/srv/media/tvshows/The Wild Thornberrys (1998)/Season 1/The WILD Thornberrys - S01 E01 - Flood Warning (480p - DVDRip).mp4",
+			"The Wild Thornberrys", 1, 1, "Flood Warning (480p - DVDRip)", ""},
+		{"/srv/media/tvshows/Show (2001)/Season 2/Show.S02.E05.Title.mkv",
+			"Show", 2, 5, "Title", ""},
+		{"/srv/media/tvshows/Show (2001)/Season 3/Show - 3x07 - Title.mkv",
+			"Show", 3, 7, "Title", ""},
+		{"/srv/media/tvshows/MythBusters (2003)/Season 02/MythBusters.S2004E05.Buried.in.Concrete.mp4",
+			"MythBusters", 2, 5, "Buried.in.Concrete", ""},
+		{"/srv/media/tvshows/King of the Hill (1997)/Season 01/101 - Pilot.mkv",
+			"King of the Hill", 1, 1, "Pilot", ""},
+		{"/srv/media/tvshows/King of the Hill (1997)/Season 12/1203 - Title.mkv",
+			"King of the Hill", 12, 3, "Title", ""},
+		{"/srv/media/tvshows/Show (2001)/Season 01/2012 Special.mkv",
+			"Show", 1, -1, "2012 Special", ""},
 	}
 	for _, c := range cases {
 		p := Parse("tvshows", c.path)
@@ -74,5 +94,27 @@ func TestSkipRules(t *testing.T) {
 	}
 	if !IsSubFile("Movie.en.srt") {
 		t.Error("IsSubFile failed")
+	}
+}
+
+func TestReparseNames(t *testing.T) {
+	st, err := store.Open(filepath.Join(t.TempDir(), "t.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	cfg := config.NewManager(st)
+	f := &store.File{Path: "/tv/The Wild Thornberrys (1998)/Season 1/The WILD Thornberrys - S01 E07 - Vacant Lot.mp4",
+		Library: "tvshows", Title: "The Wild Thornberrys", Season: 1, Episode: -1}
+	if err := st.UpsertFile(f, nil); err != nil {
+		t.Fatal(err)
+	}
+	New(st, cfg).ReparseNames()
+	got, _ := st.GetFile(f.ID)
+	if got.Season != 1 || got.Episode != 7 || got.EpTitle != "Vacant Lot" {
+		t.Errorf("after reparse: %+v", got)
+	}
+	if v, _, _ := st.KVGet("parser_version"); v != ParserVersion {
+		t.Errorf("version not recorded: %q", v)
 	}
 }

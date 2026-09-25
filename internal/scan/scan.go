@@ -616,3 +616,40 @@ func sleepOr(stop <-chan struct{}, d time.Duration) bool {
 		return false
 	}
 }
+
+// ParserVersion bumps whenever Parse learns new filename forms; boot
+// re-parses every stored name once per version (ReparseNames).
+const ParserVersion = "2"
+
+// ReparseNames re-applies Parse to every stored file when ParserVersion
+// changed, updating only rows whose name-derived fields differ. Cheap:
+// no probing, just the path strings.
+func (s *Scanner) ReparseNames() {
+	if v, ok, _ := s.st.KVGet("parser_version"); ok && v == ParserVersion {
+		return
+	}
+	type upd struct {
+		id int64
+		p  Parsed
+	}
+	var ups []upd
+	_ = s.st.EachFile(func(f *store.File) error {
+		p := Parse(f.Library, f.Path)
+		if p.Title != f.Title || p.Year != f.Year || p.Season != f.Season || p.Episode != f.Episode ||
+			p.EpTitle != f.EpTitle || p.QualityTag != f.QualityTag {
+			ups = append(ups, upd{f.ID, p})
+		}
+		return nil
+	})
+	for _, u := range ups {
+		if err := s.st.UpdateParsed(u.id, u.p.Title, u.p.Year, u.p.Season, u.p.Episode, u.p.EpTitle, u.p.QualityTag); err != nil {
+			log.Printf("scan: reparse: %v", err)
+			return
+		}
+	}
+	_ = s.st.KVSet("parser_version", ParserVersion)
+	if len(ups) > 0 {
+		log.Printf("scan: re-parsed %d file names (parser v%s)", len(ups), ParserVersion)
+		s.RefreshRecsSoon()
+	}
+}

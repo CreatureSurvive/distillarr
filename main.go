@@ -65,6 +65,7 @@ func main() {
 
 	cfg := config.NewManager(st)
 	sc := scan.New(st, cfg)
+	sc.ReparseNames()
 	eng := jobs.New(st, cfg, sc)
 
 	// Recommendations resolve "auto" against probed hardware, learn from
