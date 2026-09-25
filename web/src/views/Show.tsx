@@ -74,7 +74,12 @@ export default function ShowView({ live }: { live: LiveState }) {
         if (choice === "cancel") return;
         r = await api.queueShow({ ...body, confirm_hardlinked: choice === "confirm", skip_hardlinked: choice === "skip" });
       }
-      toast(r.created > 0 ? `${runNow ? "Encoding" : "Queued"} ${r.created} episode${r.created === 1 ? "" : "s"}${r.skipped ? ` · ${r.skipped} skipped` : ""}` : "Nothing new to queue: episodes are already queued or not worth it.", r.created > 0 ? "ok" : "err");
+      toast(r.created > 0
+        ? `${runNow ? "Encoding" : "Queued"} ${r.created} episode${r.created === 1 ? "" : "s"}`
+          + (r.for_uniform_season ? ` (${r.for_uniform_season} to keep the season uniform)` : "")
+          + (r.skipped ? ` · ${r.skipped} skipped` : "")
+          + (r.left_different ? ` · ${r.left_different} already re-encoded, left as is` : "")
+        : "Nothing new to queue: episodes are already queued or not worth it.", r.created > 0 ? "ok" : "err");
       setSel(new Set());
     } catch (e: any) {
       toast(e.message, "err");

@@ -951,7 +951,7 @@ export const api = {
     only_worth?: boolean;
     confirm_hardlinked?: boolean;
     skip_hardlinked?: boolean;
-  }) => post<{ created: number; skipped: number }>("/api/v1/show/queue", body),
+  }) => post<{ created: number; skipped: number; for_uniform_season?: number; left_different?: number }>("/api/v1/show/queue", body),
 
   file: (id: number) =>
     req<{

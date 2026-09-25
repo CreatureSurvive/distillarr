@@ -424,10 +424,26 @@ func (s *Server) queueShow(w http.ResponseWriter, r *http.Request) {
 		}
 		return true
 	}
+	// A season/show queue keeps each season uniform (same codec and
+	// container), so it doesn't turn into a mixed_season issue later.
+	// A hand-picked list of episodes is queued exactly as picked.
+	pinned, extra, leftAlone := map[int]encode.Settings{}, map[int]encode.Settings{}, 0
+	if len(req.FileIDs) == 0 {
+		pinned, extra, leftAlone = seasonUniform(s.cfg.Get(), files, plans,
+			func(i int) bool { return wouldQueue(i, files[i]) }, s.st.HasReencode)
+	}
+	queueAt := func(i int, f *store.File) bool {
+		if _, ok := extra[i]; ok {
+			if q, _ := s.st.HasQueuedForFile(f.Path); !q {
+				return true
+			}
+		}
+		return wouldQueue(i, f)
+	}
 	if !req.ConfirmHardlinked && !req.SkipHardlinked {
 		var linked []*store.File
 		for i, f := range files {
-			if wouldQueue(i, f) && f.Nlink > 1 {
+			if queueAt(i, f) && f.Nlink > 1 {
 				linked = append(linked, f)
 			}
 		}
@@ -436,9 +452,9 @@ func (s *Server) queueShow(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	created, skipped := 0, 0
+	created, skipped, uniform := 0, 0, 0
 	for i, f := range files {
-		if !wouldQueue(i, f) {
+		if !queueAt(i, f) {
 			skipped++
 			continue
 		}
@@ -446,16 +462,28 @@ func (s *Server) queueShow(w http.ResponseWriter, r *http.Request) {
 			skipped++
 			continue
 		}
-		st := plans[i].Setting
+		st, reason := plans[i].Setting, "Queued from the show page"
+		if p, ok := pinned[i]; ok {
+			st = p
+		}
+		if e, ok := extra[i]; ok && !wouldQueue(i, f) {
+			st, reason = e, "Keeps the season uniform"
+		}
 		if f.Nlink > 1 {
 			st.ConfirmedHardlinked = true
 		}
-		if _, err := s.enqueue(f, st, req.RunNow, "manual", "Queued from the show page"); err == nil {
+		if _, err := s.enqueue(f, st, req.RunNow, "manual", reason); err == nil {
 			created++
+			if reason == "Keeps the season uniform" {
+				uniform++
+			}
+		} else {
+			skipped++
 		}
 	}
 	s.eng.Kick()
-	writeJSON(w, http.StatusOK, map[string]any{"created": created, "skipped": skipped})
+	writeJSON(w, http.StatusOK, map[string]any{"created": created, "skipped": skipped,
+		"for_uniform_season": uniform, "left_different": leftAlone})
 }
 
 // ---- single file ----
