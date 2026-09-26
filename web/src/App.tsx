@@ -108,6 +108,8 @@ export default function App() {
   const [needsSetup, setNeedsSetup] = useState(false);
   useEffect(() => { api.config().then((c) => setNeedsSetup(c.libraries.length === 0)).catch(() => {}); }, []);
   const loc = useLocation();
+  // New pages open at the top; list views restore their own position.
+  useEffect(() => { window.scrollTo(0, 0); }, [loc.pathname]);
 
   const running = live.activeJobs.length;
 

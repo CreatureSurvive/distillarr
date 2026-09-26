@@ -922,12 +922,20 @@ var seriesSort = map[string]string{
 	"bitrate": "7 DESC, f.title COLLATE NOCASE",
 }
 
-// ListSeries returns per-show aggregates for the tvshows library.
-func (s *Store) ListSeries(titleLike, sort string, onlyWorth bool) ([]Series, error) {
+// ListSeries returns per-show aggregates for the tvshows library. A
+// non-zero facets filter keeps shows with at least one matching episode;
+// the aggregates still cover the whole show.
+func (s *Store) ListSeries(titleLike, sort string, onlyWorth bool, facets FileFilter) ([]Series, error) {
 	where, args := "f.missing=0 AND f.library='tvshows'", []any{}
 	if titleLike != "" {
 		where += " AND f.title LIKE ? COLLATE NOCASE"
 		args = append(args, "%"+escapeLike(titleLike)+"%")
+	}
+	if facets != (FileFilter{}) {
+		facets.Library = "tvshows"
+		fw, fa := facets.where()
+		where += " AND f.title COLLATE NOCASE IN (SELECT title FROM files WHERE " + fw + ")"
+		args = append(args, fa...)
 	}
 	order, ok := seriesSort[sort]
 	if !ok {

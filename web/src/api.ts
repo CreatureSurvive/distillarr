@@ -959,7 +959,7 @@ export const api = {
   libraryStats: (lib: string) =>
     req<{ files: number; total_size: number; transcodable_size: number; projected_saved: number }>(
       `/api/v1/libraries/stats?library=${lib}`),
-  series: (p: { title?: string; sort?: string; candidates?: boolean }) =>
+  series: (p: Record<string, string | number | boolean | undefined>) =>
     req<{ series: Series[] }>(`/api/v1/series?${qs(p)}`),
   show: (title: string) => req<ShowDetail>(`/api/v1/show?title=${encodeURIComponent(title)}`),
   showEpisodes: (title: string, season?: number) =>

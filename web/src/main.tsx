@@ -8,6 +8,9 @@ import { AuthGate } from "./Login";
 import "./tokens.css";
 import "./app.css";
 
+// The browser's own restore fires before a remounted list has content.
+if ("scrollRestoration" in history) history.scrollRestoration = "manual";
+
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
     <HashRouter>

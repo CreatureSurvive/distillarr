@@ -3,23 +3,36 @@
 import { useEffect, useState } from "react";
 import { api, type Series } from "../api";
 import { Empty, ShowCard, Toggle } from "../components";
+import { FacetFilters, NO_FACETS, facetParams, type Facets } from "../filters";
 import { bytes } from "../format";
 import type { LiveState } from "../App";
+import { useScrollRestore } from "../scroll";
 import { useSessionState } from "./Library";
+
+// Last result, so coming back from a show renders the list (and its scroll
+// position) at once while the slow aggregate query refreshes it.
+let lastList: { key: string; list: Series[] } | null = null;
 
 export default function Shows({ live }: { live: LiveState }) {
   const [search, setSearch] = useSessionState("sh.search", "");
   const [sort, setSort] = useSessionState("sh.sort", "reclaimable");
   const [worth, setWorth] = useSessionState("sh.worth", false);
-  const [list, setList] = useState<Series[] | null>(null);
+  const [facets, setFacets] = useSessionState<Facets>("sh.facets", NO_FACETS);
+  const query = { title: search, sort, candidates: worth, ...facetParams(facets) };
+  const queryKey = JSON.stringify(query);
+  const [list, setList] = useState<Series[] | null>(() => (lastList?.key === queryKey ? lastList.list : null));
   const [stats, setStats] = useState<{ files: number; total_size: number; projected_saved: number } | null>(null);
 
   useEffect(() => {
     const t = setTimeout(() => {
-      api.series({ title: search, sort, candidates: worth }).then((r) => setList(r.series)).catch(() => setList([]));
+      api.series(query).then((r) => {
+        lastList = { key: queryKey, list: r.series };
+        setList(r.series);
+      }).catch(() => setList([]));
     }, search ? 250 : 0);
     return () => clearTimeout(t);
-  }, [search, sort, worth, live.queueVersion]);
+  }, [queryKey, live.queueVersion]);
+  useScrollRestore("shows", list !== null);
 
   useEffect(() => {
     api.libraryStats("tvshows").then(setStats).catch(() => {});
@@ -53,11 +66,12 @@ export default function Shows({ live }: { live: LiveState }) {
         </select>
         <Toggle on={worth} onChange={setWorth} label="Has episodes worth re-encoding" />
       </div>
+      <FacetFilters library="tvshows" value={facets} onChange={setFacets} />
 
       {list === null ? (
         <div className="result-count mono dim">Loading…</div>
       ) : list.length === 0 ? (
-        <Empty title="No shows">{search ? "Nothing matches that search." : "Run a rescan to index the TV library."}</Empty>
+        <Empty title="No shows">{search || Object.values(facets).some(Boolean) ? "Nothing matches that search or these filters." : "Run a rescan to index the TV library."}</Empty>
       ) : (
         <div className="grid">
           {list.map((s) => <ShowCard key={s.title} s={s} />)}

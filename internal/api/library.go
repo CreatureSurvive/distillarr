@@ -209,7 +209,17 @@ type seriesOut struct {
 
 func (s *Server) listSeries(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
-	list, err := s.st.ListSeries(q.Get("title"), q.Get("sort"), q.Get("candidates") == "1")
+	facets := store.FileFilter{
+		Codec:      q.Get("codec"),
+		Container:  q.Get("container"),
+		AudioCodec: q.Get("audio"),
+		Issue:      q.Get("issue"),
+		ResClass:   atoi(q.Get("res")),
+		Upscale:    q.Get("upscale"),
+		Hardlinked: q.Get("hardlinked"),
+		Managed:    q.Get("managed"),
+	}
+	list, err := s.st.ListSeries(q.Get("title"), q.Get("sort"), q.Get("candidates") == "1", facets)
 	if err != nil {
 		fail(w, 500, err)
 		return

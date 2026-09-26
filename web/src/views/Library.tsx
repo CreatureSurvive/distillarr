@@ -6,6 +6,7 @@ import { Empty, MovieCard, Toggle } from "../components";
 import { FacetFilters, NO_FACETS, facetParams, type Facets } from "../filters";
 import { bytes } from "../format";
 import type { LiveState } from "../App";
+import { useScrollRestore } from "../scroll";
 
 const PAGE = 60;
 
@@ -38,24 +39,37 @@ export default function Library({ live }: { live: LiveState }) {
   const [stats, setStats] = useState<{ files: number; total_size: number; projected_saved: number } | null>(null);
   const sentinel = useRef<HTMLDivElement>(null);
   const reqId = useRef(0);
+  const [loadedOnce, setLoadedOnce] = useState(false);
+  // Coming back to the list reloads as many cards as were showing, so the
+  // remembered scroll position has content under it.
+  const [loaded, setLoaded] = useSessionState("mv.loaded", PAGE);
+  const firstLimit = useRef(Math.min(Math.max(loaded, PAGE), 2000));
+  useScrollRestore("movies", loadedOnce);
 
   const params = useCallback(
-    (offset: number) => ({ library: "movies", title: search, sort, ...facetParams(facets), candidates: worth, offset, limit: PAGE }),
+    (offset: number, limit = PAGE) => ({ library: "movies", title: search, sort, ...facetParams(facets), candidates: worth, offset, limit }),
     [search, sort, facets, worth]
   );
 
   useEffect(() => {
     const id = ++reqId.current;
+    const limit = Math.max(firstLimit.current, PAGE);
     const t = setTimeout(() => {
       setLoading(true);
-      api.files(params(0)).then((r) => {
+      api.files(params(0, limit)).then((r) => {
         if (id !== reqId.current) return;
+        firstLimit.current = PAGE;
         setFiles(r.files);
         setTotal(r.total);
+        setLoadedOnce(true);
       }).finally(() => id === reqId.current && setLoading(false));
     }, search ? 250 : 0);
     return () => clearTimeout(t);
   }, [params, live.queueVersion, live.arrVersion]);
+
+  useEffect(() => {
+    if (loadedOnce && files.length !== loaded) setLoaded(files.length);
+  }, [files.length, loadedOnce]);
 
   useEffect(() => {
     api.libraryStats("movies").then(setStats).catch(() => {});
