@@ -370,9 +370,9 @@ details.panel[open] > summary { margin-bottom: 12px; }
 .audio-rules-table td { padding: 6px 8px 6px 0; vertical-align: middle; border-bottom: 1px solid var(--line-soft); }
 .audio-rules-table td:first-child { white-space: nowrap; }
 .audio-rules-table select.input, .audio-rules-table input.input { min-height: 30px; padding: 4px 6px; font-size: 12.5px; }
-.quality { display: flex; align-items: center; gap: 12px; }
-.quality input[type="range"] { flex: 1; max-width: 340px; accent-color: var(--teal); min-height: 28px; }
-.quality-val { font-size: 13px; white-space: nowrap; }
+.quality { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; min-width: 0; }
+.quality input[type="range"] { width: 100%; max-width: 340px; accent-color: var(--teal); min-height: 28px; }
+.quality-val { font-size: 13px; overflow-wrap: anywhere; }
 .track { display: flex; flex-direction: column; gap: 8px; padding: 10px 0; border-bottom: 1px dashed var(--line-soft); }
 .track:last-child { border-bottom: none; }
 .track-name { font-size: 13.5px; display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
