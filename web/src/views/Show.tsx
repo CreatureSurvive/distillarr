@@ -31,20 +31,30 @@ export default function ShowView({ live }: { live: LiveState }) {
     api.hw().then((h) => { setHw(h.report); setAuto(h.auto); }).catch(() => {});
   }, [title, live.queueVersion]);
 
+  // A new season starts with nothing selected; queue updates (a job
+  // finishing or starting) only refresh the list and keep the selection.
+  useEffect(() => { setSel(new Set()); }, [title, season]);
+
   useEffect(() => {
     if (season === null) return;
-    setSel(new Set());
-    api.showEpisodes(title, season).then((r) => setEps(r.episodes)).catch(() => setEps([]));
+    api.showEpisodes(title, season).then((r) => {
+      setEps(r.episodes);
+      const ids = new Set(r.episodes.map((e) => e.id));
+      setSel((cur) => {
+        const kept = [...cur].filter((id) => ids.has(id));
+        return kept.length === cur.size ? cur : new Set(kept);
+      });
+    }).catch(() => setEps([]));
   }, [title, season, live.queueVersion]);
 
-  const fileIds = sel.size > 0 ? [...sel] : undefined;
+  const fileIds = sel.size > 0 ? [...sel].sort((a, b) => a - b) : undefined;
   useEffect(() => {
     if (season === null) return;
     const t = setTimeout(() => {
       api.showPlan({ title, season, overrides: ov, file_ids: fileIds }).then(setPlan).catch(() => setPlan(null));
     }, 250);
     return () => clearTimeout(t);
-  }, [title, season, JSON.stringify(ov), sel.size, live.queueVersion]);
+  }, [title, season, JSON.stringify(ov), JSON.stringify(fileIds), live.queueVersion]);
 
   const planByFile = useMemo(() => {
     const m = new Map<number, ShowPlan["episodes"][number]>();
