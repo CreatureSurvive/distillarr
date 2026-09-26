@@ -62,6 +62,10 @@ export default function FileDetail({ live }: { live: LiveState }) {
 
   if (err) return <Empty title="File not found">{err}</Empty>;
   if (!file || !settings) return <div className="result-count mono dim">Loading…</div>;
+  // Only with every stream's size recorded; anything noticeable left over
+  // is mostly attachments (anime MKVs embed their subtitle fonts).
+  const streamBytes = streams.every((s) => s.bytes > 0) ? streams.reduce((a, s) => a + s.bytes, 0) : 0;
+  const other = streamBytes > 0 && file.size - streamBytes > file.size * 0.005 ? file.size - streamBytes : 0;
 
   const rec = plan?.rec;
   const autoRec = plan?.auto;
@@ -392,21 +396,39 @@ export default function FileDetail({ live }: { live: LiveState }) {
           <details className="panel">
             <summary>Source streams</summary>
             <ul className="stream-list">
-              {streams.map((s) => (
-                <li key={s.id}>
-                  <span className="mono dim">#{s.stream_index}</span>
-                  <span className="stream-kind">{s.kind}</span>
-                  <span className="mono">{s.codec}</span>
-                  <span className="dim">
-                    {s.lang && s.lang.toUpperCase()}
-                    {s.kind === "audio" && ` ${channelsLabel(s.channels)}`}
-                    {s.bit_rate > 0 ? ` · ${bitrate(s.bit_rate)}`
-                      : s.kind === "video" && file.video_bitrate > 0 && <span title="Container doesn't record this stream's bitrate; estimated from file size minus audio"> · ~{bitrate(file.video_bitrate)}</span>}
-                    {s.kind === "subtitle" && (s.is_text ? " · text" : " · image")}
-                    {s.forced && " · forced"}
-                  </span>
+              {streams.map((s) => {
+                const r = streamRate(s, file);
+                return (
+                  <li key={s.id}>
+                    <span className="mono dim">#{s.stream_index}</span>
+                    <span className="stream-kind">{s.kind}</span>
+                    <span className="mono">{s.codec}</span>
+                    <span className="dim">
+                      {s.lang && s.lang.toUpperCase()}
+                      {s.kind === "audio" && ` ${channelsLabel(s.channels)}`}
+                      {s.kind === "subtitle" && (s.is_text ? " · text" : " · image")}
+                      {s.forced && " · forced"}
+                    </span>
+                    {r && (
+                      <span className="mono dim stream-rate" title={r.estimated ? "The file doesn't record this stream's own bitrate; estimated from the file's total minus its other streams" : undefined}>
+                        {s.kind === "subtitle" && r.bytes > 0 ? bytes(r.bytes)
+                          : <>{r.estimated && "~"}{bitrate(r.bps)}{r.bytes > 0 && ` · ${r.estimated ? "~" : ""}${bytes(r.bytes)}`}</>}
+                      </span>
+                    )}
+                  </li>
+                );
+              })}
+              {other > 0 && (
+                <li>
+                  <span className="stream-kind">Other</span>
+                  <span className="dim" title="Attachments (often subtitle fonts), chapters and container overhead">attachments etc.</span>
+                  <span className="mono dim stream-rate">{bytes(other)}</span>
                 </li>
-              ))}
+              )}
+              <li className="stream-total">
+                <span className="stream-kind">Total</span>
+                <span className="mono dim stream-rate">{file.total_bitrate > 0 && `${bitrate(file.total_bitrate)} · `}{bytes(file.size)}</span>
+              </li>
             </ul>
             <div className="mono faint small path">{file.path}</div>
           </details>
@@ -422,4 +444,14 @@ export default function FileDetail({ live }: { live: LiveState }) {
       </div>
     </div>
   );
+}
+
+// A stream's bitrate and payload size: recorded values when the file has
+// them (MP4 bit_rate, MKV statistics tags), else video falls back to the
+// file's estimated video bitrate.
+function streamRate(s: Stream, f: FileItem): { bps: number; bytes: number; estimated: boolean } | null {
+  const est = (bps: number) => (f.duration > 0 ? Math.round((bps * f.duration) / 8) : 0);
+  if (s.bit_rate > 0) return { bps: s.bit_rate, bytes: s.bytes || est(s.bit_rate), estimated: false };
+  if (s.kind === "video" && f.video_bitrate > 0) return { bps: f.video_bitrate, bytes: est(f.video_bitrate), estimated: true };
+  return null;
 }

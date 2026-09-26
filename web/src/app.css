@@ -352,6 +352,8 @@ details.panel[open] > summary { margin-bottom: 12px; }
 .stream-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; font-size: 13px; }
 .stream-list li { display: flex; flex-wrap: wrap; gap: 4px 10px; }
 .stream-kind { text-transform: capitalize; width: 64px; color: var(--text-dim); }
+.stream-rate { margin-left: auto; white-space: nowrap; }
+.stream-total { border-top: 1px solid var(--line-soft); padding-top: 6px; }
 
 /* options editor */
 .opts { display: flex; flex-direction: column; }

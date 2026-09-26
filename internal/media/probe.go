@@ -144,10 +144,30 @@ func (s *Stream) Title() string {
 	return strings.TrimSpace(s.Tags["title"])
 }
 
-// BitRateInt parses the string bitrate.
+// BitRateInt parses the string bitrate, falling back to the per-track
+// statistics tag mkvmerge writes (MKV streams carry no bit_rate).
 func (s *Stream) BitRateInt() int64 {
-	n, _ := strconv.ParseInt(s.BitRate, 10, 64)
-	return n
+	if n, _ := strconv.ParseInt(s.BitRate, 10, 64); n > 0 {
+		return n
+	}
+	return s.statTag("BPS")
+}
+
+// Bytes is the track's payload size from mkvmerge's statistics tags;
+// 0 when the container doesn't record it.
+func (s *Stream) Bytes() int64 { return s.statTag("NUMBER_OF_BYTES") }
+
+// statTag reads a numeric statistics tag, which mkvmerge may suffix with a
+// language ("BPS-eng").
+func (s *Stream) statTag(name string) int64 {
+	for k, v := range s.Tags {
+		if k == name || strings.HasPrefix(k, name+"-") {
+			if n, err := strconv.ParseInt(strings.TrimSpace(v), 10, 64); err == nil && n > 0 {
+				return n
+			}
+		}
+	}
+	return 0
 }
 
 // DurationSec parses the container duration.

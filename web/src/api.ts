@@ -175,6 +175,7 @@ export type Stream = {
   title: string;
   channels: number;
   bit_rate: number;
+  bytes: number;
   default: boolean;
   forced: boolean;
   is_text: boolean;

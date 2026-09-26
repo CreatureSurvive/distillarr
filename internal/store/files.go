@@ -250,10 +250,10 @@ func (s *Store) UpsertFile(f *File, streams []Stream) error {
 	for i := range streams {
 		streams[i].FileID = id
 		if _, err := tx.Exec(`INSERT INTO streams(file_id, kind, stream_index, codec, lang, title,
-			channels, bit_rate, is_default, is_forced, is_text)
-			VALUES(?,?,?,?,?,?,?,?,?,?,?)`,
+			channels, bit_rate, bytes, is_default, is_forced, is_text)
+			VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`,
 			streams[i].FileID, streams[i].Kind, streams[i].StreamIndex, streams[i].Codec,
-			streams[i].Lang, streams[i].Title, streams[i].Channels, streams[i].BitRate,
+			streams[i].Lang, streams[i].Title, streams[i].Channels, streams[i].BitRate, streams[i].Bytes,
 			b2i(streams[i].IsDefault), b2i(streams[i].IsForced), b2i(streams[i].IsText)); err != nil {
 			return err
 		}
@@ -676,6 +676,85 @@ func (s *Store) FilesNeedingMeta(limit int) ([]MetaTodo, error) {
 	return out, rows.Err()
 }
 
+// StreamStatsTodo lists MKV files after id (ascending) whose stream rows
+// predate reading mkvmerge's per-track statistics tags.
+func (s *Store) StreamStatsTodo(after int64, limit int) ([]MetaTodo, error) {
+	rows, err := s.dbR.Query(`SELECT id, path, container FROM files
+		WHERE missing=0 AND container IN ('mkv','webm') AND id>? ORDER BY id LIMIT ?`, after, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []MetaTodo
+	for rows.Next() {
+		var t MetaTodo
+		if err := rows.Scan(&t.ID, &t.Path, &t.Container); err != nil {
+			return nil, err
+		}
+		out = append(out, t)
+	}
+	return out, rows.Err()
+}
+
+// StreamStat is one stream's measured bitrate and payload size.
+type StreamStat struct {
+	Index   int
+	BitRate int64
+	Bytes   int64
+}
+
+// SetStreamStats fills per-stream bitrate/size and the bitrates derived
+// from them (video_bitrate, audio_json, subs_json) without touching the
+// rest of the row: a full re-probe upsert would reset crop and VMAF results.
+func (s *Store) SetStreamStats(id int64, stats []StreamStat, videoBitrate int64) error {
+	by := map[int]StreamStat{}
+	for _, st := range stats {
+		by[st.Index] = st
+	}
+	var audioJSON, subsJSON string
+	if err := s.dbR.QueryRow(`SELECT audio_json, subs_json FROM files WHERE id=?`, id).Scan(&audioJSON, &subsJSON); err != nil {
+		return err
+	}
+	var audio []AudioStream
+	var subs []SubStream
+	_ = json.Unmarshal([]byte(audioJSON), &audio)
+	_ = json.Unmarshal([]byte(subsJSON), &subs)
+	for i := range audio {
+		if st, ok := by[audio[i].Index]; ok && st.BitRate > 0 {
+			audio[i].BitRate = st.BitRate
+		}
+	}
+	for i := range subs {
+		if st, ok := by[subs[i].Index]; ok && st.BitRate > 0 {
+			subs[i].BitRate = st.BitRate
+		}
+	}
+	tx, err := s.dbW.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	for _, st := range stats {
+		if _, err := tx.Exec(`UPDATE streams SET bit_rate=?, bytes=? WHERE file_id=? AND stream_index=?`,
+			st.BitRate, st.Bytes, id, st.Index); err != nil {
+			return err
+		}
+	}
+	upd, args := `UPDATE files SET video_bitrate=?`, []any{videoBitrate}
+	if audio != nil {
+		b, _ := json.Marshal(audio)
+		upd, args = upd+`, audio_json=?`, append(args, string(b))
+	}
+	if subs != nil {
+		b, _ := json.Marshal(subs)
+		upd, args = upd+`, subs_json=?`, append(args, string(b))
+	}
+	if _, err := tx.Exec(upd+` WHERE id=?`, append(args, id)...); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
 // SetMeta stores container facts.
 func (s *Store) SetMeta(id int64, tag string, faststart int) error {
 	_, err := s.dbW.Exec(`UPDATE files SET video_tag=?, faststart=?, meta_checked=1 WHERE id=?`, tag, faststart, id)
@@ -847,7 +926,7 @@ func (s *Store) RenameFilePath(oldPath, newPath string) error {
 // Streams returns the stream rows for a file.
 func (s *Store) Streams(fileID int64) ([]Stream, error) {
 	rows, err := s.dbR.Query(`SELECT id, file_id, kind, stream_index, codec, lang, title,
-		channels, bit_rate, is_default, is_forced, is_text FROM streams WHERE file_id=?
+		channels, bit_rate, bytes, is_default, is_forced, is_text FROM streams WHERE file_id=?
 		ORDER BY stream_index`, fileID)
 	if err != nil {
 		return nil, err
@@ -858,7 +937,7 @@ func (s *Store) Streams(fileID int64) ([]Stream, error) {
 		var st Stream
 		var d, fo, tx int
 		if err := rows.Scan(&st.ID, &st.FileID, &st.Kind, &st.StreamIndex, &st.Codec, &st.Lang,
-			&st.Title, &st.Channels, &st.BitRate, &d, &fo, &tx); err != nil {
+			&st.Title, &st.Channels, &st.BitRate, &st.Bytes, &d, &fo, &tx); err != nil {
 			return nil, err
 		}
 		st.IsDefault, st.IsForced, st.IsText = d != 0, fo != 0, tx != 0
@@ -878,6 +957,7 @@ type Stream struct {
 	Title       string `json:"title"`
 	Channels    int    `json:"channels"`
 	BitRate     int64  `json:"bit_rate"`
+	Bytes       int64  `json:"bytes"`
 	IsDefault   bool   `json:"default"`
 	IsForced    bool   `json:"forced"`
 	IsText      bool   `json:"is_text"`

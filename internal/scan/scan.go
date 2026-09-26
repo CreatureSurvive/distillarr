@@ -8,6 +8,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -375,15 +376,16 @@ func buildStreams(fileID int64, p *media.Probe) []store.Stream {
 				continue
 			}
 			out = append(out, store.Stream{Kind: "video", StreamIndex: st.Index,
-				Codec: st.CodecName, BitRate: st.BitRateInt()})
+				Codec: st.CodecName, BitRate: st.BitRateInt(), Bytes: st.Bytes()})
 		case "audio":
 			out = append(out, store.Stream{Kind: "audio", StreamIndex: st.Index,
 				Codec: st.CodecName, Lang: st.Lang(), Title: st.Title(),
-				Channels: st.Channels, BitRate: st.BitRateInt(),
+				Channels: st.Channels, BitRate: st.BitRateInt(), Bytes: st.Bytes(),
 				IsDefault: st.Disposition["default"] == 1, IsForced: st.Disposition["forced"] == 1})
 		case "subtitle":
 			out = append(out, store.Stream{Kind: "subtitle", StreamIndex: st.Index,
 				Codec: st.CodecName, Lang: st.Lang(), Title: st.Title(),
+				BitRate: st.BitRateInt(), Bytes: st.Bytes(),
 				IsDefault: st.Disposition["default"] == 1, IsForced: st.Disposition["forced"] == 1,
 				IsText: st.IsTextSubtitle()})
 		}
@@ -553,6 +555,42 @@ func (s *Scanner) fillMeta() int {
 	return len(todo)
 }
 
+// streamStatsCursorKey tracks the one-time pass that reads mkvmerge's
+// per-track statistics for MKVs scanned before they were recorded; -1 = done.
+const streamStatsCursorKey = "stream_stats_cursor"
+
+func (s *Scanner) fillStreamStats() int {
+	cur, _, _ := s.st.KVGet(streamStatsCursorKey)
+	after, _ := strconv.ParseInt(cur, 10, 64)
+	if after < 0 {
+		return 0
+	}
+	todo, err := s.st.StreamStatsTodo(after, 100)
+	if err != nil {
+		return 0
+	}
+	if len(todo) == 0 {
+		_ = s.st.KVSet(streamStatsCursorKey, "-1")
+		return 0
+	}
+	for _, t := range todo {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		p, err := media.ProbeFile(ctx, t.Path)
+		cancel()
+		if err == nil {
+			var stats []store.StreamStat
+			for _, st := range p.Streams {
+				stats = append(stats, store.StreamStat{Index: st.Index, BitRate: st.BitRateInt(), Bytes: st.Bytes()})
+			}
+			if err := s.st.SetStreamStats(t.ID, stats, p.VideoBitrate()); err != nil {
+				log.Printf("scan: stream stats %s: %v", t.Path, err)
+			}
+		}
+	}
+	_ = s.st.KVSet(streamStatsCursorKey, strconv.FormatInt(todo[len(todo)-1].ID, 10))
+	return len(todo)
+}
+
 // CropLoop detects black bars in the background, re-encode candidates
 // first, two files at a time. New or changed files are picked up after
 // each scan pass; recommendations refresh as results land.
@@ -567,6 +605,10 @@ func (s *Scanner) CropLoop(stop <-chan struct{}) {
 		// Container facts first: fast, and they feed the issues list.
 		if n := s.fillMeta(); n > 0 {
 			s.RefreshRecsSoon() // debounced; issues fill in as batches land
+			continue
+		}
+		if n := s.fillStreamStats(); n > 0 {
+			s.RefreshRecsSoon() // video bitrates feed recommendations
 			continue
 		}
 		todo, err := s.st.FilesNeedingCrop(40)
