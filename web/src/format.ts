@@ -4,6 +4,7 @@
 
 export function bytes(b: number | undefined | null): string {
   if (b === undefined || b === null || isNaN(b)) return "—";
+  if (b < 0) return `−${bytes(-b)}`;
   const units = ["B", "KB", "MB", "GB", "TB"];
   let v = b;
   let u = 0;
