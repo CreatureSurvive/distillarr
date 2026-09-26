@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+import { ArrowDown, ArrowUp, ArrowUpToLine, ChevronDown, ChevronRight } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
 import { api, subscribe, type Config, type IntakeRow, type Job, type MeasureStatus, type Schedule } from "../api";
 import { Copyable, Empty, Seg, Toggle, toast } from "../components";
@@ -135,9 +136,9 @@ export default function Queue({ live }: { live: LiveState }) {
                 <div className="job-actions">
                   {tab === "pending" && (
                     <>
-                      <button className="btn mini" disabled={i === 0} title="Move to top" onClick={() => act(() => api.moveJob(j.id, jobs[0].id))}>⤒</button>
-                      <button className="btn mini" disabled={i === 0} title="Move up" onClick={() => act(() => api.moveJob(j.id, jobs[i - 1].id))}>↑</button>
-                      <button className="btn mini" disabled={i === jobs.length - 1} title="Move down" onClick={() => act(() => api.moveJob(j.id, jobs[i + 2]?.id ?? 0))}>↓</button>
+                      <button className="btn mini" disabled={i === 0} title="Move to top" aria-label="Move to top" onClick={() => act(() => api.moveJob(j.id, jobs[0].id))}><ArrowUpToLine className="ico" aria-hidden /></button>
+                      <button className="btn mini" disabled={i === 0} title="Move up" aria-label="Move up" onClick={() => act(() => api.moveJob(j.id, jobs[i - 1].id))}><ArrowUp className="ico" aria-hidden /></button>
+                      <button className="btn mini" disabled={i === jobs.length - 1} title="Move down" aria-label="Move down" onClick={() => act(() => api.moveJob(j.id, jobs[i + 2]?.id ?? 0))}><ArrowDown className="ico" aria-hidden /></button>
                       <button className="btn mini" onClick={() => act(() => api.runNowJob(j.id), "Starting as soon as a worker is free")}>Run now</button>
                     </>
                   )}
@@ -254,7 +255,7 @@ function IntakePanel({ live }: { live: LiveState }) {
       {waiting.length > 0 && (
         <div style={{ marginTop: needsConfirmation.length > 0 ? 14 : 0 }}>
           <button className="btn mini" onClick={() => setWaitingOpen((o) => !o)}>
-            {waitingOpen ? "▾" : "▸"} Waiting <span className="count">{waiting.length}</span>
+            {waitingOpen ? <ChevronDown className="ico" aria-hidden /> : <ChevronRight className="ico" aria-hidden />} Waiting <span className="count">{waiting.length}</span>
           </button>
           {waitingOpen && (
             <ul className="jobs" style={{ marginTop: 8 }}>

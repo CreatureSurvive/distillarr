@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+import { ArrowLeft } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { api, type Preview } from "../api";
@@ -74,7 +75,7 @@ export default function PreviewView({ live }: { live: LiveState }) {
   return (
     <div>
       <div className="crumbs">
-        <Link to={`/file/${p.file_id}`}>← Back to file</Link>
+        <Link to={`/file/${p.file_id}`}><ArrowLeft className="ico" aria-hidden /> Back to file</Link>
       </div>
 
       <div className="page-head">

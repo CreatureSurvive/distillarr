@@ -3,6 +3,7 @@
 // First-run setup wizard: shown while no library is configured.
 // Libraries (server-side directory browser), hardware probe, encoding
 // defaults and window, optional integrations, finish (queue stays paused).
+import { Check } from "lucide-react";
 import { useEffect, useState } from "react";
 import { api, type Config, type HwInfo } from "../api";
 import { Seg, toast } from "../components";
@@ -132,7 +133,7 @@ export default function SetupWizard({ onDone }: { onDone: () => void }) {
                 {ok.length === 0 && <li className="dim small">Only software (CPU) encoding works here. That's fine, just slower.</li>}
                 {ok.map((r) => (
                   <li key={`${r.backend}-${r.codec}-${r.node || ""}`}>
-                    <span className="teal">✓</span>
+                    <span className="teal"><Check className="ico" aria-hidden /></span>
                     <span>{backendLabel(r.backend)} {r.codec.toUpperCase()}</span>
                     <span className="mono dim small">{r.node ? hw.devices[r.node] || r.node : ""}</span>
                   </li>

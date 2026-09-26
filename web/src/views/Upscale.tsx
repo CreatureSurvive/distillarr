@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+import { ArrowLeft } from "lucide-react";
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { api, hardlinkedFiles, type Config, type FileItem, type Plan, type Settings, type Still, type UpscaleInfo } from "../api";
@@ -111,7 +112,7 @@ export default function UpscaleView() {
   if (loadErr) return <Empty title="Couldn't load this file">{loadErr}</Empty>;
   if (!file || !info) return <div className="dim">Loading…</div>;
 
-  const back = <div className="crumbs"><Link to={`/file/${file.id}`}>← Back to file</Link></div>;
+  const back = <div className="crumbs"><Link to={`/file/${file.id}`}><ArrowLeft className="ico" aria-hidden /> Back to file</Link></div>;
 
   if (!info.available) {
     return (

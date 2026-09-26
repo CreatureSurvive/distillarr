@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { NavLink, Route, Routes, useLocation } from "react-router-dom";
+import { Film, ListOrdered, Settings, TriangleAlert, Tv } from "lucide-react";
 import { api, subscribe, type Job, type JfStatus, type Progress, type ScanStats } from "./api";
 import { Toaster } from "./components";
 import { bytes, dur } from "./format";
@@ -32,11 +33,11 @@ export type LiveState = {
 };
 
 const NAV = [
-  { to: "/", label: "Movies", icon: "▦", end: true },
-  { to: "/shows", label: "Shows", icon: "▤", end: false },
-  { to: "/issues", label: "Issues", icon: "!", end: false },
-  { to: "/queue", label: "Queue", icon: "≡", end: false },
-  { to: "/settings", label: "Settings", icon: "⚙", end: false },
+  { to: "/", label: "Movies", icon: Film, end: true },
+  { to: "/shows", label: "Shows", icon: Tv, end: false },
+  { to: "/issues", label: "Issues", icon: TriangleAlert, end: false },
+  { to: "/queue", label: "Queue", icon: ListOrdered, end: false },
+  { to: "/settings", label: "Settings", icon: Settings, end: false },
 ];
 
 export default function App() {
@@ -126,7 +127,7 @@ export default function App() {
         <nav className="nav" aria-label="Main">
           {NAV.map((n) => (
             <NavLink key={n.to} to={n.to} end={n.end} className={({ isActive }) => `nav-link${isActive ? " active" : ""}`}>
-              <span className="nav-glyph" aria-hidden>{n.icon}</span>
+              <n.icon className="nav-glyph" aria-hidden strokeWidth={1.8} />
               <span className="nav-text">{n.label}</span>
               {n.to === "/queue" && needsConfirmation > 0 && (
                 <span className="nav-badge nav-badge-warn" title="Needs confirmation">{needsConfirmation}</span>

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+import { ArrowDown, ArrowUp, Bell, Check, Clapperboard, ImageUpscale, Languages, Plug, Server, Shield, Workflow, X } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
 import { NavLink, useParams } from "react-router-dom";
 import { api, subscribe, type ArrInfo, type ArrInstance, type ArrTestResult, type AudioRule, type AutopilotPreviewGroup, type AutoRule, type BazarrTest, type Config, type HwInfo, type JfStatus, type JfTest, type LangOverride, type LangpruneReport, type LangPolicy, type PlexStatus, type PlexTest, type RuleAction, type RuleMatch, type TrashItem } from "../api";
@@ -25,14 +26,14 @@ function Field({ label, hint, children }: { label: string; hint?: string; childr
 // Settings grew past one scrolling page; each tab is its own route
 // (#/settings/<id>) so links and reloads land on the right one.
 const SETTINGS_TABS = [
-  { id: "connections", label: "Connections" },
-  { id: "automation", label: "Automation" },
-  { id: "notifications", label: "Notifications" },
-  { id: "encoding", label: "Encoding" },
-  { id: "tracks", label: "Languages & subtitles" },
-  { id: "upscaling", label: "Upscaling" },
-  { id: "security", label: "Security" },
-  { id: "system", label: "System" },
+  { id: "connections", icon: Plug, label: "Connections" },
+  { id: "automation", icon: Workflow, label: "Automation" },
+  { id: "notifications", icon: Bell, label: "Notifications" },
+  { id: "encoding", icon: Clapperboard, label: "Encoding" },
+  { id: "tracks", icon: Languages, label: "Languages & subtitles" },
+  { id: "upscaling", icon: ImageUpscale, label: "Upscaling" },
+  { id: "security", icon: Shield, label: "Security" },
+  { id: "system", icon: Server, label: "System" },
 ];
 
 export default function SettingsView({ live, onJellyfin, onPlex }: { live: LiveState; onJellyfin: () => void; onPlex: () => void }) {
@@ -73,7 +74,7 @@ export default function SettingsView({ live, onJellyfin, onPlex }: { live: LiveS
       </header>
       <nav className="settings-nav" aria-label="Settings sections">
         {SETTINGS_TABS.map((t) => (
-          <NavLink key={t.id} to={`/settings/${t.id}`} className={t.id === tab ? "active" : undefined}>{t.label}</NavLink>
+          <NavLink key={t.id} to={`/settings/${t.id}`} className={t.id === tab ? "active" : undefined}><t.icon aria-hidden strokeWidth={1.8} />{t.label}</NavLink>
         ))}
       </nav>
 
@@ -305,7 +306,7 @@ function JellyfinSection({ cfg, setCfg, live, onJellyfin }: { cfg: Config; setCf
                 <ul className="lib-check">
                   {test.libraries.map((l) => (
                     <li key={l.location}>
-                      <span className={l.reachable ? "teal" : "warm"}>{l.reachable ? "✓" : "✗"}</span>
+                      <span className={l.reachable ? "teal" : "warm"}>{l.reachable ? <Check className="ico" aria-hidden /> : <X className="ico" aria-hidden />}</span>
                       <span>{l.name}</span>
                       <span className="mono dim small">{l.location} → {l.mapped}</span>
                     </li>
@@ -313,7 +314,7 @@ function JellyfinSection({ cfg, setCfg, live, onJellyfin }: { cfg: Config; setCf
                 </ul>
               )}
               {test.libraries?.some((l) => !l.reachable) && (
-                <div className="dim small">Folders marked ✗ aren't visible here, so their items won't match. Adjust the path mapping, then test again.</div>
+                <div className="dim small">Folders marked <X className="ico" aria-hidden /> aren't visible here, so their items won't match. Adjust the path mapping, then test again.</div>
               )}
             </>
           ) : (
@@ -428,7 +429,7 @@ function PlexSection({ cfg, setCfg, live, onPlex }: { cfg: Config; setCfg: (c: C
                 <ul className="lib-check">
                   {test.libraries.map((l) => (
                     <li key={l.location}>
-                      <span className={l.reachable ? "teal" : "warm"}>{l.reachable ? "✓" : "✗"}</span>
+                      <span className={l.reachable ? "teal" : "warm"}>{l.reachable ? <Check className="ico" aria-hidden /> : <X className="ico" aria-hidden />}</span>
                       <span>{l.name}</span>
                       <span className="mono dim small">{l.location} → {l.mapped}</span>
                     </li>
@@ -436,7 +437,7 @@ function PlexSection({ cfg, setCfg, live, onPlex }: { cfg: Config; setCfg: (c: C
                 </ul>
               )}
               {test.libraries?.some((l) => !l.reachable) && (
-                <div className="dim small">Sections marked ✗ aren't visible here, so their items won't match. Adjust the path mapping, then test again.</div>
+                <div className="dim small">Sections marked <X className="ico" aria-hidden /> aren't visible here, so their items won't match. Adjust the path mapping, then test again.</div>
               )}
             </>
           ) : (
@@ -521,7 +522,7 @@ function BazarrSection({ cfg, setCfg }: { cfg: Config; setCfg: (c: Config) => vo
                 <ul className="lib-check">
                   {test.paths.map((p) => (
                     <li key={p.path}>
-                      <span className={p.reachable ? "teal" : "warm"}>{p.reachable ? "✓" : "✗"}</span>
+                      <span className={p.reachable ? "teal" : "warm"}>{p.reachable ? <Check className="ico" aria-hidden /> : <X className="ico" aria-hidden />}</span>
                       <span>{p.title}</span>
                       <span className="mono dim small">{p.path} → {p.mapped}</span>
                     </li>
@@ -529,7 +530,7 @@ function BazarrSection({ cfg, setCfg }: { cfg: Config; setCfg: (c: Config) => vo
                 </ul>
               )}
               {test.paths?.some((p) => !p.reachable) && (
-                <div className="dim small">Paths marked ✗ aren't visible here. Adjust the path mapping, then test again.</div>
+                <div className="dim small">Paths marked <X className="ico" aria-hidden /> aren't visible here. Adjust the path mapping, then test again.</div>
               )}
             </>
           ) : (
@@ -907,14 +908,14 @@ function ArrSection({ cfg, setCfg }: { cfg: Config; setCfg: (c: Config) => void 
                       <ul className="lib-check">
                         {test.root_folders.map((f) => (
                           <li key={f.path}>
-                            <span className={f.reachable ? "teal" : "warm"}>{f.reachable ? "✓" : "✗"}</span>
+                            <span className={f.reachable ? "teal" : "warm"}>{f.reachable ? <Check className="ico" aria-hidden /> : <X className="ico" aria-hidden />}</span>
                             <span className="mono dim small">{f.path} → {f.mapped}</span>
                           </li>
                         ))}
                       </ul>
                     )}
                     {test.root_folders?.some((f) => !f.reachable) && (
-                      <div className="dim small">Folders marked ✗ aren't visible here. Adjust the path mapping, then test again.</div>
+                      <div className="dim small">Folders marked <X className="ico" aria-hidden /> aren't visible here. Adjust the path mapping, then test again.</div>
                     )}
                   </>
                 ) : (
@@ -1261,8 +1262,8 @@ function AutopilotSection({ cfg, setCfg }: { cfg: Config; setCfg: (c: Config) =>
                 <div className="job-meta mono dim small">{summarizeRule(r)}</div>
               </div>
               <div className="job-actions">
-                <button className="btn mini" disabled={i === 0} title="Move up" onClick={() => move(i, -1)}>↑</button>
-                <button className="btn mini" disabled={i === rules.length - 1} title="Move down" onClick={() => move(i, 1)}>↓</button>
+                <button className="btn mini" disabled={i === 0} title="Move up" aria-label="Move up" onClick={() => move(i, -1)}><ArrowUp className="ico" aria-hidden /></button>
+                <button className="btn mini" disabled={i === rules.length - 1} title="Move down" aria-label="Move down" onClick={() => move(i, 1)}><ArrowDown className="ico" aria-hidden /></button>
                 <button className="btn mini" onClick={() => setEditing(r)}>Edit</button>
                 <button className="btn mini btn-danger" onClick={() => removeRule(i)}>Remove</button>
               </div>
@@ -1344,7 +1345,7 @@ function HardwareSection({ live }: { live: LiveState }) {
               {rep.results.filter((r) => (r.node || "cpu") === n).map((r) => (
                 <div key={`${r.backend}${r.codec}`} className={`hw-cell ${r.ok ? "ok" : "no"}`} title={r.error || `${r.ms} ms`}>
                   <span>{backendLabel(r.backend)} {r.codec.toUpperCase()}</span>
-                  <span className="mono">{r.ok ? "✓" : "—"}</span>
+                  <span className="mono">{r.ok ? <Check className="ico" aria-hidden /> : "—"}</span>
                 </div>
               ))}
             </div>

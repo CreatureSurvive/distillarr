@@ -16,7 +16,7 @@
   padding: 6px 4px; border-radius: var(--r-sm); color: var(--text-dim); font-size: 11px; font-weight: 600;
 }
 .nav-link.active { color: var(--teal); }
-.nav-glyph { font-size: 17px; line-height: 1; }
+.nav-glyph { width: 20px; height: 20px; flex: none; }
 .nav-badge {
   position: absolute; top: 2px; left: calc(50% + 6px);
   font: 600 10px/16px var(--font-mono); min-width: 16px; text-align: center;
@@ -42,7 +42,8 @@
   .nav-link { flex-direction: row; gap: 10px; font-size: 14px; padding: 9px 10px; border: 1px solid transparent; }
   .nav-link:hover { color: var(--text); background: var(--surface); }
   .nav-link.active { color: var(--text); background: var(--surface-2); border-color: var(--line); }
-  .nav-glyph { font-size: 14px; width: 16px; text-align: center; opacity: 0.8; }
+  .nav-glyph { width: 17px; height: 17px; opacity: 0.8; }
+  .nav-link.active .nav-glyph { opacity: 1; color: var(--teal); }
   .nav-badge { position: static; margin-left: auto; }
   .main { padding: 28px 34px 60px; }
   .shell:has(.deck) .main { padding-bottom: 100px; }
@@ -419,8 +420,12 @@ details.panel[open] > summary { margin-bottom: 12px; }
 
 /* ---------- settings ---------- */
 .settings-nav { display: flex; gap: 6px; overflow-x: auto; margin-bottom: 16px; padding-bottom: 4px; }
-.settings-nav a { flex: none; font-size: 13px; padding: 6px 12px; border: 1px solid var(--line); border-radius: 999px; color: var(--text-dim); }
+.settings-nav a { flex: none; display: inline-flex; align-items: center; gap: 6px; font-size: 13px; padding: 6px 12px; border: 1px solid var(--line); border-radius: 999px; color: var(--text-dim); }
 .settings-nav a:hover { color: var(--text); border-color: var(--text-faint); }
+.settings-nav svg { width: 14px; height: 14px; flex: none; opacity: 0.75; }
+.settings-nav a.active svg { opacity: 1; color: var(--teal); }
+/* Inline icons inside buttons and text sit on the text baseline. */
+.ico { width: 1em; height: 1em; flex: none; vertical-align: -0.125em; }
 .settings-nav a.active { color: var(--text); border-color: var(--text-dim); background: var(--panel-2, rgba(255,255,255,0.04)); }
 .settings .panel { scroll-margin-top: 16px; }
 .pill { display: inline-flex; align-items: center; gap: 8px; font-size: 12.5px; padding: 5px 10px; border: 1px solid var(--line); border-radius: 999px; color: var(--text-dim); }
