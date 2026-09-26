@@ -399,7 +399,9 @@ export default function FileDetail({ live }: { live: LiveState }) {
                   <span className="mono">{s.codec}</span>
                   <span className="dim">
                     {s.lang && s.lang.toUpperCase()}
-                    {s.kind === "audio" && ` ${channelsLabel(s.channels)}${s.bit_rate ? ` · ${bitrate(s.bit_rate)}` : ""}`}
+                    {s.kind === "audio" && ` ${channelsLabel(s.channels)}`}
+                    {s.bit_rate > 0 ? ` · ${bitrate(s.bit_rate)}`
+                      : s.kind === "video" && file.video_bitrate > 0 && <span title="Container doesn't record this stream's bitrate; estimated from file size minus audio"> · ~{bitrate(file.video_bitrate)}</span>}
                     {s.kind === "subtitle" && (s.is_text ? " · text" : " · image")}
                     {s.forced && " · forced"}
                   </span>
