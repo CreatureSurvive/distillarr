@@ -1,11 +1,24 @@
 # Distillarr
 
+[![CI](https://github.com/CreatureSurvive/distillarr/actions/workflows/ci.yml/badge.svg)](https://github.com/CreatureSurvive/distillarr/actions/workflows/ci.yml)
+[![Licence: GPL-3.0-or-later](https://img.shields.io/badge/licence-GPL--3.0--or--later-blue)](LICENSE)
+[![Image](https://img.shields.io/badge/image-ghcr.io%2Fcreaturesurvive%2Fdistillarr-2496ed?logo=docker&logoColor=white)](https://github.com/CreatureSurvive/distillarr/pkgs/container/distillarr)
+
 Distillarr finds the files in your media library that would shrink or play
 better, and re-encodes them (HEVC, AV1 or H.264) on your GPU or CPU. It
 checks every result against the original before it replaces anything, and
 it works with Sonarr, Radarr, Jellyfin, Plex and Bazarr.
 
-![Movies library with per-file savings](docs/img/library.png)
+![Movies library, sorted by the space each file would save](docs/img/library.png)
+
+- [What it does](#what-it-does)
+- [Tour](#tour)
+- [Quick start](#quick-start)
+- [Safety](#safety)
+- [Integrations](#integrations)
+- [Hardware](#hardware)
+- [Development](#development)
+- [Licence](#licence)
 
 ## What it does
 
@@ -39,10 +52,59 @@ it works with Sonarr, Radarr, Jellyfin, Plex and Bazarr.
 What it doesn't do: download anything, manage your library layout, or
 touch files you haven't queued (automation is off until you turn it on).
 
+## Tour
+
+### Per-file recommendations
+
+Each file page shows what the recommended encode would do and why: the
+codec and encoder, the quality that was measured on this file's own
+samples, and the expected size. Every option can be overridden per file,
+and the exact ffmpeg command is one click away.
+
+![File page: encode options and a measured size estimate](docs/img/file.png)
+
+### A/B previews
+
+Before committing to a setting, encode a few short samples spread across
+the file and play them side by side (or stacked) with the original, with
+the VMAF score and size of each.
+
+![A/B compare: source and HEVC samples side by side](docs/img/preview.png)
+
+### Whole shows and seasons
+
+Shows are planned a season at a time: how much the season would shrink,
+how many episodes clear your savings threshold, and one button to queue
+them. Episodes that aren't worth it are marked "keep".
+
 | | |
 |---|---|
-| ![File page](docs/img/file.png) | ![Issues](docs/img/issues.png) |
-| ![Queue](docs/img/queue.png) | ![Settings](docs/img/settings.png) |
+| ![Shows, sorted by the space each would save](docs/img/shows.png) | ![Season plan for one show](docs/img/show.png) |
+
+### Issues
+
+Problems are grouped by kind and labelled as a quick fix (a remux, video
+untouched), a re-encode, or information only. Fix one file or a whole
+group at once.
+
+![Issues page: problem groups and affected files](docs/img/issues.png)
+
+### Queue and history
+
+The queue runs inside the processing windows you set, and history keeps
+track of what's been saved: per week, per library, per codec, and the
+biggest wins.
+
+![Queue: processing windows and history of space saved](docs/img/queue.png)
+
+### Settings
+
+Defaults for new recommendations, connections, automation rules,
+notifications, languages and subtitles, upscaling and security all live
+under Settings. Every setting is described in
+[docs/configuration.md](docs/configuration.md).
+
+![Encoding defaults](docs/img/settings.png)
 
 ## Quick start
 
