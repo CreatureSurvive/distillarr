@@ -156,6 +156,31 @@ func (s *Store) ClaimNext(windowOpen, neuralOpen bool) (*Job, error) {
 	return j, err
 }
 
+// QueuedForTune lists queued jobs the dispatcher could start now, in the
+// order it will start them (ClaimNext's), skipping upscales.
+func (s *Store) QueuedForTune(windowOpen bool, limit int) ([]*Job, error) {
+	wo := 0
+	if windowOpen {
+		wo = 1
+	}
+	rows, err := s.dbR.Query(`SELECT `+jobCols+` FROM jobs WHERE status='queued'
+		AND NOT (`+isUpscale+`) AND (run_now=1 OR ?=1)
+		ORDER BY priority, id LIMIT ?`, wo, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []*Job
+	for rows.Next() {
+		j, err := scanJob(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, j)
+	}
+	return out, rows.Err()
+}
+
 // PauseJob returns a running job to the queue without counting the run as an
 // attempt: a neural upscale that stops at the end of its window and resumes in
 // the next is not failing, and must not use up its retries doing so.
@@ -167,9 +192,11 @@ func (s *Store) PauseJob(id int64) error {
 
 // RequeueRunning returns every running job to the queue without counting
 // the interrupted run as an attempt: a deliberate shutdown isn't the job
-// failing, and restarts must not use up its retries.
+// failing, and restarts must not use up its retries. The temp path is
+// cleared: the encode it names never finished, and a job with a temp file
+// on record is resumed straight into Verify (see canResume).
 func (s *Store) RequeueRunning() (int64, error) {
-	return execChanges(s.dbW, `UPDATE jobs SET status='queued', progress_json='', started_at='',
+	return execChanges(s.dbW, `UPDATE jobs SET status='queued', progress_json='', started_at='', temp_path='',
 		attempts=MAX(attempts-1,0) WHERE status='running'`)
 }
 

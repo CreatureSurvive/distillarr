@@ -90,6 +90,14 @@ type Engine struct {
 
 	sess sessionsState // latest playback-sessions poll
 
+	// Tune-ahead (tuneahead.go): files under a quality search, the ahead
+	// search's cancel, jobs it gave up on, and in-run searches under way.
+	tuneMu      sync.Mutex
+	tuning      map[string]chan struct{}
+	aheadCancel context.CancelFunc
+	aheadFailed map[int64]bool
+	inRunTunes  atomic.Int32
+
 	stopCh chan struct{}
 	wg     sync.WaitGroup
 	kick   chan struct{}
@@ -104,6 +112,8 @@ func New(st *store.Store, cfg *config.Manager, sc *scan.Scanner) *Engine {
 		st: st, cfg: cfg, scan: sc,
 		sems: map[string]chan struct{}{},
 		hwFails: map[string][]time.Time{},
+		tuning:      map[string]chan struct{}{},
+		aheadFailed: map[int64]bool{},
 		stopCh: make(chan struct{}),
 		kick:   make(chan struct{}, 1),
 	}
@@ -127,6 +137,8 @@ func (e *Engine) Start() {
 	go e.measureLoop()
 	e.wg.Add(1)
 	go e.sessionsLoop()
+	e.wg.Add(1)
+	go e.tuneAheadLoop()
 	// Probe hardware in the background on first boot.
 	if e.Report() == nil {
 		go func() {
@@ -721,6 +733,30 @@ func (e *Engine) tuneQuality(ctx context.Context, j *store.Job, s encode.Setting
 		e.saveJobSettings(j, s)
 		return s
 	}
+	// The tune-ahead worker may be measuring this very file: wait for its
+	// result instead of measuring twice.
+	for {
+		release, busy := e.claimTune(j.SrcPath)
+		if release != nil {
+			defer release()
+			break
+		}
+		e.notify(EvJob, map[string]any{"id": j.ID, "status": "running", "note": "waiting for the quality measurement already under way"})
+		select {
+		case <-busy:
+		case <-ctx.Done():
+			return s
+		}
+		f, _ = e.st.GetFileByPath(j.SrcPath)
+		if t := recs.TunedFor(f, s); t != nil {
+			s.Quality = t.Quality
+			e.saveJobSettings(j, s)
+			return s
+		}
+	}
+	e.inRunTunes.Add(1)
+	defer e.inRunTunes.Add(-1)
+	e.preemptAhead()
 	e.notify(EvJob, map[string]any{"id": j.ID, "status": "running",
 		"note": fmt.Sprintf("measuring quality (target VMAF %.0f)", s.VMAFTarget)})
 	tuneStart := time.Now()

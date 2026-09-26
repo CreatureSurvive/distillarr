@@ -120,6 +120,7 @@ export default function Queue({ live }: { live: LiveState }) {
                       ? <span className="warm">Quick fix · remux · video copied</span>
                       : <span>{j.codec.toUpperCase()} · {backendLabel(settings.backend || j.backend || "auto")} · q{j.quality}</span>}
                     <span>{bytes(j.src_size)}{saved && <span className="teal"> → {bytes(j.output_size)} (−{Math.round((1 - j.output_size / j.src_size) * 100)}%)</span>}</span>
+                    {j.status === "queued" && live.notes[j.id] && <span className="teal">{live.notes[j.id]}</span>}
                     {j.attempts > 1 && <span>try {j.attempts}/{j.max_attempts}</span>}
                     {j.finished_at && <span>{ago(j.finished_at)}</span>}
                   </div>

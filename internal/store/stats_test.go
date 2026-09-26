@@ -320,8 +320,49 @@ func TestRequeueRunningDoesNotSpendAnAttempt(t *testing.T) {
 		if c.Attempts != 1 {
 			t.Fatalf("restart %d: attempts = %d, want 1", restart, c.Attempts)
 		}
+		if err := st.SetJobTemp(c.ID, "/m/.distillarr-1.mp4.tmp", ""); err != nil {
+			t.Fatal(err)
+		}
 		if n, err := st.RequeueRunning(); err != nil || n != 1 {
 			t.Fatalf("restart %d: RequeueRunning = %d, %v", restart, n, err)
 		}
+		if g, _ := st.GetJob(c.ID); g.TempPath != "" {
+			t.Fatalf("restart %d: temp path kept (%q): the next run would verify a half-written file", restart, g.TempPath)
+		}
+	}
+}
+
+// Tune-ahead measures jobs in the order the dispatcher will claim them,
+// never upscales, and only what may run now (window closed: run-now only).
+func TestQueuedForTuneFollowsClaimOrder(t *testing.T) {
+	st, err := Open(filepath.Join(t.TempDir(), "t.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	add := func(path string, prio int, settings string, runNow bool) *Job {
+		j := &Job{SrcPath: path, Backend: "qsv", Codec: "hevc", SettingsJSON: settings, MaxAttempts: 3, Priority: prio, RunNow: runNow}
+		if err := st.CreateJob(j); err != nil {
+			t.Fatal(err)
+		}
+		return j
+	}
+	a := add("/m/a", 200, `{}`, false)
+	b := add("/m/b", 100, `{}`, false)
+	add("/m/up", 50, `{"upscale_to":2160}`, false)
+	c := add("/m/c", 300, `{}`, true)
+	got, err := st.QueuedForTune(true, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var ids []int64
+	for _, j := range got {
+		ids = append(ids, j.ID)
+	}
+	if len(ids) != 3 || ids[0] != b.ID || ids[1] != a.ID || ids[2] != c.ID {
+		t.Errorf("window open: got %v, want [%d %d %d]", ids, b.ID, a.ID, c.ID)
+	}
+	if got, _ := st.QueuedForTune(false, 10); len(got) != 1 || got[0].ID != c.ID {
+		t.Errorf("window closed: only the run-now job, got %d jobs", len(got))
 	}
 }

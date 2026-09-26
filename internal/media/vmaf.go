@@ -53,6 +53,8 @@ type VMAFRef struct {
 	// content - animation, HDR tonemap - where VMAF is known to under-
 	// penalize banding; not worth the extra cost on everything.
 	Cambi bool
+	// Nice runs the scoring at low CPU priority.
+	Nice bool
 }
 
 // VMAF scores an encoded sample (starting at t=0) against the same span
@@ -95,14 +97,27 @@ func VMAF(ctx context.Context, distorted string, ref VMAFRef) (VMAFResult, error
 
 	cctx, cancel := context.WithTimeout(ctx, 10*time.Minute)
 	defer cancel()
-	out, err := exec.CommandContext(cctx, FFmpegVMAF, "-hide_banner", "-nostdin", "-loglevel", "error",
+	name, args := FFmpegVMAF, []string{"-hide_banner", "-nostdin", "-loglevel", "error",
 		"-i", distorted,
 		"-ss", fmt.Sprintf("%.3f", ref.Start), "-t", fmt.Sprintf("%.3f", ref.Dur), "-i", ref.Path,
-		"-lavfi", graph, "-f", "null", "-").CombinedOutput()
+		"-lavfi", graph, "-f", "null", "-"}
+	if ref.Nice {
+		name, args = "nice", append([]string{"-n", "10", FFmpegVMAF}, args...)
+	}
+	out, err := exec.CommandContext(cctx, name, args...).CombinedOutput()
 	if err != nil {
-		msg := strings.TrimSpace(string(out))
-		if len(msg) > 300 {
-			msg = msg[len(msg)-300:]
+		// The null muxer floods stderr with harmless dts warnings (frames are
+		// renumbered on purpose); drop them so the real cause survives the trim.
+		var lines []string
+		for _, l := range strings.Split(string(out), "\n") {
+			if strings.Contains(l, "non monotonically increasing dts") || strings.Contains(l, "Last message repeated") {
+				continue
+			}
+			lines = append(lines, l)
+		}
+		msg := strings.TrimSpace(strings.Join(lines, " | "))
+		if len(msg) > 600 {
+			msg = msg[len(msg)-600:]
 		}
 		return VMAFResult{}, fmt.Errorf("vmaf: %v: %s", err, msg)
 	}

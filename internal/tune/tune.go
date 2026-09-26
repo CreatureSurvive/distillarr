@@ -74,6 +74,9 @@ type Options struct {
 	// worth it on flat, gradient-heavy content where VMAF is known to
 	// under-penalize banding, not worth it on everything.
 	Cambi bool
+	// Nice runs VMAF scoring at low CPU priority, for searches that run
+	// alongside an encode.
+	Nice bool
 }
 
 // CutSamples decodes each span of the original once, accurately, into a
@@ -372,7 +375,7 @@ func Search(ctx context.Context, o Options) (Result, []string, error) {
 					encBytes = n
 				}
 				vr, err := media.VMAF(ctx, out, media.VMAFRef{Path: cut, Start: 0, Dur: sampleLen + 1,
-					Crop: crop, W: refW, H: refH, Deinterlace: deint, Threads: vmafThreads, Cambi: o.Cambi})
+					Crop: crop, W: refW, H: refH, Deinterlace: deint, Threads: vmafThreads, Cambi: o.Cambi, Nice: o.Nice})
 				if err != nil {
 					errs[i] = err
 					return
