@@ -165,6 +165,14 @@ func (s *Store) PauseJob(id int64) error {
 	return err
 }
 
+// RequeueRunning returns every running job to the queue without counting
+// the interrupted run as an attempt: a deliberate shutdown isn't the job
+// failing, and restarts must not use up its retries.
+func (s *Store) RequeueRunning() (int64, error) {
+	return execChanges(s.dbW, `UPDATE jobs SET status='queued', progress_json='', started_at='',
+		attempts=MAX(attempts-1,0) WHERE status='running'`)
+}
+
 // UpdateJobStatus sets status (and optionally error text) on a job.
 func (s *Store) UpdateJobStatus(id int64, status, errMsg string) error {
 	_, err := s.dbW.Exec(`UPDATE jobs SET status=?, error=? WHERE id=?`, status, errMsg, id)

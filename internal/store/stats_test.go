@@ -301,3 +301,27 @@ func TestUpscaledFilesAndFilter(t *testing.T) {
 		t.Errorf("no filter lists everything: %v", got)
 	}
 }
+
+// Restarting the app mid-encode is not the job failing: a graceful shutdown
+// requeues running jobs with their attempt refunded, however many restarts.
+func TestRequeueRunningDoesNotSpendAnAttempt(t *testing.T) {
+	st, err := Open(filepath.Join(t.TempDir(), "t.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	j := &Job{SrcPath: "/m/x.mp4", Backend: "qsv", Codec: "hevc", SettingsJSON: `{}`, MaxAttempts: 3}
+	st.CreateJob(j)
+	for restart := 1; restart <= 6; restart++ {
+		c, _ := st.ClaimNext(true, false)
+		if c == nil {
+			t.Fatalf("restart %d: the requeued job should be claimable again", restart)
+		}
+		if c.Attempts != 1 {
+			t.Fatalf("restart %d: attempts = %d, want 1", restart, c.Attempts)
+		}
+		if n, err := st.RequeueRunning(); err != nil || n != 1 {
+			t.Fatalf("restart %d: RequeueRunning = %d, %v", restart, n, err)
+		}
+	}
+}

@@ -140,6 +140,11 @@ func (e *Engine) Start() {
 // Stop drains workers.
 func (e *Engine) Stop() {
 	close(e.stopCh)
+	if n, err := e.st.RequeueRunning(); err != nil {
+		log.Printf("jobs: shutdown requeue: %v", err)
+	} else if n > 0 {
+		log.Printf("jobs: shutdown: requeued %d running job(s) without spending an attempt", n)
+	}
 	e.wg.Wait()
 }
 
@@ -1162,13 +1167,12 @@ func isStaleTempName(name string) bool {
 		strings.HasSuffix(name, ".tmp")
 }
 
+// staleTempAge leaves recently written temp files alone even when no active
+// job claims them: an encode's file is written continuously.
+const staleTempAge = 30 * time.Minute
+
 func (e *Engine) sweepStaleTemps() {
-	keep := map[string]bool{}
-	if active, err := e.st.ActiveJobs(); err == nil {
-		for _, j := range active {
-			keep[j.TempPath] = true
-		}
-	}
+	var found []string
 	for _, lib := range e.cfg.Get().Libraries {
 		filepath.WalkDir(lib.Path, func(path string, d fs.DirEntry, err error) error {
 			if err != nil {
@@ -1177,11 +1181,33 @@ func (e *Engine) sweepStaleTemps() {
 			if d.IsDir() && (d.Name() == manualDirNew || d.Name() == manualDirLegacy) {
 				return filepath.SkipDir
 			}
-			if !d.IsDir() && isStaleTempName(d.Name()) && !keep[path] {
-				removeTemp(path)
+			if !d.IsDir() && isStaleTempName(d.Name()) {
+				found = append(found, path)
 			}
 			return nil
 		})
+	}
+	if len(found) == 0 {
+		return
+	}
+	// The walk takes a while on a big library and a job can start during it,
+	// so the active set is read after the walk, not before.
+	active, err := e.st.ActiveJobs()
+	if err != nil {
+		return
+	}
+	keep := map[string]bool{}
+	for _, j := range active {
+		keep[j.TempPath] = true
+	}
+	for _, p := range found {
+		if keep[p] {
+			continue
+		}
+		if fi, err := os.Stat(p); err != nil || time.Since(fi.ModTime()) < staleTempAge {
+			continue
+		}
+		removeTemp(p)
 	}
 }
 
