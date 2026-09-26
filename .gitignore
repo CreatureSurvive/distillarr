@@ -19,3 +19,16 @@ node_modules/
 
 # DB-upgrade test fixtures
 !internal/store/testdata/*.db
+
+# AI assistant and agent files: every dot-entry at the root is ignored
+# except the ones the project itself uses.
+/.*
+!/.gitignore
+!/.dockerignore
+!/.github/
+.github/copilot-instructions.md
+CLAUDE.md
+CLAUDE.local.md
+AGENTS.md
+GEMINI.md
+opencode.json

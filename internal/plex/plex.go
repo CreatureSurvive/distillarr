@@ -248,7 +248,7 @@ func (c *Client) Metadata(ctx context.Context, ratingKey string) (*Item, error) 
 // SetAddedAt writes an item's "date added", locked so a later refresh or
 // agent match doesn't overwrite it (the query shape matches what
 // python-plexapi's AddedAtMixin sends, confirmed working against
-// current Plex Media Server versions —).
+// current Plex Media Server versions).
 // typ is the item's Plex metadata type (1 movie, 4 episode).
 func (c *Client) SetAddedAt(ctx context.Context, sectionKey, ratingKey string, typ int, unixTime int64, locked bool) error {
 	lockedVal := "0"

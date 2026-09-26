@@ -3,12 +3,9 @@
 // Package imagesubs handles PGS and VobSub image subtitle tracks:
 // extracting them to sidecar files, and OCR'ing one representative track
 // to text via tesseract (driven directly, not through pgsrip's CLI —
-// testing found that CLI silently no-ops on a filename it doesn't
-// recognize). for the research this
-// package's design follows, including the finding that external image
-// sidecars are not known to be selectable subtitle tracks in Jellyfin or
-// Plex — "sidecar" mode is offered anyway, behind a UI warning, per user
-// direction rather than dropping it.
+// that CLI silently no-ops on a filename it doesn't recognize). External
+// image sidecars are not known to be selectable subtitle tracks in
+// Jellyfin or Plex, so "sidecar" mode is offered behind a UI warning.
 package imagesubs
 
 import (

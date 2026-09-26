@@ -262,9 +262,8 @@ type Config struct {
 
 	// ImageSubsMode: "" (keep, default) | "sidecar" | "ocr". PGS
 	// and VobSub sidecar files are not known to be selectable in Jellyfin
-	// or Plex — "sidecar" is
-	// offered anyway, gated by a UI warning, per user direction rather
-	// than dropping it. Resolved per file
+	// or Plex, so "sidecar" is
+	// gated by a UI warning. Resolved per file
 	// by EffectiveImageSubsMode (file override > rule override > this).
 	ImageSubsMode string `json:"image_subs_mode,omitempty"`
 	// ImageSubsKeepOriginal keeps the source image subtitle track in the

@@ -26,7 +26,7 @@ var PgsRip = "pgsrip"
 var Tesseract = "tesseract"
 
 // tessdataRepo is Google's official trained-model repository — Apache
-// 2.0 licensed,
+// 2.0 licensed.
 const tessdataRepoBase = "https://github.com/tesseract-ocr/tessdata_best/raw/main/"
 
 // confidenceSampleSize caps how many of pgsrip's kept intermediate PNGs
@@ -54,7 +54,7 @@ type OCRResult struct {
 // internal/sidecar), returning the confidence either way so the
 // caller can cache it. tessdataDir is where per-language traineddata
 // lives; a missing language is downloaded into it on demand (Apache
-// 2.0,) and reused on every later
+// 2.0) and reused on every later
 // call. Only PGS is supported — VobSub has no working OCR tool
 // integrated here (see the package doc and the research doc's caveat);
 // a VobSub track returns a plain error.

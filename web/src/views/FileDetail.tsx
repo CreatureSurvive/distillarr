@@ -235,7 +235,7 @@ export default function FileDetail({ live }: { live: LiveState }) {
                   const mode = e.target.value;
                   if (mode === "sidecar" && !confirm(
                     "External PGS/VobSub sidecars aren't known to be selectable subtitle tracks in Jellyfin or Plex " +
-                    ". Turn on anyway for this file?"
+                    "Turn on anyway for this file?"
                   )) return;
                   try {
                     await api.setImageSubsMode(file.id, mode);

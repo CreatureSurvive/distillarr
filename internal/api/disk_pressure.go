@@ -23,13 +23,9 @@ var statFreePct = func(path string) float64 {
 	return float64(st.Bavail) / float64(st.Blocks) * 100
 }
 
-// diskPressureFor reports whether cfg is under disk-pressure mode
-// DiskPressurePct is set, and at least one library's own
-// filesystem (not a hardcoded path — each Library.Path is checked
-// directly) is at or below it. api.system's own disk-usage display
-// still hardcodes /srv/media; that's a separate, pre-existing thing
-// left for "remove host defaults" pass, which already plans a
-// per-library rework there.
+// diskPressureFor reports whether cfg is under disk-pressure mode:
+// DiskPressurePct is set, and at least one library's own filesystem
+// (each Library.Path is checked directly) is at or below it.
 func diskPressureFor(cfg config.Config) bool {
 	if cfg.DiskPressurePct <= 0 {
 		return false
